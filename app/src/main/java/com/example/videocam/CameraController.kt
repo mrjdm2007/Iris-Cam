@@ -97,8 +97,6 @@ class CameraController(
         val blue: Boolean,
         val filterId: Int,
         val filterIntensity: Int,
-        val portrait: Boolean,
-        val portraitBlurStrength: Int
     ) {
         var image: Image? = null // RAW only
         var result: TotalCaptureResult? = null
@@ -1285,7 +1283,7 @@ class CameraController(
         // JPEG_R must be saved byte-for-byte to preserve its gain map. If a pixel filter
         // is selected, use ordinary JPEG so the requested look is actually rendered.
         cfg.photoFormat == 3 && ultraHdrAvailable &&
-            cfg.filterId == 0 && !cfg.flat && !cfg.upscale && !cfg.portrait &&
+            cfg.filterId == 0 && !cfg.flat && !cfg.upscale &&
             store.trim(cfg.cameraId).isNeutral() -> ImageFormat.JPEG_R
         else -> ImageFormat.JPEG
     }
@@ -1612,7 +1610,7 @@ class CameraController(
         try {
             val fmt = captureFormat()
             if (cfg.photoFormat == 3 && ultraHdrAvailable && fmt != ImageFormat.JPEG_R) {
-                handler.post { ui.onMessage("Photo processing is active; using standard JPEG so portrait blur and looks can be rendered. Turn them off for native Ultra HDR.") }
+                handler.post { ui.onMessage("Photo processing is active; using standard JPEG so selected looks can be rendered. Turn them off for native Ultra HDR.") }
             }
             val plan = scenePlan()
             if (cfg.scene in 1..2 && plan == null) {
@@ -1649,7 +1647,7 @@ class CameraController(
             val sh = Shot(
                 cfg.cameraId, fmt, chars, needRotation(), cfg.photoQuality, reqs.size,
                 cfg.bw, cfg.flat && !cfg.bw, cfg.photoLook, hplan != null, cfg.upscale && currentLensNeedsUpscale(), cfg.glow, cfg.blue,
-                cfg.filterId, cfg.filterIntensity, cfg.portrait, cfg.portraitBlurStrength
+                cfg.filterId, cfg.filterIntensity
             )
             synchronized(lock) { shot = sh }
             if (plan != null && plan.expNs * reqs.size >= 1_500_000_000L) {
@@ -1761,13 +1759,6 @@ class CameraController(
             out.recycle()
             out = bloomed
         }
-        if (sh.portrait) {
-            val portrait = PortraitProcessor.apply(out, sh.portraitBlurStrength)
-            if (portrait !== out) {
-                out.recycle()
-                out = portrait
-            }
-        }
         if (!trim.isNeutral()) {
             val t = ColorTrim.apply(out, trim, 0)
             out.recycle()
@@ -1807,7 +1798,7 @@ class CameraController(
                 val out = finishLook(rotateBy(merged, sh.rotDeg), sh, trim)
                 val canWriteGainmap = Build.VERSION.SDK_INT >= 34 &&
                     sh.filterId == 0 && !sh.bw && !sh.flat && !sh.blue && !sh.glow &&
-                    sh.photoLook == 0 && !sh.portrait && !sh.upscale && trim.isNeutral()
+                    sh.photoLook == 0 && !sh.upscale && trim.isNeutral()
                 val gainmapAdded = canWriteGainmap &&
                     HdrFusion.attachGainmap(out, sh.jpegs.last(), sh.rotDeg)
                 if (gainmapAdded) {
@@ -1825,7 +1816,7 @@ class CameraController(
                 out.recycle()
             } else {
                 val bytes = sh.jpegs[0]
-                saved = if (sh.bw || sh.blue || sh.flat || sh.upscale || sh.glow || sh.portrait || sh.filterId > 0 || !trim.isNeutral()) {
+                saved = if (sh.bw || sh.blue || sh.flat || sh.upscale || sh.glow || sh.filterId > 0 || !trim.isNeutral()) {
                     val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
                     val out = finishLook(rotateBy(bmp, sh.rotDeg), sh, trim)
                     val u = saveBitmap(out, "$base.jpg", sh.quality)
