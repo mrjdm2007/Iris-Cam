@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Iris Cam · Monitor</title>
+<style>
+  :root { color-scheme: dark; --bg:#101114; --surface:#1b1d22; --surface2:#252830; --outline:#3a3d45; --text:#f2f0e9; --muted:#b8b6ad; --amber:#ffb300; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background:var(--bg); color:var(--text); font-family:Roboto,system-ui,sans-serif; }
+  #top { display:flex; align-items:center; gap:14px; padding:12px 18px; background:#191b20; border-bottom:1px solid #30323a; font-size:14px; flex-wrap:wrap; position:sticky; top:0; z-index:5; }
+  .brand { font-weight:800; letter-spacing:.08em; color:var(--amber); }
+  .badge { border:1px solid var(--outline); background:var(--surface2); color:var(--muted); border-radius:999px; padding:5px 10px; font-size:11px; letter-spacing:.04em; }
+  #rec { width: 12px; height: 12px; border-radius: 50%; background: #444; display: inline-block; }
+  #rec.on { background: #e53935; }
+  #tc { font-variant-numeric: tabular-nums; font-weight: 600; }
+  #wrap { position: relative; width: 100%; background: #000; display: flex; justify-content: center; }
+  #wrap.recording { box-shadow: inset 0 0 0 3px #e53935; }
+  #stage { position: relative; width: 100%; max-height: 72vh; }
+  #v, #c { display: block; width: 100%; }
+  #c { position: absolute; left: 0; top: 0; display: none; }
+  #meter { position: absolute; right: 8px; top: 8px; bottom: 8px; width: 8px; background: #222a; border-radius: 4px; overflow: hidden; }
+  #meterFill { position: absolute; left: 0; right: 0; bottom: 0; height: 0; background: linear-gradient(#e53935, #ffb300 25%, #43a047 60%); }
+  #panel { display:flex; flex-wrap:wrap; gap:12px; padding:14px 18px; max-width:1600px; margin:auto; }
+  .grp { background:var(--surface); border:1px solid #30333b; border-radius:16px; padding:14px; min-width:260px; flex:1 1 280px; box-shadow:0 3px 14px #0003; }
+  .grp h3 { margin:0 0 12px; font-size:12px; letter-spacing:.1em; color:var(--amber); font-weight:700; text-transform:uppercase; }
+  button, select { background:var(--surface2); color:var(--text); border:1px solid var(--outline); border-radius:999px; padding:9px 15px; font-size:13px; cursor:pointer; min-height:38px; }
+  button:hover { border-color:var(--amber); }
+  button.big { font-size:16px; font-weight:700; padding:12px 24px; }
+  button.red { background:#b3261e; border-color:#ef6b62; color:white; }
+  button.gold.on, button.mark.on { background:var(--amber); color:#171717; border-color:var(--amber); }
+  input[type=range] { width:100%; accent-color:var(--amber); }
+  input[type=number] { background:var(--surface2); color:var(--text); border:1px solid var(--outline); border-radius:8px; padding:8px; }
+  .row { display:flex; gap:8px; align-items:center; margin:8px 0; flex-wrap:wrap; }
+  .sliderrow { display:grid; grid-template-columns:1fr 68px; gap:10px; align-items:center; }
+  .val { min-width:56px; text-align:right; color:var(--muted); font-variant-numeric:tabular-nums; }
+  .rack { display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
+  .rack select { min-height:34px; padding:5px 10px; }
+  .hint { color:var(--muted); font-size:11px; }
+  #lutBox { display: none; }
+  small { color: #888; }
+</style>
+</head>
+<body>
+<div id="top">
+  <span class="brand">IRIS CAM</span><span id="rec"></span><span id="tc">--:--:--</span>
+  <span id="info">connecting...</span><span class="badge">FLAT MONITOR · 720p / 30 TARGET</span>
+  <span style="flex:1"></span>
+  <button id="fs">Fullscreen</button>
+</div>
+<div id="wrap">
+  <div id="stage">
+    <img id="v" alt="">
+    <canvas id="c"></canvas>
+    <div id="meter"><div id="meterFill"></div></div>
+  </div>
+</div>
+<div id="panel">
+  <div class="grp">
+    <h3>Camera</h3>
+    <div class="row">
+      <button id="bRec" class="big red">● REC</button>
+    </div>
+    <div class="row"><button id="bSound">Enable sound</button><small id="sndInfo"></small></div>
+  </div>
+  <div class="grp">
+    <h3>Focus pull</h3>
+    <div class="sliderrow"><input id="focus" type="range" min="0" max="100" value="0"><span id="focusV" class="val">AF</span></div>
+    <div class="rack"><button id="focusA" class="mark">Set A</button><button id="focusB" class="mark">Set B</button><select id="focusTime"><option>1</option><option>2</option><option selected>3</option><option>5</option><option>8</option><option>12</option></select><button id="focusRack">Rack A → B</button></div>
+    <div class="row"><button id="bAf">Autofocus</button><button id="fNear">Near</button><button id="fFar">Far</button></div>
+  </div>
+  <div class="grp">
+    <h3>Zoom</h3>
+    <div class="sliderrow"><input id="zoom" type="range" min="1" max="7" step="0.01" value="1"><span id="zoomV" class="val">1.0x</span></div>
+    <div class="rack"><button id="zoomA" class="mark">Set A</button><button id="zoomB" class="mark">Set B</button><select id="zoomTime"><option>1</option><option>2</option><option>3</option><option selected>5</option><option>8</option><option>12</option></select><button id="zoomPull">Pull A → B</button></div>
+    <div class="row"><button data-z="1">1x</button><button data-z="2">2x</button><button data-z="2.7">2.7x</button></div>
+  </div>
+  <div class="grp">
+    <h3>Exposure</h3>
+    <div class="row"><button id="bManual">Auto</button><span class="val" id="expInfo"></span></div>
+    <div class="sliderrow"><input id="exposure" type="range" min="-2" max="2" step="0.1" value="0"><span class="val" id="exposureV">EV 0.0</span></div>
+    <div class="rack"><button id="expA" class="mark">Set A</button><button id="expB" class="mark">Set B</button><select id="expTime"><option>1</option><option>2</option><option>3</option><option selected>5</option><option>8</option><option>12</option></select><button id="expPull">Pull A → B</button></div>
+    <div class="row"><label>ISO</label><input id="iso" type="number" min="50" max="12800" step="50" style="width:90px"><button id="setIso">Set</button></div>
+    <div class="row"><label>Shutter 1/</label><input id="shut" type="number" min="1" max="8000" style="width:90px"><button id="setShut">Set</button></div>
+  </div>
+  <div class="grp" id="lutBox">
+    <h3>LUT (this screen only)</h3>
+    <div class="row"><input id="lutFile" type="file" accept=".cube"></div>
+    <div class="row"><label>Strength</label><input id="lutAmt" type="range" min="0" max="100" value="100"></div>
+    <div class="row"><button id="lutOff">Remove LUT</button><small id="lutInfo">Not recorded, view only</small></div>
+  </div>
+</div>
+<script>
+(function () {
+  var q = new URLSearchParams(location.search);
+  var pin = q.get('pin') || '';
+  function api(path) { return fetch(path + (path.indexOf('?') >= 0 ? '&' : '?') + 'pin=' + encodeURIComponent(pin)); }
+  function cmd(c, a) { return api('/cmd?c=' + c + '&a=' + encodeURIComponent(a === undefined ? '' : a)); }
+  var $ = function (id) { return document.getElementById(id); };
+  var img = $('v');
+  var st = {};
+
+  function connect() { img.src = '/stream?pin=' + encodeURIComponent(pin) + '&t=' + Date.now(); }
+  img.onerror = function () { setTimeout(connect, 1500); };
+  connect();
+
+  var focusDrag = false, zoomDrag = false;
+  function update(s) {
+    st = s;
+    $('rec').className = s.rec ? 'on' : '';
+    $('wrap').className = s.rec ? 'recording' : '';
+    $('tc').textContent = s.tc || '';
+    $('info').textContent = (s.mode || '') + ' | ' + (s.res || '') + ' ' + (s.fps || '') + 'fps | ' + (s.battery || '') + '% batt';
+    $('bRec').textContent = s.rec ? '■ STOP' : (s.mode === 'photo' ? '● CAPTURE' : '● REC');
+    if (!focusDrag) { $('focus').value = Math.round((s.focus || 0) * 100); }
+    $('focusV').textContent = s.manualFocus ? Math.round((s.focus || 0) * 100) + '%' : 'AF';
+    if (!zoomDrag) { $('zoom').min = s.zoomMin || 1; $('zoom').max = s.zoomMax || 1; $('zoom').value = s.zoom || 1; }
+    $('zoomV').textContent = (s.zoom || 1).toFixed(2) + 'x';
+    $('bManual').textContent = s.manual ? 'Manual' : 'Auto';
+    $('expInfo').textContent = 'ISO ' + (s.iso || '-') + '  1/' + (s.shutter || '-');
+    $('exposure').min = s.expMin; $('exposure').max = s.expMax; $('exposure').step = s.expManual ? 50 : 0.1;
+    if (document.activeElement !== $('exposure')) $('exposure').value = s.expValue;
+    $('exposureV').textContent = (s.expUnit || 'EV') + ' ' + (s.expManual ? Math.round(s.expValue) : Number(s.expValue).toFixed(1));
+    $('focusTime').value = s.focusSeconds || 3; $('zoomTime').value = s.zoomSeconds || 5; $('expTime').value = s.expSeconds || 5;
+    ['focusA','focusB','zoomA','zoomB','expA','expB'].forEach(function(k){ $(k).classList.toggle('on', s[k] !== null && s[k] !== undefined); });
+    $('focusRack').textContent = s.focusToB === false ? 'Rack B → A' : 'Rack A → B'; $('zoomPull').textContent = s.zoomToB === false ? 'Pull B → A' : 'Pull A → B'; $('expPull').textContent = s.expToB === false ? 'Pull B → A' : 'Pull A → B';
+    $('focus').disabled = !s.focusSupported; $('focusRack').disabled = !s.focusSupported;
+    var sq = s.squeeze || 1;
+    if (img.naturalWidth > 0) {
+      $('stage').style.aspectRatio = (img.naturalWidth * sq) + ' / ' + img.naturalHeight;
+      img.style.height = '100%'; img.style.objectFit = 'fill';
+      $('c').style.height = '100%';
+    }
+  }
+  function poll() {
+    api('/state').then(function (r) { return r.json(); }).then(update).catch(function () { $('info').textContent = 'no connection'; });
+  }
+  setInterval(poll, 500); poll();
+
+  $('bRec').onclick = function () { cmd('rec'); };
+  $('bAf').onclick = function () { cmd('af'); };
+  $('fNear').onclick = function () { cmd('focus', 1); };
+  $('fFar').onclick = function () { cmd('focus', 0); };
+  $('focus').oninput = function () { focusDrag = true; cmd('focus', this.value / 100); };
+  $('focus').onchange = function () { focusDrag = false; };
+  $('focusA').onclick = function () { cmd('focusA'); }; $('focusB').onclick = function () { cmd('focusB'); };
+  $('focusRack').onclick = function () { cmd('focusRack'); }; $('focusTime').onchange = function () { cmd('focusTime', this.value); };
+  $('zoom').oninput = function () { zoomDrag = true; cmd('zoom', this.value); };
+  $('zoom').onchange = function () { zoomDrag = false; };
+  $('zoomA').onclick = function () { cmd('zoomA'); }; $('zoomB').onclick = function () { cmd('zoomB'); };
+  $('zoomPull').onclick = function () { cmd('zoomPull'); }; $('zoomTime').onchange = function () { cmd('zoomTime', this.value); };
+  $('expA').onclick = function () { cmd('expA'); }; $('expB').onclick = function () { cmd('expB'); };
+  $('expPull').onclick = function () { cmd('expPull'); }; $('expTime').onchange = function () { cmd('expTime', this.value); };
+  $('exposure').oninput = function () { cmd('exposure', this.value); $('exposureV').textContent = (st.expUnit || 'EV') + ' ' + (st.expManual ? Math.round(this.value) : Number(this.value).toFixed(1)); };
+  Array.prototype.forEach.call(document.querySelectorAll('button[data-z]'), function (b) {
+    b.onclick = function () { cmd('zoom', b.getAttribute('data-z')); };
+  });
+  $('bManual').onclick = function () { cmd('manual'); };
+  $('setIso').onclick = function () { cmd('iso', $('iso').value); };
+  $('setShut').onclick = function () { cmd('shutter', $('shut').value); };
+  $('fs').onclick = function () {
+    if (document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen();
+  };
+
+  // ---- live audio ----
+  var ac = null, ws = null, nextT = 0, level = 0;
+  $('bSound').onclick = function () {
+    if (ws) { ws.close(); ws = null; if (ac) { ac.close(); ac = null; } $('bSound').textContent = 'Enable sound'; $('sndInfo').textContent = ''; return; }
+    ac = new (window.AudioContext || window.webkitAudioContext)();
+    ws = new WebSocket('ws://' + location.host + '/ws?pin=' + encodeURIComponent(pin));
+    ws.binaryType = 'arraybuffer';
+    ws.onopen = function () { $('bSound').textContent = 'Mute'; $('sndInfo').textContent = 'live'; };
+    ws.onclose = function () { $('sndInfo').textContent = 'off'; };
+    ws.onmessage = function (e) {
+      if (!ac) return;
+      var i16 = new Int16Array(e.data);
+      var f = new Float32Array(i16.length);
+      var pk = 0;
+      for (var i = 0; i < i16.length; i++) { f[i] = i16[i] / 32768; var a = Math.abs(f[i]); if (a > pk) pk = a; }
+      level = Math.max(level * 0.85, pk);
+      var buf = ac.createBuffer(1, f.length, 48000);
+      buf.copyToChannel(f, 0);
+      var s = ac.createBufferSource();
+      s.buffer = buf; s.connect(ac.destination);
+      var now = ac.currentTime;
+      if (nextT < now + 0.03 || nextT > now + 0.5) nextT = now + 0.12;
+      s.start(nextT);
+      nextT += buf.duration;
+    };
+  };
+  setInterval(function () {
+    level *= 0.8;
+    var db = level > 0.0001 ? 20 * Math.log10(level) : -90;
+    var pct = Math.max(0, Math.min(100, (db + 60) / 60 * 100));
+    $('meterFill').style.height = pct + '%';
+  }, 60);
+
+  // ---- LUT (desktop browsers only) ----
+  var desktop = window.matchMedia('(pointer: fine)').matches && window.innerWidth >= 900;
+  if (desktop) $('lutBox').style.display = 'block';
+  var gl = null, prog = null, lutTex = null, frameTex = null, lutSize = 0, amt = 1, lutOn = false;
+  var cv = $('c');
+
+  function parseCube(txt) {
+    var size3 = 0, size1 = 0, rows = [], domainMin = [0,0,0], domainMax = [1,1,1];
+    var lines = txt.split(/\r?\n/);
+    for (var i = 0; i < lines.length; i++) {
+      var t = lines[i].trim();
+      if (!t || t[0] === '#') continue;
+      var p = t.split(/\s+/);
+      if (p[0] === 'TITLE') continue;
+      if (p[0] === 'LUT_3D_SIZE') { size3 = parseInt(p[1], 10); continue; }
+      if (p[0] === 'LUT_1D_SIZE') { size1 = parseInt(p[1], 10); continue; }
+      if (p[0] === 'DOMAIN_MIN' && p.length >= 4) { domainMin = p.slice(1,4).map(Number); continue; }
+      if (p[0] === 'DOMAIN_MAX' && p.length >= 4) { domainMax = p.slice(1,4).map(Number); continue; }
+      if (p.length >= 3 && p.slice(0,3).every(function(v){ return Number.isFinite(Number(v)); }))
+        rows.push([Number(p[0]), Number(p[1]), Number(p[2])]);
+    }
+    if (size3 > 1) {
+      var need3 = size3 * size3 * size3;
+      var offset = size1 > 1 ? size1 : 0;
+      if (rows.length < offset + need3) return null;
+      // Standard .cube 3D table ordering (red varies fastest) maps directly to WebGL's x-fastest volume.
+      return { size:size3, data:rows.slice(offset, offset + need3).flat() };
+    }
+    if (size1 > 1 && rows.length >= size1) {
+      // Expand a 1D per-channel LUT into a small 3D volume so the same GPU shader handles both formats.
+      var n = 32, data = new Array(n*n*n*3), one = rows.slice(0,size1);
+      function sample(channel, x) {
+        var q = Math.max(0,Math.min(size1-1,x*(size1-1))), a = Math.floor(q), b = Math.min(size1-1,a+1), f = q-a;
+        return one[a][channel]*(1-f) + one[b][channel]*f;
+      }
+      var k = 0;
+      for (var z=0; z<n; z++) for (var y=0; y<n; y++) for (var x=0; x<n; x++) {
+        data[k++] = sample(0,x/(n-1));
+        data[k++] = sample(1,y/(n-1));
+        data[k++] = sample(2,z/(n-1));
+      }
+      return { size:n, data:data };
+    }
+    return null;
+  }
+
+  function initGL() {
+    if (gl) return true;
+    gl = cv.getContext('webgl2', { premultipliedAlpha: false });
+    if (!gl) { $('lutInfo').textContent = 'WebGL2 not available in this browser'; return false; }
+    var vs = '#version 300 es\nin vec2 p; out vec2 uv; void main(){ uv = p*0.5+0.5; gl_Position = vec4(p,0.,1.); }';
+    var fs = '#version 300 es\nprecision highp float; precision highp sampler3D; in vec2 uv; out vec4 o;' +
+      'uniform sampler2D tex; uniform sampler3D lut; uniform float size; uniform float amt;' +
+      'void main(){ vec3 c = texture(tex, uv).rgb; vec3 l = texture(lut, c*(size-1.)/size + 0.5/size).rgb; o = vec4(mix(c, l, amt), 1.); }';
+    function sh(t, s) {
+      var x = gl.createShader(t); gl.shaderSource(x, s); gl.compileShader(x);
+      if (!gl.getShaderParameter(x, gl.COMPILE_STATUS)) { $('lutInfo').textContent = 'LUT shader error: ' + gl.getShaderInfoLog(x); throw new Error('LUT shader compile failed'); }
+      return x;
+    }
+    try {
+      prog = gl.createProgram();
+      gl.attachShader(prog, sh(gl.VERTEX_SHADER, vs));
+      gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, fs));
+      gl.linkProgram(prog);
+      if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
+      gl.useProgram(prog);
+    } catch (e) { $('lutInfo').textContent = 'LUT unavailable: ' + e.message; gl = null; return false; }
+    var vb = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, vb);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+    var loc = gl.getAttribLocation(prog, 'p');
+    gl.enableVertexAttribArray(loc);
+    gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+    frameTex = gl.createTexture();
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, frameTex);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.uniform1i(gl.getUniformLocation(prog, 'tex'), 0);
+    gl.uniform1i(gl.getUniformLocation(prog, 'lut'), 1);
+    return true;
+  }
+
+  function loadLut(txt) {
+    var l = parseCube(txt);
+    if (!l) { $('lutInfo').textContent = 'Unsupported .cube file: check LUT_3D_SIZE / LUT_1D_SIZE and data rows'; return; }
+    if (!initGL()) return;
+    var n = l.size, u8 = new Uint8Array(n * n * n * 3);
+    for (var i = 0; i < u8.length; i++) u8[i] = Math.max(0, Math.min(255, Math.round(l.data[i] * 255)));
+    gl.activeTexture(gl.TEXTURE1);
+    if (lutTex) gl.deleteTexture(lutTex);
+    lutTex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_3D, lutTex);
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+    gl.texImage3D(gl.TEXTURE_3D, 0, gl.RGB8, n, n, n, 0, gl.RGB, gl.UNSIGNED_BYTE, u8);
+    gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_R, gl.CLAMP_TO_EDGE);
+    gl.uniform1f(gl.getUniformLocation(prog, 'size'), n);
+    lutSize = n; lutOn = true;
+    cv.style.display = 'block'; img.style.visibility = 'hidden';
+    $('lutInfo').textContent = 'LUT ' + n + '^3 active · laptop preview only';
+  }
+
+  $('lutFile').onchange = function () {
+    var f = this.files[0]; if (!f) return;
+    var r = new FileReader();
+    r.onload = function () { loadLut(r.result); };
+    r.readAsText(f);
+  };
+  $('lutAmt').oninput = function () { amt = this.value / 100; };
+  $('lutOff').onclick = function () {
+    lutOn = false; cv.style.display = 'none'; img.style.visibility = 'visible';
+    $('lutInfo').textContent = 'Not recorded, view only';
+  };
+
+  function draw() {
+    if (lutOn && gl && img.naturalWidth > 0) {
+      if (cv.width !== img.naturalWidth || cv.height !== img.naturalHeight) { cv.width = img.naturalWidth; cv.height = img.naturalHeight; }
+      gl.viewport(0, 0, cv.width, cv.height);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, frameTex);
+      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+      try { gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, img); } catch (e) {}
+      gl.activeTexture(gl.TEXTURE1);
+      gl.bindTexture(gl.TEXTURE_3D, lutTex);
+      gl.uniform1f(gl.getUniformLocation(prog, 'amt'), amt);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    }
+    requestAnimationFrame(draw);
+  }
+  requestAnimationFrame(draw);
+})();
+</script>
+</body>
+</html>

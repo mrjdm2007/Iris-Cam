@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Iris Cam</string>
+
+    <!-- App-wide Material 3 dark foundation. The camera view remains intentionally edge-to-edge. -->
+    <style name="AppTheme" parent="Theme.Material3.Dark.NoActionBar">
+        <item name="colorPrimary">#FFB300</item>
+        <item name="colorOnPrimary">#1A160A</item>
+        <item name="colorSecondary">#E6B84C</item>
+        <item name="colorOnSecondary">#211A08</item>
+        <item name="colorTertiary">#D9A441</item>
+        <item name="colorSurface">#17191D</item>
+        <item name="colorOnSurface">#F3F0E8</item>
+        <item name="colorSurfaceVariant">#292C32</item>
+        <item name="colorOnSurfaceVariant">#C6C2B8</item>
+        <item name="colorOutline">#494B52</item>
+        <item name="android:colorAccent">#FFB300</item>
+        <item name="android:statusBarColor">#101114</item>
+        <item name="android:navigationBarColor">#101114</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowFullscreen">true</item>
+        <item name="android:windowBackground">#101114</item>
+        <item name="materialAlertDialogTheme">@style/ThemeOverlay.IrisCam.MaterialAlertDialog</item>
+    </style>
+
+    <style name="ThemeOverlay.IrisCam.MaterialAlertDialog" parent="ThemeOverlay.Material3.MaterialAlertDialog">
+        <item name="colorPrimary">#FFB300</item>
+        <item name="colorSecondary">#E6B84C</item>
+    </style>
+</resources>
