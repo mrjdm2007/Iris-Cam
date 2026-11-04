@@ -628,6 +628,14 @@ class CameraController(
      * auxiliary ID is present but cannot actually be opened. This keeps device-specific IDs
      * from making the whole app unusable on a different firmware/build.
      */
+    private fun tryNextCamera(candidates: List<String>, index: Int) {
+        if (isMotoEdge50NeoProfile()) {
+            ui.onMessage("Edge 50 Neo camera ID ${candidates.getOrNull(index - 1) ?: "unknown"} could not be opened. Keeping the selected lens; no substitution was made.")
+        } else {
+            openCameraCandidate(candidates, index)
+        }
+    }
+
     @SuppressLint("MissingPermission")
     private fun openCameraCandidate(candidates: List<String>, index: Int) {
         if (!started) return
@@ -673,7 +681,7 @@ class CameraController(
                         }
                         if (started) {
                             ui.onMessage("Trying another detected lens")
-                            handler.postDelayed({ openCameraCandidate(candidates, index + 1) }, 250)
+                            handler.postDelayed({ tryNextCamera(candidates, index + 1) }, 250)
                         }
                     } else if (settled.compareAndSet(false, true) && started) {
                         openCameraCandidate(candidates, index + 1)
@@ -1375,7 +1383,10 @@ class CameraController(
             warnedLens = cfg.cameraId
             ui.onMessage("This lens has no RAW: using phone JPEG with this lens's colour trim")
         }
-        val st = tv.surfaceTexture ?: return
+        val st = tv.surfaceTexture ?: run {
+            finishConfiguration()
+            return
+        }
         val cap = captureSize()
         val ps = previewSizeForPhoto(cap)
         lastPreview = ps
