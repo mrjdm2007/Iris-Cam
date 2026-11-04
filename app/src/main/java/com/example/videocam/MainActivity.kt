@@ -1430,20 +1430,8 @@ class MainActivity : Activity(), CameraController.Callbacks {
 
     private fun switchLens(id: String) {
         if (!idle()) return
-        var target = id
-        if (cfg.fps == 60 && !cam.supportsFps(id, 60)) {
-            val fallback = cam.cameraIds.firstOrNull { !cam.isFrontCamera(it) && cam.supportsFps(it, 60) }
-            if (fallback != null) {
-                target = fallback
-                toast("Selected lens does not support 60 fps; switched to the compatible main camera")
-            } else {
-                cfg.fps = 30
-                toast("Selected lens does not support 60 fps; recording rate changed to 30 fps")
-            }
-        }
-        cfg.cameraId = target
+        cfg.cameraId = id
         store.save("last", cfg)
-        beginCameraTransition()
         cam.reopen()
         refreshUi()
     }
