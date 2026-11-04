@@ -1279,6 +1279,9 @@ class CameraController(
     val ultraHdrAvailable: Boolean get() = Build.VERSION.SDK_INT >= 34 && jprSizes.isNotEmpty()
 
     private fun captureFormat(): Int = when {
+        // HDR fusion requires a bracket of ordinary JPEG frames. Never let a stale
+        // Ultra HDR preference route this capture through the camera's JPEG_R pipeline.
+        cfg.scene == 3 -> ImageFormat.JPEG
         effMode() == 1 -> ImageFormat.RAW_SENSOR
         // JPEG_R must be saved byte-for-byte to preserve its gain map. If a pixel filter
         // is selected, use ordinary JPEG so the requested look is actually rendered.
@@ -1608,8 +1611,10 @@ class CameraController(
             return
         }
         try {
-            val fmt = captureFormat()
-            if (cfg.photoFormat == 3 && ultraHdrAvailable && fmt != ImageFormat.JPEG_R) {
+            // HDR scene always uses standard JPEG brackets and the app's own
+            // HdrFusion merger. Do not invoke Camera2 JPEG_R / native Ultra HDR here.
+            val fmt = if (cfg.scene == 3) ImageFormat.JPEG else captureFormat()
+            if (cfg.scene != 3 && cfg.photoFormat == 3 && ultraHdrAvailable && fmt != ImageFormat.JPEG_R) {
                 handler.post { ui.onMessage("Photo processing is active; using standard JPEG so selected looks can be rendered. Turn them off for native Ultra HDR.") }
             }
             val plan = scenePlan()
@@ -1796,16 +1801,8 @@ class CameraController(
             } else if (sh.hdr && sh.jpegs.size >= 2) {
                 val merged = HdrFusion.merge(sh.jpegs) ?: throw IllegalStateException("Couldn't combine the HDR frames")
                 val out = finishLook(rotateBy(merged, sh.rotDeg), sh, trim)
-                val canWriteGainmap = Build.VERSION.SDK_INT >= 34 &&
-                    sh.filterId == 0 && !sh.bw && !sh.flat && !sh.blue && !sh.glow &&
-                    sh.photoLook == 0 && !sh.upscale && trim.isNeutral()
-                val gainmapAdded = canWriteGainmap &&
-                    HdrFusion.attachGainmap(out, sh.jpegs.last(), sh.rotDeg)
-                if (gainmapAdded) {
-                    handler.post {
-                        ui.onMessage("The fusion gain map was calculated, but Android's public Bitmap encoder cannot package it as JPEG_R; this fused file is saved as SDR JPEG. Native camera Ultra HDR capture still saves JPEG_R when supported.")
-                    }
-                }
+                // Exposure fusion is deliberately exported as a broadly compatible SDR JPEG.
+                // The camera-generated JPEG_R path is separate and is not used by HDR scene mode.
                 saved = saveBitmap(out, "$base.jpg", sh.quality)
                 out.recycle()
             } else if (sh.jpegs.size > 1) {
