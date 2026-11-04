@@ -77,7 +77,7 @@ data class Config(
     var photoNrOff: Boolean = false,
     var portrait: Boolean = false,
     var scene: Int = 0,              // photo scene: 0 normal, 1 night, 2 astro, 3 multi-frame HDR fusion
-    var hdrFrames: Int = 3,          // multi-frame HDR fusion: 2 or 3 exposures
+    var hdrFrames: Int = 2,          // faster default: two-exposure HDR fusion; 3 remains selectable
     var upscale: Boolean = false,    // upscale photos to 12.6 MP
     var bw: Boolean = false,         // photo black and white, high contrast
     var photoLook: Int = 0,          // 0 natural, 1 golden hour, 2 dream glow
