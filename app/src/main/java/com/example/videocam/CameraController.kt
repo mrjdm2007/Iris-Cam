@@ -133,7 +133,9 @@ class CameraController(
         val advertised = manager.cameraIdList.toList()
         val detected = advertised.filter { usable(it) }
         if (isMotoEdge50NeoProfile()) {
-            val profile = motoProfileIds.filter { it in advertised && usable(it) }
+            // Restore the Edge 50 Neo's explicitly supplied camera IDs without
+            // filtering auxiliary modules by generic backward-compatibility checks.
+            val profile = motoProfileIds.filter { it in advertised }
             (profile + detected.filterNot { it in profile }).distinct()
         } else {
             detected.sortedWith(compareBy({ lensRank(it) }, { it }))
@@ -331,7 +333,8 @@ class CameraController(
                 ratio < 1.8f -> "0" // supplied main ID (1x)
                 else -> "3"          // supplied telephoto ID (2.7x)
             }
-            if (exact in cameraIds && !isFront(exact)) return exact
+            // User supplied the exact Edge 50 Neo auxiliary IDs; select them directly.
+            if (exact in manager.cameraIdList) return exact
         }
 
         fun isLogical(id: String): Boolean = runCatching {
