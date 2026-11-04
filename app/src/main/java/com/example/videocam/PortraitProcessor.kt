@@ -3,15 +3,13 @@ package com.example.videocam
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
-import android.graphics.RenderEffect
-import android.graphics.Shader
 import android.os.Build
 import com.google.android.gms.tasks.Tasks
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.segmentation.Segmentation
 import com.google.mlkit.vision.segmentation.SegmentationMask
 import com.google.mlkit.vision.segmentation.selfie.SelfieSegmenterOptions
-import java.nio.FloatBuffer
+import java.nio.ByteOrder
 import kotlin.math.max
 import kotlin.math.min
 
@@ -48,7 +46,7 @@ object PortraitProcessor {
             } else source
             val input = InputImage.fromBitmap(inference, 0)
             val mask = Tasks.await(segmenter.process(input))
-            val maskBuffer = mask.buffer.asReadOnlyBuffer()
+            val maskBuffer = mask.buffer.asReadOnlyBuffer().order(ByteOrder.nativeOrder())
             val maskWidth = mask.width
             val maskHeight = mask.height
             if (maskWidth <= 0 || maskHeight <= 0) return source
@@ -70,7 +68,7 @@ object PortraitProcessor {
                 for (x in 0 until source.width) {
                     val mx = ((x + 0.5f) * scaleX).toInt().coerceIn(0, maskWidth - 1)
                     val index = my * maskWidth + mx
-                    val confidence = maskBuffer.get(index).coerceIn(0f, 1f)
+                    val confidence = maskBuffer.getFloat(index * Float.SIZE_BYTES).coerceIn(0f, 1f)
                     val t = ((confidence - featherLow) / (featherHigh - featherLow)).coerceIn(0f, 1f)
                     val foreground = t * t * (3f - 2f * t)
                     val a = srcRow[x]
@@ -95,28 +93,31 @@ object PortraitProcessor {
     }
 
     private fun blurredBackground(source: Bitmap, strength: Int): Bitmap {
-        val radius = max(3f, min(source.width, source.height) * (strength / 100f) * 0.035f)
-        val out = Bitmap.createBitmap(source.width, source.height, Bitmap.Config.ARGB_8888)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            val paint = Paint(Paint.FILTER_BITMAP_FLAG).apply {
-                renderEffect = RenderEffect.createBlurEffect(radius, radius, Shader.TileMode.CLAMP)
-            }
-            Canvas(out).drawBitmap(source, 0f, 0f, paint)
-        } else {
-            // API 29–30 fallback: a low-resolution background creates a soft, memory-safe blur.
-            val factor = if (strength >= 70) 14 else 10
-            val small = Bitmap.createScaledBitmap(
-                source,
-                (source.width / factor).coerceAtLeast(1),
-                (source.height / factor).coerceAtLeast(1),
-                true
-            )
-            Canvas(out).drawBitmap(
-                small, null, android.graphics.Rect(0, 0, out.width, out.height),
-                Paint(Paint.FILTER_BITMAP_FLAG)
-            )
-            small.recycle()
+        // A downsample/upsample blur works consistently on API 29+ and avoids applying
+        // RenderEffect to Paint (RenderEffect is a View/RenderNode effect, not a Paint property).
+        // Keep the working image small to limit peak memory on high-resolution camera frames.
+        val factor = when {
+            strength >= 80 -> 18
+            strength >= 55 -> 14
+            strength >= 30 -> 10
+            else -> 7
         }
+        val smallW = (source.width / factor).coerceAtLeast(1)
+        val smallH = (source.height / factor).coerceAtLeast(1)
+        var small = Bitmap.createScaledBitmap(source, smallW, smallH, true)
+        // Two additional low-resolution resampling passes soften block edges while keeping
+        // the blur radius proportional to the selected strength.
+        repeat(2) {
+            val w = (small.width * 0.72f).toInt().coerceAtLeast(1)
+            val h = (small.height * 0.72f).toInt().coerceAtLeast(1)
+            val reduced = Bitmap.createScaledBitmap(small, w, h, true)
+            if (reduced !== small) small.recycle()
+            val enlarged = Bitmap.createScaledBitmap(reduced, smallW, smallH, true)
+            if (enlarged !== reduced) reduced.recycle()
+            small = enlarged
+        }
+        val out = Bitmap.createScaledBitmap(small, source.width, source.height, true)
+        if (small !== out) small.recycle()
         return out
     }
 }
