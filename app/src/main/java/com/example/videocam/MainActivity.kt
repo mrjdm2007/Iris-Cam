@@ -49,6 +49,7 @@ import android.view.ViewOutlineProvider
 import android.view.ViewTreeObserver
 import android.view.WindowManager
 import android.view.animation.LinearInterpolator
+import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
 import android.widget.ImageView
@@ -56,6 +57,7 @@ import android.widget.LinearLayout
 import android.widget.PopupMenu
 import android.widget.ProgressBar
 import android.widget.SeekBar
+import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import java.io.ByteArrayOutputStream
@@ -2440,56 +2442,111 @@ class MainActivity : Activity(), CameraController.Callbacks {
         toast("Copied $label")
     }
 
+    /**
+     * Show connection details as selectable text with an explicit copy button beside
+     * every URL/terminal command. This is more reliable on touchscreens than relying
+     * on tapping a list row or trying to select text inside an AlertDialog message.
+     */
+    private fun showCopyDialog(
+        title: String,
+        intro: String,
+        entries: List<Pair<String, String>>,
+        turnOff: (() -> Unit)? = null
+    ) {
+        val body = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(20, 8, 20, 4)
+        }
+        val introView = TextView(this).apply {
+            text = intro
+            textSize = 14f
+            setTextColor(Color.WHITE)
+            setPadding(0, 0, 0, 12)
+        }
+        body.addView(introView)
+        entries.forEach { (label, value) ->
+            val group = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(0, 8, 0, 10)
+            }
+            val heading = TextView(this).apply {
+                text = label
+                textSize = 13f
+                setTypeface(Typeface.DEFAULT, Typeface.BOLD)
+                setTextColor(AMBER)
+            }
+            val code = TextView(this).apply {
+                text = value
+                textSize = 13f
+                typeface = Typeface.MONOSPACE
+                setTextIsSelectable(true)
+                setTextColor(Color.WHITE)
+                setPadding(0, 6, 0, 6)
+            }
+            val copy = Button(this).apply {
+                text = "COPY"
+                isAllCaps = true
+                setOnClickListener { copyToClipboard(label, value) }
+            }
+            group.addView(heading)
+            group.addView(code)
+            group.addView(copy)
+            body.addView(group)
+            val divider = View(this).apply {
+                setBackgroundColor(0x44FFFFFF)
+                layoutParams = LinearLayout.LayoutParams(MATCH, 1)
+            }
+            body.addView(divider)
+        }
+        val scroll = ScrollView(this).apply {
+            isFillViewport = true
+            addView(body, ViewGroup.LayoutParams(MATCH, WRAP))
+        }
+        MaterialAlertDialogBuilder(this)
+            .setTitle(title)
+            .setView(scroll)
+            .setNegativeButton(if (turnOff != null) "Turn off monitor" else "Close") { _, _ -> turnOff?.invoke() }
+            .show()
+    }
+
     private fun showUsbCommands() {
         val m = monitor
         val port = m?.port ?: 8080
         val url = if (m != null) "http://localhost:$port/?pin=${m.pin}" else "http://localhost:$port"
-        val options = arrayOf(
-            "Copy adb devices",
-            "Copy ADB reverse command",
-            "Copy laptop monitor URL",
-            "Copy disconnect command"
+        val entries = listOf(
+            "List connected Android devices" to "adb devices",
+            "Enable USB port forwarding" to "adb reverse tcp:$port tcp:$port",
+            "Open monitor on your Mac" to url,
+            "Remove USB port forwarding" to "adb reverse --remove tcp:$port"
         )
-        MaterialAlertDialogBuilder(this)
-            .setTitle("USB monitoring on Mac")
-            .setMessage("Enable Developer options and USB debugging on your phone, connect a data-capable USB cable to your Mac, then authorize the Mac. Start Laptop Monitor first to get the live PIN and full URL.")
-            .setItems(options) { _, which ->
-                when (which) {
-                    0 -> copyToClipboard("adb devices", "adb devices")
-                    1 -> copyToClipboard("ADB reverse command", "adb reverse tcp:$port tcp:$port")
-                    2 -> copyToClipboard("monitor URL", url)
-                    3 -> copyToClipboard("disconnect command", "adb reverse --remove tcp:$port")
-                }
-            }
-            .setNegativeButton(if (m != null) "Turn off monitor" else "Close") { _, _ -> if (m != null) stopMonitor() }
-            .show()
+        showCopyDialog(
+            "USB monitoring on Mac",
+            "Enable Developer options and USB debugging on your phone, connect a data-capable USB cable to your Mac, then authorize the Mac. Start Laptop Monitor first to get the live PIN and full URL. Tap COPY beside any command, or long-press the selectable text.",
+            entries,
+            if (m != null) ({ stopMonitor() }) else null
+        )
     }
 
     private fun showMonitorInfo() {
         val m = monitor ?: return
         val ip = localIp()
-        val wifi = if (ip == null) "Wi-Fi: unavailable (connect both devices to the same network)" else
-            "WI-FI\nOpen on your laptop: http://$ip:${m.port}/?pin=${m.pin}"
-        val usb = "USB-C (ADB)\n1. Enable Developer options and USB debugging.\n2. Connect phone to Mac with a data cable and authorize.\n3. Run: adb reverse tcp:${m.port} tcp:${m.port}\n4. Open: http://localhost:${m.port}/?pin=${m.pin}"
-        val options = arrayOf(
-            "Copy adb devices",
-            "Copy ADB reverse command",
-            "Copy complete laptop URL (with PIN)",
-            "Copy disconnect command"
-        )
-        MaterialAlertDialogBuilder(this)
-            .setTitle("Laptop camera monitor · PIN ${m.pin}")
-            .setMessage("$wifi\n\n$usb\n\nSelect a row below to copy it. The feed is served locally; no cloud upload is used by this monitor server.")
-            .setItems(options) { _, which ->
-                when (which) {
-                    0 -> copyToClipboard("adb devices", "adb devices")
-                    1 -> copyToClipboard("ADB reverse command", "adb reverse tcp:${m.port} tcp:${m.port}")
-                    2 -> copyToClipboard("monitor URL", "http://localhost:${m.port}/?pin=${m.pin}")
-                    3 -> copyToClipboard("disconnect command", "adb reverse --remove tcp:${m.port}")
-                }
-            }
-            .setNegativeButton("Turn off") { _, _ -> stopMonitor() }
-            .show()
+        val wifiUrl = if (ip == null) null else "http://$ip:${m.port}/?pin=${m.pin}"
+        val localUrl = "http://localhost:${m.port}/?pin=${m.pin}"
+        val intro = buildString {
+            append("PIN: ${m.pin}\n\n")
+            if (wifiUrl != null) append("Wi-Fi: connect your Mac and phone to the same network and open the Wi-Fi URL below.\n\n")
+            else append("Wi-Fi address unavailable. Connect both devices to the same network and try again.\n\n")
+            append("USB-C: enable USB debugging, connect the phone to your Mac, authorize it, then run the ADB reverse command below. Open the localhost URL afterwards.\n\n")
+            append("The monitor feed is served locally; this server does not upload it to the cloud.")
+        }
+        val entries = buildList {
+            if (wifiUrl != null) add("Wi-Fi monitor URL" to wifiUrl)
+            add("List connected Android devices" to "adb devices")
+            add("Enable USB port forwarding" to "adb reverse tcp:${m.port} tcp:${m.port}")
+            add("USB monitor URL (localhost)" to localUrl)
+            add("Remove USB port forwarding" to "adb reverse --remove tcp:${m.port}")
+        }
+        showCopyDialog("Laptop camera monitor", intro, entries) { stopMonitor() }
     }
 
     private fun shutterHaptic(view: View) {
