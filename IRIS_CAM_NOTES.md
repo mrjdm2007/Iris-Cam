@@ -26,8 +26,8 @@ This project is an in-progress source update. It is not represented as a device-
 - The monitor transport is still MJPEG, not the planned hardware H.264/WebCodecs pipeline. USB ADB reverse avoids Wi-Fi transport but does not remove the JPEG capture/encode cost. The 720p/30 setting is a target, not a guaranteed measured rate.
 - Native JPEG_R files preserve the camera-generated Ultra HDR gain map, but a custom HDR-aware in-app photo viewer/preview has not been implemented. HDR display also depends on Android version and an HDR-capable display.
 - Multi-frame HDR fusion outputs standard JPEG, not a newly-authored Ultra HDR gain-map JPEG. The two-frame fusion is an exposure-fusion implementation, not a full GCam HDR+ pipeline.
-- A true subtle portrait/depth-blur mode, video VHS/Glow effects, Golden Hour photo filter, Dolly Zoom workflow, complete app-wide Material 3 component redesign, and complete camera lifecycle/crash audit remain outstanding.
-- Camera mode/orientation crash fixes and lens switching require physical testing across the target phone and other devices. No Android SDK/device is available in this build environment, so a Gradle APK build and camera hardware test could not be run here.
+- A true subtle portrait/depth-blur mode, video VHS/Glow effects, a dedicated H.264/WebCodecs monitor transport, a custom HDR-aware in-app photo viewer, and complete camera lifecycle/crash audit remain outstanding. Golden Hour and Dream Glow are already available as photo looks; they are not depth-aware portrait effects.
+- Camera mode/orientation crash fixes, physical lens switching, the 0.5x–7x zoom endpoints, and runtime camera recovery require physical testing across the target phone and other devices. No Android SDK/device is available in this build environment, so a Gradle APK build and camera hardware test could not be run here.
 
 ## Build
 
