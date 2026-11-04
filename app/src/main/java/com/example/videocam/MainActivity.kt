@@ -2502,7 +2502,8 @@ class MainActivity : Activity(), CameraController.Callbacks {
     private fun showUsbCommands() {
         val m = monitor
         val port = m?.port ?: 8080
-        val url = if (m != null) "http://localhost:$port/?pin=${m.pin}" else "http://localhost:$port"
+        val usbLocalPort = 18080
+        val url = if (m != null) "http://localhost:$usbLocalPort/?pin=${m.pin}" else "http://localhost:$usbLocalPort"
         val content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(20), dp(8), dp(20), dp(4))
@@ -2513,9 +2514,9 @@ class MainActivity : Activity(), CameraController.Callbacks {
             textSize = 13f
         }.also { content.addView(it) }
         addCopyRow(content, "ADB devices command", "adb devices")
-        addCopyRow(content, "ADB reverse command", "adb reverse tcp:$port tcp:$port")
+        addCopyRow(content, "ADB reverse command", "adb reverse tcp:$usbLocalPort tcp:$port")
         addCopyRow(content, "Laptop monitor URL", url)
-        addCopyRow(content, "Disconnect command", "adb reverse --remove tcp:$port")
+        addCopyRow(content, "Disconnect command", "adb reverse --remove tcp:$usbLocalPort")
         MaterialAlertDialogBuilder(this)
             .setTitle("USB monitoring on Mac")
             .setView(content)
@@ -2546,9 +2547,10 @@ class MainActivity : Activity(), CameraController.Callbacks {
             }.also { content.addView(it) }
         }
         addCopyRow(content, "ADB devices command", "adb devices")
-        addCopyRow(content, "ADB reverse command", "adb reverse tcp:${m.port} tcp:${m.port}")
-        addCopyRow(content, "USB monitor URL", "http://localhost:${m.port}/?pin=${m.pin}")
-        addCopyRow(content, "Disconnect command", "adb reverse --remove tcp:${m.port}")
+        val usbLocalPort = 18080
+        addCopyRow(content, "ADB reverse command", "adb reverse tcp:$usbLocalPort tcp:${m.port}")
+        addCopyRow(content, "USB monitor URL", "http://localhost:$usbLocalPort/?pin=${m.pin}")
+        addCopyRow(content, "Disconnect command", "adb reverse --remove tcp:$usbLocalPort")
         MaterialAlertDialogBuilder(this)
             .setTitle("Laptop camera monitor")
             .setView(content)
