@@ -1,0 +1,10 @@
+# Android / Gradle
+.gradle/
+**/build/
+local.properties
+
+# Signing material — never commit private keys or passwords
+*.jks
+*.keystore
+*.p12
+*.pem
