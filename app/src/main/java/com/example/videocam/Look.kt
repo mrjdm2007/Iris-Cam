@@ -55,12 +55,42 @@ object Look {
     }
 
     /** Returns [src] untouched when no look is wanted, otherwise a new bitmap with the look applied. */
-    fun apply(src: Bitmap, bw: Boolean, flat: Boolean): Bitmap {
+    fun apply(src: Bitmap, bw: Boolean, flat: Boolean, photoLook: Int = 0): Bitmap {
         if (bw) {
             val out = Bitmap.createBitmap(src.width, src.height, Bitmap.Config.ARGB_8888)
             val p = Paint(Paint.FILTER_BITMAP_FLAG)
             p.colorFilter = bwFilter()
             Canvas(out).drawBitmap(src, 0f, 0f, p)
+            return out
+        }
+        if (photoLook == 1) {
+            val out = Bitmap.createBitmap(src.width, src.height, Bitmap.Config.ARGB_8888)
+            val saturation = ColorMatrix().apply { setSaturation(1.08f) }
+            val warm = ColorMatrix(floatArrayOf(
+                1.02f, 0f, 0f, 0f, 12f,
+                0f, 1.01f, 0f, 0f, 4f,
+                0f, 0f, 0.94f, 0f, -10f,
+                0f, 0f, 0f, 1f, 0f
+            ))
+            saturation.postConcat(warm)
+            Canvas(out).drawBitmap(src, 0f, 0f, Paint(Paint.FILTER_BITMAP_FLAG).apply {
+                colorFilter = ColorMatrixColorFilter(saturation)
+            })
+            return out
+        }
+        if (photoLook == 2) {
+            // Memory-conscious dreamy bloom: create a small low-frequency image and blend it
+            // softly over the original. This is a photo look, not a depth-aware portrait blur.
+            val w = src.width
+            val h = src.height
+            val smallW = (w / 8).coerceAtLeast(1)
+            val smallH = (h / 8).coerceAtLeast(1)
+            val low = Bitmap.createScaledBitmap(src, smallW, smallH, true)
+            val out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(out)
+            canvas.drawBitmap(src, 0f, 0f, Paint(Paint.FILTER_BITMAP_FLAG))
+            canvas.drawBitmap(low, null, android.graphics.Rect(0, 0, w, h), Paint(Paint.FILTER_BITMAP_FLAG).apply { alpha = 34 })
+            low.recycle()
             return out
         }
         if (!flat) return src
