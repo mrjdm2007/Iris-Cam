@@ -93,7 +93,8 @@ class CameraController(
         val photoLook: Int,
         val hdr: Boolean,
         val upscale: Boolean,
-        val glow: Boolean
+        val glow: Boolean,
+        val blue: Boolean
     ) {
         var image: Image? = null // RAW only
         var result: TotalCaptureResult? = null
@@ -1285,7 +1286,7 @@ class CameraController(
         // JPEG_R must be saved byte-for-byte to preserve its gain map. If a pixel filter
         // is selected, use ordinary JPEG so the requested look is actually rendered.
         cfg.photoFormat == 3 && ultraHdrAvailable &&
-            !cfg.glow && !cfg.bw && !cfg.flat && !cfg.upscale &&
+            !cfg.glow && !cfg.bw && !cfg.blue && !cfg.flat && !cfg.upscale &&
             store.trim(cfg.cameraId).isNeutral() -> ImageFormat.JPEG_R
         else -> ImageFormat.JPEG
     }
@@ -1648,7 +1649,7 @@ class CameraController(
             }
             val sh = Shot(
                 cfg.cameraId, fmt, chars, needRotation(), cfg.photoQuality, reqs.size,
-                cfg.bw, cfg.flat && !cfg.bw, cfg.photoLook, hplan != null, cfg.upscale && currentLensNeedsUpscale(), cfg.glow
+                cfg.bw, cfg.flat && !cfg.bw, cfg.photoLook, hplan != null, cfg.upscale && currentLensNeedsUpscale(), cfg.glow, cfg.blue
             )
             synchronized(lock) { shot = sh }
             if (plan != null && plan.expNs * reqs.size >= 1_500_000_000L) {
@@ -1737,7 +1738,7 @@ class CameraController(
     /** Applies look, lens colour trim and optional upscaling to an upright bitmap, recycling what it replaces. */
     private fun finishLook(bmp: Bitmap, sh: Shot, trim: Trim): Bitmap {
         var out = bmp
-        val styled = Look.apply(out, sh.bw, sh.flat, sh.photoLook)
+        val styled = Look.apply(out, sh.bw, sh.flat, sh.photoLook, sh.blue)
         if (styled !== out) {
             out.recycle()
             out = styled
@@ -1794,7 +1795,7 @@ class CameraController(
                 out.recycle()
             } else {
                 val bytes = sh.jpegs[0]
-                saved = if (sh.bw || sh.flat || sh.upscale || sh.glow || !trim.isNeutral()) {
+                saved = if (sh.bw || sh.blue || sh.flat || sh.upscale || sh.glow || !trim.isNeutral()) {
                     val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
                     val out = finishLook(rotateBy(bmp, sh.rotDeg), sh, trim)
                     val u = saveBitmap(out, "$base.jpg", sh.quality)
