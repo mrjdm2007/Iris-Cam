@@ -1790,8 +1790,12 @@ class CameraController(
                     sh.photoLook == 0 && !sh.portrait && !sh.upscale && trim.isNeutral()
                 val gainmapAdded = canWriteGainmap &&
                     HdrFusion.attachGainmap(out, sh.jpegs.last(), sh.rotDeg)
-                saved = if (gainmapAdded) saveHdrBitmap(out, "$base.jpg", sh.quality)
-                    else saveBitmap(out, "$base.jpg", sh.quality)
+                if (gainmapAdded) {
+                    handler.post {
+                        ui.onMessage("Fusion gain map was generated for the in-app bitmap, but Android's Bitmap encoder saves this fused result as SDR JPEG. Use native Ultra HDR capture to save a JPEG_R file.")
+                    }
+                }
+                saved = saveBitmap(out, "$base.jpg", sh.quality)
                 out.recycle()
             } else if (sh.jpegs.size > 1) {
                 // astro: several long frames added together (linear light) to make up the full exposure
@@ -1868,25 +1872,6 @@ class CameraController(
         ctx.contentResolver.openOutputStream(uri)!!.use { bmp.compress(Bitmap.CompressFormat.JPEG, q, it) }
         finishImageUri(uri)
         return uri
-    }
-
-    /** Writes an Android 14 Ultra HDR JPEG_R after a gain map has been attached to the bitmap. */
-    @android.annotation.TargetApi(34)
-    private fun saveHdrBitmap(bmp: Bitmap, name: String, q: Int): Uri {
-        val uri = newImageUri(name, "image/jpeg")
-        try {
-            ctx.contentResolver.openOutputStream(uri)!!.use {
-                if (!bmp.compress(Bitmap.CompressFormat.JPEG_R, q, it)) {
-                    throw IllegalStateException("JPEG_R encoder rejected the HDR bitmap")
-                }
-            }
-            finishImageUri(uri)
-            return uri
-        } catch (_: Throwable) {
-            ctx.contentResolver.delete(uri, null, null)
-            // Keep the fused photo even if a particular Android 14 encoder rejects JPEG_R.
-            return saveBitmap(bmp, name, q)
-        }
     }
 
     /** Sensor details per lens, shown in Phone capabilities while in photo mode. */
