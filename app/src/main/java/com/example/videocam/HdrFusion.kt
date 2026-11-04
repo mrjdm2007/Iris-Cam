@@ -264,7 +264,6 @@ object HdrFusion {
             bright.recycle()
             brightSmall?.recycle()
             sdrSmall?.recycle()
-            gainBitmap?.recycle()
         }
     }
 
