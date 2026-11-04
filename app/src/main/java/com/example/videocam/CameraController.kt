@@ -117,27 +117,10 @@ class CameraController(
     private val cbThread = HandlerThread("cam-results").apply { start() }
     private val cbHandler = Handler(cbThread.looper)
 
-    private fun isMotoEdge50NeoProfile(): Boolean {
-        val maker = Build.MANUFACTURER.lowercase(Locale.US)
-        val model = Build.MODEL.lowercase(Locale.US)
-        // Restrict the device-specific ID map to the Edge 50 Neo family. IDs are selected
-        // from CameraManager's advertised list, but are not filtered by generic capability flags.
-        return maker.contains("motorola") && (model.contains("edge 50 neo") || model.contains("xt2409"))
-    }
-
-    private val motoProfileIds = listOf("5", "2", "0", "3", "1")
-
     val cameraIds: List<String> = try {
-        val advertised = manager.cameraIdList.toSet()
-        if (isMotoEdge50NeoProfile()) {
-            // These are the user's confirmed Edge 50 Neo IDs from the working VideoCam build.
-            // Do not run generic usable()/capability filtering on OEM auxiliary IDs: Motorola
-            // omits standard capability flags for some of these cameras.
-            motoProfileIds.filter { it in advertised }
-        } else {
-            advertised.filter { usable(it) }
-                .sortedWith(compareBy({ lensRank(it) }, { it }))
-        }
+        (manager.cameraIdList.toList() + listOf("0", "1", "2", "3", "5")).distinct()
+            .filter { usable(it) }
+            .sortedWith(compareBy({ lensRank(it) }, { it }))
     } catch (e: Exception) {
         emptyList()
     }
@@ -271,27 +254,20 @@ class CameraController(
         val c = manager.getCameraCharacteristics(id)
         val caps = c.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES) ?: intArrayOf()
         val m = c.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
-        val videoSizes = m?.getOutputSizes(MediaRecorder::class.java)
-        val previewSizes = m?.getOutputSizes(SurfaceTexture::class.java)
-        val hasPreviewOutput = !videoSizes.isNullOrEmpty() || !previewSizes.isNullOrEmpty()
-        val backwardCompatible = caps.contains(CameraMetadata.REQUEST_AVAILABLE_CAPABILITIES_BACKWARD_COMPATIBLE)
-        // Some OEM auxiliary IDs omit the backward-compatible flag despite advertising
-        // preview/record output surfaces. Accept these only on the narrowly matched profile.
-        (backwardCompatible || (isMotoEdge50NeoProfile() && id in motoProfileIds)) && hasPreviewOutput
+        val sz = m?.getOutputSizes(MediaRecorder::class.java) ?: m?.getOutputSizes(SurfaceTexture::class.java)
+        caps.contains(CameraMetadata.REQUEST_AVAILABLE_CAPABILITIES_BACKWARD_COMPATIBLE) &&
+            sz != null && sz.isNotEmpty()
     } catch (e: Exception) {
         false
     }
 
-    private fun lensRank(id: String): Int = runCatching {
-        val c = manager.getCameraCharacteristics(id)
-        val caps = c.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES) ?: intArrayOf()
-        if (caps.contains(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_LOGICAL_MULTI_CAMERA)) return@runCatching 0
-        if (c.get(CameraCharacteristics.LENS_FACING) == CameraMetadata.LENS_FACING_FRONT) return@runCatching 10_000
-        val f = c.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.firstOrNull() ?: return@runCatching 500
-        val size = c.get(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE) ?: return@runCatching 500
-        val eq = f * 43.27f / hypot(size.width, size.height)
-        1 + (abs(eq - 24f) * 10f).roundToInt() // main-camera-equivalent focal length first
-    }.getOrDefault(9_999)
+    private fun lensRank(id: String): Int = when (id) {
+        "0" -> 0
+        "2" -> 1
+        "3" -> 2
+        "5" -> 3
+        else -> if (isFront(id)) 9 else 4
+    }
 
     private fun isFront(id: String): Boolean =
         manager.getCameraCharacteristics(id).get(CameraCharacteristics.LENS_FACING) ==
@@ -327,59 +303,22 @@ class CameraController(
         }
     }.getOrDefault(false)
 
-    /** Resolve a shortcut only to a real, advertised physical lens with a close focal-length match. */
-    fun cameraIdForShortcut(ratio: Float): String? {
-        if (isMotoEdge50NeoProfile()) {
-            val exact = when {
-                ratio < 0.75f -> "2" // supplied ultrawide ID (0.7x)
-                ratio < 1.8f -> "0" // supplied main ID (1x)
-                else -> "3"          // supplied telephoto ID (2.7x)
-            }
-            if (exact in cameraIds && !isFront(exact)) return exact
-        }
-
-        fun isLogical(id: String): Boolean = runCatching {
-            val caps = manager.getCameraCharacteristics(id)
-                .get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES) ?: intArrayOf()
-            caps.contains(CameraMetadata.REQUEST_AVAILABLE_CAPABILITIES_LOGICAL_MULTI_CAMERA)
-        }.getOrDefault(false)
-
-        fun equivalent(id: String): Float? = runCatching {
-            val c = manager.getCameraCharacteristics(id)
-            val f = c.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.firstOrNull()
-                ?: return@runCatching null
-            val size = c.get(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE)
-                ?: return@runCatching null
-            f * 43.27f / hypot(size.width, size.height)
-        }.getOrNull()
-
-        val physicalBack = cameraIds.filter { !isFront(it) && !isLogical(it) }
-        if (physicalBack.isEmpty()) return null
-        val measured = physicalBack.mapNotNull { id -> equivalent(id)?.let { id to it } }
-        val baseline = measured.minByOrNull { abs(it.second - 24f) }?.second ?: return null
-        val target = baseline * ratio
-        val match = measured.minByOrNull { abs(it.second - target) } ?: return null
-
-        // Avoid pretending a single main camera is an ultrawide/telephoto lens.
-        // A 30% tolerance accommodates sensor/crop differences across manufacturers.
-        val relativeError = abs(match.second - target) / target.coerceAtLeast(1f)
-        return match.first.takeIf { relativeError <= 0.30f }
-    }
-
     fun cameraLabel(id: String): String {
+        when (id) {
+            "0" -> return "Main 1x (ID 0)"
+            "2" -> return "Wide 0.7x (ID 2)"
+            "3" -> return "Tele 2.7x (ID 3)"
+            "5" -> return "All lenses, auto switch (ID 5)"
+        }
         val c = manager.getCameraCharacteristics(id)
         val side = if (isFront(id)) "Front" else "Back"
-        val caps = c.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES) ?: intArrayOf()
-        if (caps.contains(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_LOGICAL_MULTI_CAMERA)) {
-            return "$side · multi-camera auto switch (ID $id)"
-        }
         val f = c.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.firstOrNull()
         val sz = c.get(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE)
         if (f != null && sz != null) {
             val eq = (f * 43.27f / hypot(sz.width, sz.height)).roundToInt()
-            return "$side · ${eq}mm equivalent (ID $id)"
+            return "$side ${eq}mm (ID $id)"
         }
-        return "$side camera (ID $id)"
+        return "$side (ID $id)"
     }
 
     fun mics(): List<AudioDeviceInfo> =
@@ -611,114 +550,37 @@ class CameraController(
         }
     }
 
-    @SuppressLint("MissingPermission")
     private fun openCamera() {
         if (cameraIds.isEmpty()) {
             ui.onMessage("No usable camera found")
             return
         }
-        val candidates = (listOf(cfg.cameraId) + cameraIds)
-            .filter { it in cameraIds }
-            .distinct()
-        openCameraCandidate(candidates, 0)
-    }
-
-    /**
-     * Try the selected camera first, then other CameraManager-advertised cameras if an OEM
-     * auxiliary ID is present but cannot actually be opened. This keeps device-specific IDs
-     * from making the whole app unusable on a different firmware/build.
-     */
-    private fun tryNextCamera(candidates: List<String>, index: Int) {
-        if (isMotoEdge50NeoProfile()) {
-            ui.onMessage("Edge 50 Neo camera ID ${candidates.getOrNull(index - 1) ?: "unknown"} could not be opened. Keeping the selected lens; no substitution was made.")
-        } else {
-            openCameraCandidate(candidates, index)
-        }
-    }
-
-    @SuppressLint("MissingPermission")
-    private fun openCameraCandidate(candidates: List<String>, index: Int) {
-        if (!started) return
-        if (index >= candidates.size) {
-            ui.onMessage("Couldn't open any detected camera. Check camera permission and close other camera apps.")
-            return
-        }
-
-        val id = candidates[index]
-        val settled = java.util.concurrent.atomic.AtomicBoolean(false)
+        if (cfg.cameraId !in cameraIds) cfg.cameraId = cameraIds.firstOrNull { it == "0" } ?: cameraIds.first()
         try {
-            loadChars(id)
-            manager.openCamera(id, object : CameraDevice.StateCallback() {
+            loadChars(cfg.cameraId)
+            manager.openCamera(cfg.cameraId, object : CameraDevice.StateCallback() {
                 override fun onOpened(cd: CameraDevice) {
-                    if (!settled.compareAndSet(false, true) || !started) {
+                    if (!started) {
                         cd.close()
                         return
                     }
                     device = cd
-                    if (cfg.cameraId != id) {
-                        cfg.cameraId = id
-                        store.save("last", cfg)
-                        ui.onMessage("Selected lens unavailable; using ${cameraLabel(id)} instead")
-                    }
                     configureAndStart()
                 }
 
                 override fun onDisconnected(cd: CameraDevice) {
-                    val wasActive = device === cd
                     cd.close()
-                    if (wasActive) {
-                        device = null
-                        if (recording) {
-                            stopRecording()
-                            ui.onMessage("Recording stopped because the camera disconnected")
-                        } else {
-                            closeSession()
-                            releaseRecorder()
-                            if (busy) {
-                                endLong()
-                                finishBusy()
-                            }
-                        }
-                        if (started) {
-                            ui.onMessage("Trying another detected lens")
-                            handler.postDelayed({ tryNextCamera(candidates, index + 1) }, 250)
-                        }
-                    } else if (settled.compareAndSet(false, true) && started) {
-                        openCameraCandidate(candidates, index + 1)
-                    }
+                    if (device === cd) device = null
                 }
 
                 override fun onError(cd: CameraDevice, error: Int) {
-                    val wasActive = device === cd
                     cd.close()
-                    if (wasActive) {
-                        device = null
-                        if (recording) {
-                            stopRecording()
-                            ui.onMessage("Recording stopped after camera error $error")
-                        } else {
-                            closeSession()
-                            releaseRecorder()
-                            if (busy) {
-                                endLong()
-                                finishBusy()
-                            }
-                        }
-                        if (started) {
-                            ui.onMessage("Trying another detected lens")
-                            handler.postDelayed({ openCameraCandidate(candidates, index + 1) }, 250)
-                        }
-                    } else if (settled.compareAndSet(false, true) && started) {
-                        openCameraCandidate(candidates, index + 1)
-                    } else if (!settled.get()) {
-                        ui.onMessage("Camera error $error")
-                    }
+                    if (device === cd) device = null
+                    ui.onMessage("Camera error $error")
                 }
             }, handler)
-        } catch (_: Exception) {
-            if (settled.compareAndSet(false, true)) {
-                handler.post { openCameraCandidate(candidates, index + 1) }
-            }
+        } catch (e: Exception) {
+            ui.onMessage("Couldn't open camera: ${e.message}")
         }
     }
 
