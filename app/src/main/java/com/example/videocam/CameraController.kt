@@ -1265,7 +1265,7 @@ class CameraController(
         // JPEG_R must be saved byte-for-byte to preserve its gain map. If a pixel filter
         // is selected, use ordinary JPEG so the requested look is actually rendered.
         cfg.photoFormat == 3 && ultraHdrAvailable &&
-            cfg.filterId == 0 && !cfg.flat && !cfg.upscale &&
+            cfg.filterId == 0 && !cfg.flat && !cfg.upscale && !cfg.portrait &&
             store.trim(cfg.cameraId).isNeutral() -> ImageFormat.JPEG_R
         else -> ImageFormat.JPEG
     }
@@ -1592,7 +1592,7 @@ class CameraController(
         try {
             val fmt = captureFormat()
             if (cfg.photoFormat == 3 && ultraHdrAvailable && fmt != ImageFormat.JPEG_R) {
-                handler.post { ui.onMessage("Photo filters are active; using standard JPEG so the selected look is applied. Turn filters off for native Ultra HDR.") }
+                handler.post { ui.onMessage("Photo processing is active; using standard JPEG so portrait blur and looks can be rendered. Turn them off for native Ultra HDR.") }
             }
             val plan = scenePlan()
             if (cfg.scene in 1..2 && plan == null) {
