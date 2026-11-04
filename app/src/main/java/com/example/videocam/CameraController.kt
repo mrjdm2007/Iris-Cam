@@ -1792,7 +1792,7 @@ class CameraController(
                     HdrFusion.attachGainmap(out, sh.jpegs.last(), sh.rotDeg)
                 if (gainmapAdded) {
                     handler.post {
-                        ui.onMessage("Fusion gain map was generated for the in-app bitmap, but Android's Bitmap encoder saves this fused result as SDR JPEG. Use native Ultra HDR capture to save a JPEG_R file.")
+                        ui.onMessage("The fusion gain map was calculated, but Android's public Bitmap encoder cannot package it as JPEG_R; this fused file is saved as SDR JPEG. Native camera Ultra HDR capture still saves JPEG_R when supported.")
                     }
                 }
                 saved = saveBitmap(out, "$base.jpg", sh.quality)
