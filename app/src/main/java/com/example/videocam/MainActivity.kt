@@ -124,6 +124,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
 
     private lateinit var formatChip: TextView
     private lateinit var imageChip: TextView
+    private lateinit var filtersChip: TextView
     private lateinit var gridChip: TextView
     private lateinit var toolsChip: TextView
     private lateinit var afChip: TextView
@@ -151,7 +152,6 @@ class MainActivity : Activity(), CameraController.Callbacks {
     private var longLeft = -1
     @Volatile
     private var lastMeterAt = 0L
-    private var bwOn = false
     private var thermalListener: PowerManager.OnThermalStatusChangedListener? = null
     private val steadyExec = Executors.newSingleThreadExecutor()
     private lateinit var chipRow: HorizontalScrollView
@@ -566,6 +566,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
         meter = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply { max = 100 }
         formatChip = chip("") { popup(formatChip, if (cfg.mode == 1) photoItems() else videoItems()) }
         imageChip = chip("IMAGE \u25BE") { popup(imageChip, imageItems()) }
+        filtersChip = chip("FILTERS ▾") { popup(filtersChip, filterItems()) }
         gridChip = chip("GRID \u25BE") { popup(gridChip, gridItems()) }
         toolsChip = chip("TOOLS \u25BE") { popup(toolsChip, toolsItems()) }
         statusText = TextView(this).apply {
@@ -582,7 +583,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
         }
         top.addView(timecode, LinearLayout.LayoutParams(dp(112), WRAP))
         top.addView(meter, LinearLayout.LayoutParams(dp(70), dp(8)).apply { setMargins(0, 0, dp(8), 0) })
-        chipRow = row(formatChip, imageChip, gridChip, toolsChip)
+        chipRow = row(formatChip, imageChip, filtersChip, gridChip, toolsChip)
         top.addView(chipRow, LinearLayout.LayoutParams(0, WRAP, 1f))
         top.addView(statusText, LinearLayout.LayoutParams(WRAP, WRAP).apply { setMargins(dp(8), 0, 0, 0) })
         topBar = top
@@ -1104,6 +1105,52 @@ class MainActivity : Activity(), CameraController.Callbacks {
     private fun imageItems(): List<Pair<String, () -> Unit>> =
         if (cfg.mode == 1) photoImageItems() else videoImageItems()
 
+    /** Dedicated Filters category. Saved stills get the full effect; video mode is preview-only. */
+    private fun filterItems(): List<Pair<String, () -> Unit>> {
+        val presets = listOf(
+            "Natural" to 0,
+            "Film Stocks · Kodak 2383" to 2,
+            "Film Stocks · Kodak 250D" to 3,
+            "Film Stocks · Kodak 500T" to 4,
+            "Film Stocks · Fuji Eterna" to 5,
+            "Cinema · Teal & Orange" to 6,
+            "Cinema · Bleach Bypass" to 7,
+            "Cinema · Noir" to 9,
+            "Vintage · Vintage Fade" to 8,
+            "Leica · Leica Colour (inspired)" to 10,
+            "Colour · Blue Cinematic" to 11,
+            "Colour · Golden Hour" to 12,
+            "Dream · Dream Glow" to 13,
+            "Effects · Black and White" to 1,
+            "Effects · Halation" to 14,
+            "Effects · Soft Diffusion" to 15,
+            "Effects · Film Grain" to 16
+        )
+        val items = presets.map { (label, id) ->
+            val title = (if (cfg.filterId == id) "✓ " else "") + label
+            title to {
+                if (idle()) {
+                    cfg.filterId = id
+                    cfg.bw = id == 1
+                    cfg.blue = false
+                    cfg.glow = false
+                    cfg.photoLook = 0
+                    cfg.flat = false
+                    cfgDirty = true
+                    applyLive()
+                    toast(if (cfg.mode == 0 && id != 0) "Preview only in video mode; recorded video is unchanged" else "${Look.FILTER_NAMES[id]} selected")
+                }
+            }
+        }
+        return items + ("Intensity: ${cfg.filterIntensity}%" to {
+            choose("Filter intensity", (0..100 step 10).map { "$it%" }) {
+                cfg.filterIntensity = it * 10
+                cfgDirty = true
+                applyLive()
+            }
+        })
+    }
+
     private fun photoImageItems(): List<Pair<String, () -> Unit>> = listOf(
         "Colour trim for this lens\u2026" to { showTrimDialog() },
         "Match lens colour\u2026" to { matchLensColour() },
@@ -1119,18 +1166,6 @@ class MainActivity : Activity(), CameraController.Callbacks {
         },
         "Flat profile: ${if (cfg.flat) "On" else "Off"}" to {
             cfg.flat = !cfg.flat
-            applyLive()
-        },
-        "Black and White: ${if (cfg.bw) "On" else "Off"}" to {
-            cfg.bw = !cfg.bw
-            applyLive()
-        },
-        "Blue cinematic filter: ${if (cfg.blue) "On" else "Off"}" to {
-            cfg.blue = !cfg.blue
-            applyLive()
-        },
-        "Glow filter: ${if (cfg.glow) "On" else "Off"}" to {
-            cfg.glow = !cfg.glow
             applyLive()
         },
         "Aux-lens upscale to 12.6 MP: ${if (cfg.upscale) "On" else "Off"}" to {
@@ -1149,7 +1184,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
         val sz = runCatching { cam.captureSize() }.getOrNull()
         val mp = if (sz != null) "%.1fMP".format(sz.width * sz.height / 1e6) else "--"
         val m = when {
-            cfg.photoFormat == 3 && cam.ultraHdrAvailable && !cfg.glow && !cfg.bw && !cfg.blue && !cfg.flat && !cfg.upscale -> "ULTRA HDR"
+            cfg.photoFormat == 3 && cam.ultraHdrAvailable && cfg.filterId == 0 && !cfg.flat && !cfg.upscale -> "ULTRA HDR"
             cfg.scene == 1 -> "NIGHT"
             cfg.scene == 2 -> "ASTRO"
             cfg.scene == 3 -> "HDR"
@@ -1168,7 +1203,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
         val sz = runCatching { cam.captureSize() }.getOrNull()
         val mp = if (sz != null) "%.1f MP".format(sz.width * sz.height / 1e6) else "?"
         val mode = when {
-            cfg.photoFormat == 3 && cam.ultraHdrAvailable && !cfg.glow && !cfg.bw && !cfg.blue && !cfg.flat && !cfg.upscale -> "Ultra HDR (native JPEG_R)"
+            cfg.photoFormat == 3 && cam.ultraHdrAvailable && cfg.filterId == 0 && !cfg.flat && !cfg.upscale -> "Ultra HDR (native JPEG_R)"
             cam.effMode() == 1 -> "RAW develop"
             else -> "Phone JPEG"
         }
@@ -1176,12 +1211,6 @@ class MainActivity : Activity(), CameraController.Callbacks {
         return listOf(
             "Photo size: $mp" to { pickPhotoRes() },
             "Capture mode: $mode" to { pickCaptureMode() },
-            "Photo look: ${listOf("Natural", "Golden Hour", "Dream Glow")[cfg.photoLook.coerceIn(0, 2)]}" to {
-                choose("Photo look (Black and White remains unchanged)", listOf("Natural", "Golden Hour", "Dream Glow")) {
-                    cfg.photoLook = it
-                    applyLive()
-                }
-            },
             "JPEG quality: ${cfg.photoQuality}" to { pickQuality() },
             "Scene: ${arrayOf("Normal", "Night (1 s, ISO 1000)", "Astro (5 min, ISO 100)", "HDR (${cfg.hdrFrames} frames)")[cfg.scene.coerceIn(0, 3)]}" to { pickScene() },
             "HDR merge: ${cfg.hdrFrames} frames" to { pickHdrFrames() },
@@ -1273,6 +1302,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
         formatChip.text = if (photo) photoFormatText() else videoFormatText()
         setActive(formatChip, false)
         setActive(imageChip, false)
+        setActive(filtersChip, cfg.filterId != 0)
         setActive(gridChip, cfg.grid != 0)
         setActive(toolsChip, false)
         modeChip.text = if (photo) "PHOTO \u21C4 VIDEO" else "VIDEO \u21C4 PHOTO"
@@ -2369,15 +2399,13 @@ class MainActivity : Activity(), CameraController.Callbacks {
 
     // ---------- black & white preview ----------
 
-    private val bwPaint by lazy {
-        Paint().apply { colorFilter = Look.bwFilter() }
-    }
-
     private fun applyBwLook() {
-        val want = cfg.mode == 1 && cfg.bw
-        if (want == bwOn) return
-        bwOn = want
-        tv.setLayerPaint(if (want) bwPaint else null)
+        // Display-only TextureView grade. The recorded video stream remains untouched.
+        tv.setLayerPaint(
+            if (cfg.filterId > 0) Paint().apply {
+                colorFilter = Look.previewFilter(cfg.filterId, cfg.filterIntensity)
+            } else null
+        )
     }
 
     private fun toggleSteady() {
