@@ -141,6 +141,10 @@ class MainActivity : Activity(), CameraController.Callbacks {
     private lateinit var lensRow: LinearLayout
     private val lensKeyChips = ArrayList<Pair<TextView, Float>>()
     private var monitor: MonitorServer? = null
+    private var monitorEncoder: MonitorH264Encoder? = null
+    private var monitorEncoderWidth = 0
+    private var monitorEncoderHeight = 0
+    private var monitorH264Failed = false
     // Preserve the camera flat-profile setting while laptop monitoring is active.
     private var monitorSavedFlat: Boolean? = null
     private var tap: AudioTap? = null
@@ -2513,6 +2517,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
             return
         }
         monitor = m
+        monitorH264Failed = false
         // Laptop monitoring is deliberately ungraded. Request the camera's flat tone curve while
         // the monitor is active; the laptop applies the user's .cube LUT independently.
         if (cfg.mode == 0) {
@@ -2532,6 +2537,11 @@ class MainActivity : Activity(), CameraController.Callbacks {
         ui.removeCallbacks(monitorTick)
         monitor?.stop()
         monitor = null
+        monitorEncoder?.close()
+        monitorEncoder = null
+        monitorEncoderWidth = 0
+        monitorEncoderHeight = 0
+        monitorH264Failed = false
         monitorSavedFlat?.let { previous ->
             if (cfg.flat != previous) {
                 cfg.flat = previous
@@ -2588,12 +2598,34 @@ class MainActivity : Activity(), CameraController.Callbacks {
                     val mt = Matrix().apply { postRotate(deg.toFloat()) }
                     Bitmap.createBitmap(b, 0, 0, b.width, b.height, mt, false).also { rotated = it }
                 }
-                val bos = ByteArrayOutputStream(100_000)
-                // MJPEG remains compatible with every browser. 1080p is used only when the
-                // selected preview itself is at least 1080p; otherwise output remains 720p.
-                // H.264/MSE remains a separate encoder/decoder migration.
-                out.compress(Bitmap.CompressFormat.JPEG, if (targetLong == 1920) 56 else 60, bos)
-                m.pushFrame(bos.toByteArray())
+                // H.264 is the primary monitor transport. MJPEG remains available as a
+                // compatibility fallback for browsers without WebCodecs.
+                if (m.h264ClientCount > 0 && !monitorH264Failed) {
+                    try {
+                        if (monitorEncoder == null || monitorEncoderWidth != out.width || monitorEncoderHeight != out.height) {
+                            monitorEncoder?.close()
+                            monitorEncoder = MonitorH264Encoder(out.width, out.height) { packet -> m.pushH264(packet) }
+                            monitorEncoderWidth = out.width
+                            monitorEncoderHeight = out.height
+                        }
+                        monitorEncoder?.encode(out)
+                    } catch (e: Throwable) {
+                        monitorEncoder?.close()
+                        monitorEncoder = null
+                        monitorH264Failed = true
+                        m.pushH264(byteArrayOf(3))
+                    }
+                } else if (m.h264ClientCount == 0 && monitorEncoder != null) {
+                    monitorEncoder?.close()
+                    monitorEncoder = null
+                    monitorEncoderWidth = 0
+                    monitorEncoderHeight = 0
+                }
+                if (m.mjpegClients > 0 || (m.h264ClientCount > 0 && monitorH264Failed)) {
+                    val bos = ByteArrayOutputStream(100_000)
+                    out.compress(Bitmap.CompressFormat.JPEG, if (targetLong == 1920) 56 else 60, bos)
+                    m.pushFrame(bos.toByteArray())
+                }
             } catch (_: Throwable) {
             } finally {
                 rotated?.recycle()
