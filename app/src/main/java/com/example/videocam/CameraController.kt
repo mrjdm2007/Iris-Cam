@@ -939,7 +939,8 @@ class CameraController(
         }
         reader = null
         synchronized(lock) {
-            shot?.image?.close()
+            shot?.rawImages?.values?.forEach { runCatching { it.close() } }
+            shot?.rawImages?.clear()
             shot = null
         }
     }
@@ -1572,7 +1573,8 @@ class CameraController(
         } catch (_: Exception) {
         }
         synchronized(lock) {
-            shot?.image?.close()
+            shot?.rawImages?.values?.forEach { runCatching { it.close() } }
+            shot?.rawImages?.clear()
             shot = null
         }
         endLong()
@@ -1671,7 +1673,7 @@ class CameraController(
         try {
             // HDR scene always uses standard JPEG brackets and the app's own
             // HdrFusion merger. Do not invoke Camera2 JPEG_R / native Ultra HDR here.
-            val fmt = if (cfg.scene == 3) ImageFormat.JPEG else captureFormat()
+            val fmt = captureFormat()
             if (cfg.scene != 3 && cfg.photoFormat == 3 && ultraHdrAvailable && fmt != ImageFormat.JPEG_R) {
                 handler.post { ui.onMessage("Photo processing is active; using standard JPEG so selected looks can be rendered. Turn them off for native Ultra HDR.") }
             }
@@ -1683,7 +1685,7 @@ class CameraController(
             }
             val hplan = if (cfg.scene == 3) hdrPlan() else null
             if (cfg.scene == 3 && hplan == null) {
-                handler.post { ui.onMessage("Not enough exposure range for HDR here, taking a normal photo") }
+                handler.post { ui.onMessage("HDR bracket unavailable on this lens; taking a single RAW/JPEG frame instead") }
             }
             val reqs = ArrayList<CaptureRequest>()
             val count = hplan?.exp?.size ?: plan?.frames ?: 1
@@ -1729,14 +1731,19 @@ class CameraController(
     private val captureCb = object : CameraCaptureSession.CaptureCallback() {
         override fun onCaptureCompleted(s: CameraCaptureSession, r: CaptureRequest, res: TotalCaptureResult) {
             synchronized(lock) {
-                shot?.result = res
+                shot?.let { sh ->
+                    if (sh.format == ImageFormat.RAW_SENSOR) {
+                        res.get(CaptureResult.SENSOR_TIMESTAMP)?.let { sh.rawResults[it] = res }
+                    }
+                }
                 maybeProcess()
             }
         }
 
         override fun onCaptureFailed(s: CameraCaptureSession, r: CaptureRequest, f: CaptureFailure) {
             synchronized(lock) {
-                shot?.image?.close()
+                shot?.rawImages?.values?.forEach { runCatching { it.close() } }
+                shot?.rawImages?.clear()
                 shot = null
             }
             handler.post {
@@ -1758,7 +1765,7 @@ class CameraController(
             if (sh == null) {
                 img.close()
             } else if (sh.format == ImageFormat.RAW_SENSOR) {
-                if (sh.image != null) img.close() else sh.image = img
+                sh.rawImages[img.timestamp] = img
                 maybeProcess()
             } else {
                 // copy the JPEG out straight away so the reader is free for the next shot
@@ -1780,7 +1787,14 @@ class CameraController(
         val sh = shot ?: return
         if (sh.started) return
         if (sh.format == ImageFormat.RAW_SENSOR) {
-            if (sh.image == null || sh.result == null) return
+            val pairs = sh.rawResults.entries.mapNotNull { (timestamp, result) ->
+                sh.rawImages[timestamp]?.let { RawFrame(it, result) }
+            }
+            if (pairs.size < sh.expected) return
+            sh.rawFrames = pairs.take(sh.expected)
+            val used = sh.rawFrames.map { it.image }.toSet()
+            sh.rawImages.values.filter { it !in used }.forEach { runCatching { it.close() } }
+            sh.rawImages.clear()
         } else if (sh.jpegs.size < sh.expected) {
             return
         }
@@ -1847,12 +1861,35 @@ class CameraController(
                 // Preserve the camera-generated Ultra HDR gain map byte-for-byte. Re-encoding
                 // through Bitmap/JPEG would destroy the HDR metadata and reduce highlight range.
                 saved = saveBytes(sh.jpegs.first(), "$base.jpg")
+            } else if (sh.format == ImageFormat.RAW_SENSOR && sh.hdr && sh.rawFrames.size >= 2) {
+                // Develop every RAW bracket with its own sensor metadata, then merge the
+                // resulting full-resolution frames. This avoids the old JPEG-only capture.
+                val brackets = ArrayList<ByteArray>(sh.rawFrames.size)
+                sh.rawFrames.forEach { frame ->
+                    val developed = try {
+                        RawDeveloper.develop(frame.image, sh.chars, frame.result, Trim())
+                    } finally {
+                        runCatching { frame.image.close() }
+                    }
+                    val bos = ByteArrayOutputStream()
+                    if (!developed.compress(Bitmap.CompressFormat.JPEG, 98, bos)) {
+                        developed.recycle()
+                        throw IllegalStateException("Couldn't encode a developed RAW bracket")
+                    }
+                    developed.recycle()
+                    brackets.add(bos.toByteArray())
+                }
+                val merged = HdrFusion.merge(brackets) ?: throw IllegalStateException("Couldn't merge the RAW exposure brackets")
+                val out = finishLook(rotateBy(merged, sh.rotDeg), sh, trim)
+                saved = saveBitmap(out, "$base.jpg", sh.quality)
+                out.recycle()
             } else if (sh.format == ImageFormat.RAW_SENSOR) {
-                val img = sh.image!!
-                val res = sh.result!!
-                val dev = RawDeveloper.develop(img, sh.chars, res, trim)
-                img.close()
-                sh.image = null
+                val frame = sh.rawFrames.firstOrNull() ?: throw IllegalStateException("RAW capture metadata was incomplete")
+                val dev = try {
+                    RawDeveloper.develop(frame.image, sh.chars, frame.result, trim)
+                } finally {
+                    runCatching { frame.image.close() }
+                }
                 val out = finishLook(rotateBy(dev, sh.rotDeg), sh, Trim())
                 saved = saveBitmap(out, "$base.jpg", sh.quality)
                 out.recycle()
@@ -1882,10 +1919,8 @@ class CameraController(
                 }
             }
         } catch (t: Throwable) {
-            try {
-                sh.image?.close()
-            } catch (_: Exception) {
-            }
+            sh.rawFrames.forEach { runCatching { it.image.close() } }
+            sh.rawImages.values.forEach { runCatching { it.close() } }
             val msg = t.message ?: t.javaClass.simpleName
             handler.post { ui.onMessage("Photo failed: $msg") }
         } finally {
