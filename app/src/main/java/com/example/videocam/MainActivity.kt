@@ -2435,13 +2435,32 @@ class MainActivity : Activity(), CameraController.Callbacks {
 
     // ---------- black & white preview ----------
 
+    private var appliedPreviewFilterId = Int.MIN_VALUE
+    private var appliedPreviewFilterIntensity = Int.MIN_VALUE
+    private var previewFilterWarningShown = false
+
     private fun applyBwLook() {
-        // Display-only TextureView grade. The recorded video stream remains untouched.
-        tv.setLayerPaint(
-            if (cfg.filterId > 0) Paint().apply {
+        // Avoid rebuilding ColorMatrix/Paint on every UI refresh; only update when the
+        // selected look changes. A preview-layer failure must never take down the camera.
+        if (!::tv.isInitialized) return
+        if (appliedPreviewFilterId == cfg.filterId &&
+            appliedPreviewFilterIntensity == cfg.filterIntensity) return
+        try {
+            val paint = if (cfg.filterId > 0) Paint().apply {
                 colorFilter = Look.previewFilter(cfg.filterId, cfg.filterIntensity)
             } else null
-        )
+            tv.setLayerPaint(paint)
+            appliedPreviewFilterId = cfg.filterId
+            appliedPreviewFilterIntensity = cfg.filterIntensity
+        } catch (e: RuntimeException) {
+            runCatching { tv.setLayerPaint(null) }
+            appliedPreviewFilterId = cfg.filterId
+            appliedPreviewFilterIntensity = cfg.filterIntensity
+            if (!previewFilterWarningShown) {
+                previewFilterWarningShown = true
+                toast("Preview filter unavailable on this device; camera preview is continuing")
+            }
+        }
     }
 
     private fun toggleSteady() {
