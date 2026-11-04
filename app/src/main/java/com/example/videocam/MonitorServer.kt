@@ -5,6 +5,7 @@ import java.io.InputStream
 import java.io.OutputStream
 import java.net.ServerSocket
 import java.net.Socket
+import java.nio.ByteBuffer
 import java.net.URLDecoder
 import java.security.MessageDigest
 import java.util.concurrent.CopyOnWriteArrayList
@@ -37,9 +38,14 @@ class MonitorServer(private val host: Host, val pin: String) {
     private var running = false
 
     private val videoCount = java.util.concurrent.atomic.AtomicInteger(0)
+    private val h264Count = java.util.concurrent.atomic.AtomicInteger(0)
     private val audioClients = CopyOnWriteArrayList<WsClient>()
+    private val h264Clients = CopyOnWriteArrayList<WsClient>()
+    @Volatile private var latestH264Config: ByteArray? = null
 
-    val videoClients: Int get() = videoCount.get()
+    val mjpegClients: Int get() = videoCount.get()
+    val h264ClientCount: Int get() = h264Count.get()
+    val videoClients: Int get() = videoCount.get() + h264Count.get()
     val audioClientCount: Int get() = audioClients.size
     var port = 8080
         private set
@@ -85,6 +91,9 @@ class MonitorServer(private val host: Host, val pin: String) {
         synchronized(frameLock) { frameLock.notifyAll() }
         audioClients.forEach { it.close() }
         audioClients.clear()
+        h264Clients.forEach { it.close() }
+        h264Clients.clear()
+        latestH264Config = null
         pool.shutdownNow()
     }
 
@@ -94,6 +103,12 @@ class MonitorServer(private val host: Host, val pin: String) {
             frameId++
             frameLock.notifyAll()
         }
+    }
+
+    fun pushH264(packet: ByteArray) {
+        if (packet.isEmpty()) return
+        if (packet[0].toInt() == 1) latestH264Config = packet
+        for (c in h264Clients) c.send(packet)
     }
 
     fun pushAudio(buf: ByteArray, n: Int) {
@@ -215,7 +230,7 @@ class MonitorServer(private val host: Host, val pin: String) {
         } catch (_: Exception) {
         } finally {
             videoCount.decrementAndGet()
-            host.clientsChanged(videoCount.get(), audioClients.size)
+            host.clientsChanged(videoClients, audioClients.size)
         }
     }
 
@@ -236,8 +251,12 @@ class MonitorServer(private val host: Host, val pin: String) {
             try {
                 while (alive) {
                     val d = q.poll(1, java.util.concurrent.TimeUnit.SECONDS) ?: continue
-                    val head = if (d.size < 126) byteArrayOf(0x82.toByte(), d.size.toByte())
-                    else byteArrayOf(0x82.toByte(), 126, (d.size shr 8).toByte(), (d.size and 0xFF).toByte())
+                    val head = when {
+                        d.size < 126 -> byteArrayOf(0x82.toByte(), d.size.toByte())
+                        d.size <= 65535 -> byteArrayOf(0x82.toByte(), 126, (d.size shr 8).toByte(), (d.size and 0xFF).toByte())
+                        else -> ByteBuffer.allocate(10).order(java.nio.ByteOrder.BIG_ENDIAN)
+                            .put(0x82.toByte()).put(127).putLong(d.size.toLong()).array()
+                    }
                     out.write(head)
                     out.write(d)
                     out.flush()
@@ -266,13 +285,27 @@ class MonitorServer(private val host: Host, val pin: String) {
         )
         out.flush()
         val c = WsClient(sock, out)
-        audioClients.add(c)
-        host.clientsChanged(videoCount.get(), audioClients.size)
-        try {
-            c.pump()
-        } finally {
-            audioClients.remove(c)
-            host.clientsChanged(videoCount.get(), audioClients.size)
+        if (req.query["type"] == "h264") {
+            h264Clients.add(c)
+            h264Count.incrementAndGet()
+            latestH264Config?.let { c.send(it) }
+            host.clientsChanged(videoClients, audioClients.size)
+            try {
+                c.pump()
+            } finally {
+                h264Clients.remove(c)
+                h264Count.decrementAndGet()
+                host.clientsChanged(videoClients, audioClients.size)
+            }
+        } else {
+            audioClients.add(c)
+            host.clientsChanged(videoClients, audioClients.size)
+            try {
+                c.pump()
+            } finally {
+                audioClients.remove(c)
+                host.clientsChanged(videoClients, audioClients.size)
+            }
         }
     }
 }

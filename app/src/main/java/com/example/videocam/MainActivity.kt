@@ -49,6 +49,7 @@ import android.view.ViewOutlineProvider
 import android.view.ViewTreeObserver
 import android.view.WindowManager
 import android.view.animation.LinearInterpolator
+import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
 import android.widget.ImageView
@@ -56,6 +57,7 @@ import android.widget.LinearLayout
 import android.widget.PopupMenu
 import android.widget.ProgressBar
 import android.widget.SeekBar
+import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import java.io.ByteArrayOutputStream
@@ -141,6 +143,10 @@ class MainActivity : Activity(), CameraController.Callbacks {
     private lateinit var lensRow: LinearLayout
     private val lensKeyChips = ArrayList<Pair<TextView, Float>>()
     private var monitor: MonitorServer? = null
+    private var monitorEncoder: MonitorH264Encoder? = null
+    private var monitorEncoderWidth = 0
+    private var monitorEncoderHeight = 0
+    private var monitorH264Failed = false
     // Preserve the camera flat-profile setting while laptop monitoring is active.
     private var monitorSavedFlat: Boolean? = null
     private var tap: AudioTap? = null
@@ -267,6 +273,12 @@ class MainActivity : Activity(), CameraController.Callbacks {
             cfg.saveDng = false
             cfg.scene = 0
             cfg.ver = 2
+            store.save("last", cfg)
+        }
+        if (cfg.ver < 3) {
+            // New default: standard JPEG. Ultra HDR and RAW remain available as explicit modes.
+            cfg.photoFormat = 0
+            cfg.ver = 3
             store.save("last", cfg)
         }
         slider.onChange = { f ->
@@ -1105,7 +1117,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
     private fun imageItems(): List<Pair<String, () -> Unit>> =
         if (cfg.mode == 1) photoImageItems() else videoImageItems()
 
-    /** Dedicated Filters category. Saved stills get the full effect; video mode is preview-only. */
+    /** Shared filter presets; photo effects are rendered on capture and video effects in the recorder GPU path. */
     private fun filterItems(): List<Pair<String, () -> Unit>> {
         val presets = listOf(
             "Natural" to 0,
@@ -1125,7 +1137,9 @@ class MainActivity : Activity(), CameraController.Callbacks {
             "Effects · Halation" to 14,
             "Effects · Soft Diffusion" to 15,
             "Effects · Film Grain" to 16,
-            "Effects · Anamorphic Flare" to 17
+            "Effects · Anamorphic Flare" to 17,
+            "Colour · Vivid" to 18,
+            "Retro · VHS" to 19
         )
         val items = presets.map { (label, id) ->
             val title = (if (cfg.filterId == id) "✓ " else "") + label
@@ -1138,8 +1152,8 @@ class MainActivity : Activity(), CameraController.Callbacks {
                     cfg.photoLook = 0
                     cfg.flat = false
                     cfgDirty = true
-                    applyLive()
-                    toast(if (cfg.mode == 0 && id != 0) "Preview only in video mode; recorded video is unchanged" else "${Look.FILTER_NAMES[id]} selected")
+                    applyFilterChange()
+                    toast(if (cfg.mode == 0 && id != 0) "${Look.FILTER_NAMES[id]} will be baked into recorded video" else "${Look.FILTER_NAMES[id]} selected")
                 }
             }
         }
@@ -1147,7 +1161,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
             choose("Filter intensity", (0..100 step 10).map { "$it%" }) {
                 cfg.filterIntensity = it * 10
                 cfgDirty = true
-                applyLive()
+                applyFilterChange()
             }
         })
     }
@@ -1480,6 +1494,15 @@ class MainActivity : Activity(), CameraController.Callbacks {
             return false
         }
         return true
+    }
+
+    private fun applyFilterChange() {
+        store.save("last", cfg)
+        // CropRenderer is attached to the recording session when it is created.
+        // Rebuild that session after a filter/intensity change so the recorder
+        // receives the graded GPU surface instead of its unprocessed surface.
+        if (cfg.mode == 0) cam.reconfigure() else cam.updateRepeating()
+        refreshUi()
     }
 
     private fun applyLive() {
@@ -2106,76 +2129,8 @@ class MainActivity : Activity(), CameraController.Callbacks {
         }.start()
     }
 
-    /** In-app still viewer. ImageDecoder preserves JPEG_R gain maps on Android 14+;
-     * ImageView/HWUI can then render the HDR rendition on a compatible HDR display. */
-    private fun showPhotoViewer(uri: Uri) {
-        val dialog = Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen)
-        val frame = FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
-        val image = ImageView(this).apply {
-            scaleType = ImageView.ScaleType.FIT_CENTER
-            adjustViewBounds = true
-        }
-        val loading = ProgressBar(this)
-        val title = TextView(this).apply {
-            text = "PHOTO"
-            textSize = 12f
-            setTextColor(Color.WHITE)
-            setPadding(dp(14), dp(10), dp(14), dp(10))
-            setBackground(roundBg(0x99000000.toInt(), 18))
-        }
-        val close = TextView(this).apply {
-            text = "✕"
-            textSize = 20f
-            gravity = Gravity.CENTER
-            setTextColor(Color.WHITE)
-            setBackground(roundBg(0x99000000.toInt(), 24))
-            setOnClickListener { dialog.dismiss() }
-        }
-        frame.addView(image, FrameLayout.LayoutParams(MATCH, MATCH))
-        frame.addView(loading, lp(dp(44), dp(44), Gravity.CENTER))
-        frame.addView(title, lp(WRAP, WRAP, Gravity.TOP or Gravity.START, dp(16), dp(18)))
-        frame.addView(close, lp(dp(44), dp(44), Gravity.TOP or Gravity.END, 0, dp(16), dp(16)))
-        dialog.setContentView(frame)
-        dialog.window?.setLayout(MATCH, MATCH)
-        dialog.show()
-        dialog.window?.setLayout(MATCH, MATCH)
-
-        Thread {
-            try {
-                val bitmap = if (Build.VERSION.SDK_INT >= 28) {
-                    ImageDecoder.decodeBitmap(ImageDecoder.createSource(contentResolver, uri)) { decoder, _, _ ->
-                        decoder.allocator = ImageDecoder.ALLOCATOR_HARDWARE
-                        decoder.isMutableRequired = false
-                    }
-                } else {
-                    @Suppress("DEPRECATION")
-                    MediaStore.Images.Media.getBitmap(contentResolver, uri)
-                }
-                val hasGainmap = Build.VERSION.SDK_INT >= 34 && bitmap.gainmap != null
-                runOnUiThread {
-                    if (!dialog.isShowing) return@runOnUiThread
-                    image.setImageBitmap(bitmap)
-                    title.text = if (hasGainmap) "ULTRA HDR · GAIN MAP" else "PHOTO"
-                    loading.visibility = View.GONE
-                }
-            } catch (e: Exception) {
-                runOnUiThread {
-                    if (dialog.isShowing) {
-                        loading.visibility = View.GONE
-                        title.text = "COULDN'T LOAD PHOTO"
-                        toast("Couldn't open photo: ${e.message ?: "unknown error"}")
-                    }
-                }
-            }
-        }.start()
-    }
-
     private fun openClip(uri: Uri) {
         val mime = contentResolver.getType(uri) ?: if (cfg.mode == 1) "image/jpeg" else "video/mp4"
-        if (mime.startsWith("image/")) {
-            showPhotoViewer(uri)
-            return
-        }
         val base = Intent(Intent.ACTION_VIEW).setDataAndType(uri, mime).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         try {
             // straight into Google Photos, so Android has nothing to ask about
@@ -2401,7 +2356,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
     // ---------- black & white preview ----------
 
     private fun applyBwLook() {
-        // Display-only TextureView grade. The recorded video stream remains untouched.
+        // TextureView preview grade; the GPU recorder renderer applies the matching grade to saved video.
         tv.setLayerPaint(
             if (cfg.filterId > 0) Paint().apply {
                 colorFilter = Look.previewFilter(cfg.filterId, cfg.filterIntensity)
@@ -2487,56 +2442,111 @@ class MainActivity : Activity(), CameraController.Callbacks {
         toast("Copied $label")
     }
 
+    /**
+     * Show connection details as selectable text with an explicit copy button beside
+     * every URL/terminal command. This is more reliable on touchscreens than relying
+     * on tapping a list row or trying to select text inside an AlertDialog message.
+     */
+    private fun showCopyDialog(
+        title: String,
+        intro: String,
+        entries: List<Pair<String, String>>,
+        turnOff: (() -> Unit)? = null
+    ) {
+        val body = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(20, 8, 20, 4)
+        }
+        val introView = TextView(this).apply {
+            text = intro
+            textSize = 14f
+            setTextColor(Color.WHITE)
+            setPadding(0, 0, 0, 12)
+        }
+        body.addView(introView)
+        entries.forEach { (label, value) ->
+            val group = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(0, 8, 0, 10)
+            }
+            val heading = TextView(this).apply {
+                text = label
+                textSize = 13f
+                setTypeface(Typeface.DEFAULT, Typeface.BOLD)
+                setTextColor(AMBER)
+            }
+            val code = TextView(this).apply {
+                text = value
+                textSize = 13f
+                typeface = Typeface.MONOSPACE
+                setTextIsSelectable(true)
+                setTextColor(Color.WHITE)
+                setPadding(0, 6, 0, 6)
+            }
+            val copy = Button(this).apply {
+                text = "COPY"
+                isAllCaps = true
+                setOnClickListener { copyToClipboard(label, value) }
+            }
+            group.addView(heading)
+            group.addView(code)
+            group.addView(copy)
+            body.addView(group)
+            val divider = View(this).apply {
+                setBackgroundColor(0x44FFFFFF)
+                layoutParams = LinearLayout.LayoutParams(MATCH, 1)
+            }
+            body.addView(divider)
+        }
+        val scroll = ScrollView(this).apply {
+            isFillViewport = true
+            addView(body, ViewGroup.LayoutParams(MATCH, WRAP))
+        }
+        MaterialAlertDialogBuilder(this)
+            .setTitle(title)
+            .setView(scroll)
+            .setNegativeButton(if (turnOff != null) "Turn off monitor" else "Close") { _, _ -> turnOff?.invoke() }
+            .show()
+    }
+
     private fun showUsbCommands() {
         val m = monitor
         val port = m?.port ?: 8080
         val url = if (m != null) "http://localhost:$port/?pin=${m.pin}" else "http://localhost:$port"
-        val options = arrayOf(
-            "Copy adb devices",
-            "Copy ADB reverse command",
-            "Copy laptop monitor URL",
-            "Copy disconnect command"
+        val entries = listOf(
+            "List connected Android devices" to "adb devices",
+            "Enable USB port forwarding" to "adb reverse tcp:$port tcp:$port",
+            "Open monitor on your Mac" to url,
+            "Remove USB port forwarding" to "adb reverse --remove tcp:$port"
         )
-        MaterialAlertDialogBuilder(this)
-            .setTitle("USB monitoring on Mac")
-            .setMessage("Enable Developer options and USB debugging on your phone, connect a data-capable USB cable to your Mac, then authorize the Mac. Start Laptop Monitor first to get the live PIN and full URL.")
-            .setItems(options) { _, which ->
-                when (which) {
-                    0 -> copyToClipboard("adb devices", "adb devices")
-                    1 -> copyToClipboard("ADB reverse command", "adb reverse tcp:$port tcp:$port")
-                    2 -> copyToClipboard("monitor URL", url)
-                    3 -> copyToClipboard("disconnect command", "adb reverse --remove tcp:$port")
-                }
-            }
-            .setNegativeButton(if (m != null) "Turn off monitor" else "Close") { _, _ -> if (m != null) stopMonitor() }
-            .show()
+        showCopyDialog(
+            "USB monitoring on Mac",
+            "Enable Developer options and USB debugging on your phone, connect a data-capable USB cable to your Mac, then authorize the Mac. Start Laptop Monitor first to get the live PIN and full URL. Tap COPY beside any command, or long-press the selectable text.",
+            entries,
+            if (m != null) ({ stopMonitor() }) else null
+        )
     }
 
     private fun showMonitorInfo() {
         val m = monitor ?: return
         val ip = localIp()
-        val wifi = if (ip == null) "Wi-Fi: unavailable (connect both devices to the same network)" else
-            "WI-FI\nOpen on your laptop: http://$ip:${m.port}/?pin=${m.pin}"
-        val usb = "USB-C (ADB)\n1. Enable Developer options and USB debugging.\n2. Connect phone to Mac with a data cable and authorize.\n3. Run: adb reverse tcp:${m.port} tcp:${m.port}\n4. Open: http://localhost:${m.port}/?pin=${m.pin}"
-        val options = arrayOf(
-            "Copy adb devices",
-            "Copy ADB reverse command",
-            "Copy complete laptop URL (with PIN)",
-            "Copy disconnect command"
-        )
-        MaterialAlertDialogBuilder(this)
-            .setTitle("Laptop camera monitor · PIN ${m.pin}")
-            .setMessage("$wifi\n\n$usb\n\nSelect a row below to copy it. The feed is served locally; no cloud upload is used by this monitor server.")
-            .setItems(options) { _, which ->
-                when (which) {
-                    0 -> copyToClipboard("adb devices", "adb devices")
-                    1 -> copyToClipboard("ADB reverse command", "adb reverse tcp:${m.port} tcp:${m.port}")
-                    2 -> copyToClipboard("monitor URL", "http://localhost:${m.port}/?pin=${m.pin}")
-                    3 -> copyToClipboard("disconnect command", "adb reverse --remove tcp:${m.port}")
-                }
-            }
-            .setNegativeButton("Turn off") { _, _ -> stopMonitor() }
-            .show()
+        val wifiUrl = if (ip == null) null else "http://$ip:${m.port}/?pin=${m.pin}"
+        val localUrl = "http://localhost:${m.port}/?pin=${m.pin}"
+        val intro = buildString {
+            append("PIN: ${m.pin}\n\n")
+            if (wifiUrl != null) append("Wi-Fi: connect your Mac and phone to the same network and open the Wi-Fi URL below.\n\n")
+            else append("Wi-Fi address unavailable. Connect both devices to the same network and try again.\n\n")
+            append("USB-C: enable USB debugging, connect the phone to your Mac, authorize it, then run the ADB reverse command below. Open the localhost URL afterwards.\n\n")
+            append("The monitor feed is served locally; this server does not upload it to the cloud.")
+        }
+        val entries = buildList {
+            if (wifiUrl != null) add("Wi-Fi monitor URL" to wifiUrl)
+            add("List connected Android devices" to "adb devices")
+            add("Enable USB port forwarding" to "adb reverse tcp:${m.port} tcp:${m.port}")
+            add("USB monitor URL (localhost)" to localUrl)
+            add("Remove USB port forwarding" to "adb reverse --remove tcp:${m.port}")
+        }
+        showCopyDialog("Laptop camera monitor", intro, entries) { stopMonitor() }
     }
 
     private fun shutterHaptic(view: View) {
@@ -2564,6 +2574,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
             return
         }
         monitor = m
+        monitorH264Failed = false
         // Laptop monitoring is deliberately ungraded. Request the camera's flat tone curve while
         // the monitor is active; the laptop applies the user's .cube LUT independently.
         if (cfg.mode == 0) {
@@ -2583,6 +2594,11 @@ class MainActivity : Activity(), CameraController.Callbacks {
         ui.removeCallbacks(monitorTick)
         monitor?.stop()
         monitor = null
+        monitorEncoder?.close()
+        monitorEncoder = null
+        monitorEncoderWidth = 0
+        monitorEncoderHeight = 0
+        monitorH264Failed = false
         monitorSavedFlat?.let { previous ->
             if (cfg.flat != previous) {
                 cfg.flat = previous
@@ -2639,12 +2655,34 @@ class MainActivity : Activity(), CameraController.Callbacks {
                     val mt = Matrix().apply { postRotate(deg.toFloat()) }
                     Bitmap.createBitmap(b, 0, 0, b.width, b.height, mt, false).also { rotated = it }
                 }
-                val bos = ByteArrayOutputStream(100_000)
-                // MJPEG remains compatible with every browser. 1080p is used only when the
-                // selected preview itself is at least 1080p; otherwise output remains 720p.
-                // H.264/MSE remains a separate encoder/decoder migration.
-                out.compress(Bitmap.CompressFormat.JPEG, if (targetLong == 1920) 56 else 60, bos)
-                m.pushFrame(bos.toByteArray())
+                // H.264 is the primary monitor transport. MJPEG remains available as a
+                // compatibility fallback for browsers without WebCodecs.
+                if (m.h264ClientCount > 0 && !monitorH264Failed) {
+                    try {
+                        if (monitorEncoder == null || monitorEncoderWidth != out.width || monitorEncoderHeight != out.height) {
+                            monitorEncoder?.close()
+                            monitorEncoder = MonitorH264Encoder(out.width, out.height) { packet -> m.pushH264(packet) }
+                            monitorEncoderWidth = out.width
+                            monitorEncoderHeight = out.height
+                        }
+                        monitorEncoder?.encode(out)
+                    } catch (e: Throwable) {
+                        monitorEncoder?.close()
+                        monitorEncoder = null
+                        monitorH264Failed = true
+                        m.pushH264(byteArrayOf(3))
+                    }
+                } else if (m.h264ClientCount == 0 && monitorEncoder != null) {
+                    monitorEncoder?.close()
+                    monitorEncoder = null
+                    monitorEncoderWidth = 0
+                    monitorEncoderHeight = 0
+                }
+                if (m.mjpegClients > 0 || (m.h264ClientCount > 0 && monitorH264Failed)) {
+                    val bos = ByteArrayOutputStream(100_000)
+                    out.compress(Bitmap.CompressFormat.JPEG, if (targetLong == 1920) 56 else 60, bos)
+                    m.pushFrame(bos.toByteArray())
+                }
             } catch (_: Throwable) {
             } finally {
                 rotated?.recycle()

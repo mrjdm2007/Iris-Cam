@@ -68,14 +68,14 @@ data class Config(
     var peak: Int = 0,               // focus peaking: 0 = off, 1 = low, 2 = medium, 3 = high
     var timer: Int = 0,              // self-timer seconds (0, 3, 5, 10)
     var mode: Int = 0,               // 0 = video, 1 = photo
-    var photoFormat: Int = 1,        // 0 = phone JPEG, 1 = RAW develop, 3 = native Ultra HDR JPEG_R
+    var photoFormat: Int = 0,        // 0 = phone JPEG (default), 1 = RAW develop, 3 = native Ultra HDR JPEG_R
     var saveDng: Boolean = false,
     var photoQuality: Int = 95,
     var photoW: Int = 0,             // 0 = largest available
     var photoH: Int = 0,
     var flashMode: Int = 0,          // 0 off, 1 on, 2 auto
     var photoNrOff: Boolean = false,
-    var portrait: Boolean = false,
+    var portrait: Boolean = false,       // portrait/landscape orientation preference
     var scene: Int = 0,              // photo scene: 0 normal, 1 night, 2 astro, 3 multi-frame HDR fusion
     var hdrFrames: Int = 3,          // multi-frame HDR fusion: 2 or 3 exposures
     var upscale: Boolean = false,    // upscale photos to 12.6 MP
@@ -208,7 +208,7 @@ data class Config(
                 o.optInt("photoLook", d.photoLook) == 2 -> 13
                 else -> 0
             }
-            val selectedFilter = o.optInt("filterId", legacyFilter).coerceIn(0, 17)
+            val selectedFilter = o.optInt("filterId", legacyFilter).coerceIn(0, 19)
             return Config(
                 cameraId = o.optString("cameraId", d.cameraId),
                 width = o.optInt("width", d.width),

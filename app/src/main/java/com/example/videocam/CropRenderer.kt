@@ -32,7 +32,9 @@ class CropRenderer(
     private val outH: Int,
     private val srcW: Int,
     private val srcH: Int,
-    private val rotation: Int
+    private val rotation: Int,
+    private val filterId: Int = 0,
+    private val filterIntensity: Int = 100
 ) {
     private val thread = HandlerThread("crop-gl").apply { start() }
     private val handler = Handler(thread.looper)
@@ -71,7 +73,10 @@ class CropRenderer(
                 latch.countDown()
             }
         }
-        latch.await()
+        if (!latch.await(5, TimeUnit.SECONDS)) {
+            release()
+            throw RuntimeException("Crop renderer setup timed out")
+        }
         val e = err
         if (e != null) {
             release()
@@ -113,8 +118,31 @@ class CropRenderer(
         val vs = "uniform mat4 uTex;attribute vec4 aPos;attribute vec2 aTc;varying vec2 vTc;" +
             "void main(){gl_Position=aPos;vTc=(uTex*vec4(aTc,0.0,1.0)).xy;}"
         val fs = "#extension GL_OES_EGL_image_external : require\n" +
-            "precision mediump float;varying vec2 vTc;uniform samplerExternalOES sTex;" +
-            "void main(){gl_FragColor=texture2D(sTex,vTc);}"
+            "precision mediump float;varying vec2 vTc;uniform samplerExternalOES sTex;uniform int uFilter;uniform float uIntensity;" +
+            "float luma(vec3 c){return dot(c,vec3(0.299,0.587,0.114));}" +
+            "vec3 bright(vec2 uv){return max(texture2D(sTex,uv).rgb-vec3(0.46),vec3(0.0));}" +
+            "vec3 bloom(vec2 uv){return (bright(uv+vec2(-0.006,-0.006))+bright(uv+vec2(0.0,-0.006))+bright(uv+vec2(0.006,-0.006))+" +
+            "bright(uv+vec2(-0.006,0.0))+bright(uv+vec2(0.006,0.0))+bright(uv+vec2(-0.006,0.006))+bright(uv+vec2(0.0,0.006))+bright(uv+vec2(0.006,0.006)))*0.125;}" +
+            "vec3 grade(vec3 c){vec3 x=c;float y=luma(c);" +
+            "if(uFilter==1){x=mix(c,vec3(y),uIntensity);x=(x-0.5)*mix(1.0,1.42,uIntensity)+0.5;}" +
+            "else if(uFilter==2){x=(c-0.5)*mix(1.0,1.12,uIntensity)+0.5+vec3(0.020,0.008,-0.020)*uIntensity;x=mix(vec3(y),x,mix(1.0,1.08,uIntensity));}" +
+            "else if(uFilter==3){x=mix(vec3(y),c,mix(1.0,1.04,uIntensity));x+=vec3(0.020,0.008,-0.012)*uIntensity;}" +
+            "else if(uFilter==4){x=mix(vec3(y),c,mix(1.0,1.02,uIntensity));x+=vec3(-0.012,0.0,0.024)*uIntensity;}" +
+            "else if(uFilter==5){x=mix(vec3(y),c,mix(1.0,0.84,uIntensity));x=(x-0.5)*mix(1.0,0.91,uIntensity)+0.5+vec3(0.004,0.016,0.020)*uIntensity;}" +
+            "else if(uFilter==6){x+=vec3(0.020,0.0,0.028)*uIntensity;x.r+=(-c.b)*0.04*uIntensity;x.b+=(-c.r)*0.03*uIntensity;}" +
+            "else if(uFilter==7){x=mix(vec3(y),c,mix(1.0,0.48,uIntensity));x=(x-0.5)*mix(1.0,1.34,uIntensity)+0.5;}" +
+            "else if(uFilter==8){x=mix(vec3(y),c,mix(1.0,0.78,uIntensity));x=(x-0.5)*mix(1.0,0.82,uIntensity)+0.5+vec3(0.059,0.035,0.004)*uIntensity;}" +
+            "else if(uFilter==9){x=mix(c,vec3(y),uIntensity);x=(x-0.5)*mix(1.0,1.62,uIntensity)+0.5;}" +
+            "else if(uFilter==10){x+=vec3(0.020,0.004,0.012)*uIntensity;x.r*=mix(1.0,1.13,uIntensity);x.b*=mix(1.0,1.10,uIntensity);}" +
+            "else if(uFilter==11){x+=vec3(-0.008,0.004,0.028)*uIntensity;x.b*=mix(1.0,1.12,uIntensity);}" +
+            "else if(uFilter==12){x+=vec3(0.047,0.016,-0.039)*uIntensity;x.r*=mix(1.0,1.08,uIntensity);}" +
+            "else if(uFilter==13){vec3 b=bloom(vTc);float g=smoothstep(0.015,0.20,luma(b));x+=b*g*1.65*uIntensity;x=mix(x,x+vec3(0.055,0.038,0.022)*g,0.55*uIntensity);x=(x-0.5)*mix(1.0,0.94,uIntensity)+0.5;}" +
+            "else if(uFilter==14){vec3 b=bloom(vTc);float g=smoothstep(0.012,0.18,luma(b));x+=b*g*vec3(2.15,0.72,0.24)*uIntensity;x+=vec3(0.12,0.025,0.0)*smoothstep(0.62,0.92,y)*uIntensity;}" +
+            "else if(uFilter==15){x=mix(c,vec3(y),0.02*uIntensity);x=(x-0.5)*mix(1.0,0.94,uIntensity)+0.5;}" +
+            "else if(uFilter==16){float n=fract(sin(dot(gl_FragCoord.xy,vec2(12.9898,78.233)))*43758.5453)-0.5;x+=n*0.035*uIntensity;}" +
+            "else if(uFilter==17){float flare=max(0.0,1.0-abs(vTc.y-0.5)*18.0);x+=vec3(flare*0.18*uIntensity);}else if(uFilter==18){x=mix(vec3(y),x,1.18);x=(x-0.5)*1.12+0.5;x+=vec3(0.008,0.006,0.012);}else if(uFilter==19){float row=mod(floor(gl_FragCoord.y),3.0);float scan=mix(0.72,0.96,step(0.5,row))*uIntensity+1.0-uIntensity;float noise=fract(sin(dot(gl_FragCoord.xy,vec2(12.9898,78.233)))*43758.5453)-0.5;float tear=step(0.975,fract(gl_FragCoord.y*0.071));vec2 uv=vTc+vec2(tear*0.018*uIntensity,0.0);x.r=texture2D(sTex,uv+vec2(0.004*uIntensity,0.0)).r;x.g=texture2D(sTex,uv).g;x.b=texture2D(sTex,uv-vec2(0.004*uIntensity,0.0)).b;x*=scan;x+=vec3(noise*0.13*uIntensity);x=mix(x,vec3(luma(x)),0.10*uIntensity);x+=vec3(tear*0.055*uIntensity,tear*0.018*uIntensity,0.0);}" +
+            "return clamp(x,0.0,1.0);}" +
+            "void main(){vec4 color=texture2D(sTex,vTc);color.rgb=grade(color.rgb);gl_FragColor=color;}"
         program = link(compile(GLES20.GL_VERTEX_SHADER, vs), compile(GLES20.GL_FRAGMENT_SHADER, fs))
         uTex = GLES20.glGetUniformLocation(program, "uTex")
         aPos = GLES20.glGetAttribLocation(program, "aPos")
@@ -183,6 +211,8 @@ class CropRenderer(
             GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
             GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, texId)
             GLES20.glUniformMatrix4fv(uTex, 1, false, tm, 0)
+            GLES20.glUniform1i(GLES20.glGetUniformLocation(program, "uFilter"), filterId.coerceIn(0, 19))
+            GLES20.glUniform1f(GLES20.glGetUniformLocation(program, "uIntensity"), filterIntensity.coerceIn(0, 100) / 100f)
             verts.position(0)
             GLES20.glEnableVertexAttribArray(aPos)
             GLES20.glVertexAttribPointer(aPos, 2, GLES20.GL_FLOAT, false, 16, verts)
@@ -205,8 +235,7 @@ class CropRenderer(
     fun release() {
         if (released) return
         released = true
-        val latch = CountDownLatch(1)
-        handler.post {
+        val cleanup = {
             try {
                 st?.setOnFrameAvailableListener(null)
                 input?.release()
@@ -220,9 +249,14 @@ class CropRenderer(
                 }
             } catch (_: Throwable) {
             }
-            latch.countDown()
         }
-        latch.await(1500, TimeUnit.MILLISECONDS)
+        if (android.os.Looper.myLooper() == thread.looper) {
+            cleanup()
+        } else {
+            val latch = CountDownLatch(1)
+            handler.post { cleanup(); latch.countDown() }
+            latch.await(2, TimeUnit.SECONDS)
+        }
         thread.quitSafely()
     }
 }

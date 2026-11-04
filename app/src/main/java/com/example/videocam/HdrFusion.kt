@@ -2,6 +2,9 @@ package com.example.videocam
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Gainmap
+import android.graphics.Matrix
+import android.os.Build
 import kotlin.math.abs
 import kotlin.math.exp
 import kotlin.math.max
@@ -202,6 +205,77 @@ object HdrFusion {
         }
         dark.recycle(); bright.recycle()
         return out
+    }
+
+    /**
+     * Builds an Ultra HDR gain map from the brighter bracket exposure and attaches it to
+     * the fused SDR base. The map stores highlight headroom (1x..4x) at reduced resolution.
+     * Returns false on pre-Android-14 devices or if a usable map cannot be produced.
+     */
+    fun attachGainmap(sdr: Bitmap, brightJpeg: ByteArray, rotationDegrees: Int): Boolean {
+        if (Build.VERSION.SDK_INT < 34) return false
+        var bright = BitmapFactory.decodeByteArray(brightJpeg, 0, brightJpeg.size) ?: return false
+        var brightSmall: Bitmap? = null
+        var sdrSmall: Bitmap? = null
+        var gainBitmap: Bitmap? = null
+        return try {
+            if (rotationDegrees != 0) {
+                val matrix = Matrix().apply { postRotate(rotationDegrees.toFloat()) }
+                val rotated = Bitmap.createBitmap(bright, 0, 0, bright.width, bright.height, matrix, false)
+                if (rotated !== bright) bright.recycle()
+                bright = rotated
+            }
+            val gw = min(512, max(64, sdr.width / 16))
+            val gh = min(512, max(64, sdr.height / 16))
+            sdrSmall = Bitmap.createScaledBitmap(sdr, gw, gh, true)
+            brightSmall = Bitmap.createScaledBitmap(bright, gw, gh, true)
+            val basePixels = IntArray(gw * gh)
+            val hdrPixels = IntArray(gw * gh)
+            sdrSmall.getPixels(basePixels, 0, gw, 0, 0, gw, gh)
+            brightSmall.getPixels(hdrPixels, 0, gw, 0, 0, gw, gh)
+            val baseLumaPixels = IntArray(gw * gh) { i ->
+                val p = basePixels[i]
+                (77 * ((p shr 16) and 255) + 150 * ((p shr 8) and 255) + 29 * (p and 255)) shr 8
+            }
+            val hdrLumaPixels = IntArray(gw * gh) { i ->
+                val p = hdrPixels[i]
+                (77 * ((p shr 16) and 255) + 150 * ((p shr 8) and 255) + 29 * (p and 255)) shr 8
+            }
+            val shift = align(grad(baseLumaPixels, gw, gh), grad(hdrLumaPixels, gw, gh), gw, gh)
+            val gainPixels = IntArray(gw * gh)
+            var useful = 0
+            for (i in gainPixels.indices) {
+                val x = i % gw
+                val y = i / gw
+                val a = basePixels[i]
+                val b = hdrPixels[(y + shift[1]).coerceIn(0, gh - 1) * gw + (x + shift[0]).coerceIn(0, gw - 1)]
+                val baseLuma = baseLumaPixels[i].toFloat()
+                val hdrLuma = hdrLumaPixels[(y + shift[1]).coerceIn(0, gh - 1) * gw + (x + shift[0]).coerceIn(0, gw - 1)].toFloat()
+                val ratio = (hdrLuma / max(2f, baseLuma)).coerceIn(1f, 4f)
+                val normalized = (kotlin.math.ln(ratio) / kotlin.math.ln(4f)).coerceIn(0f, 1f)
+                val v = (normalized * 255f + 0.5f).toInt()
+                if (v > 4) useful++
+                gainPixels[i] = (0xFF shl 24) or (v shl 16) or (v shl 8) or v
+            }
+            if (useful < gainPixels.size / 200) return false
+            gainBitmap = Bitmap.createBitmap(gw, gh, Bitmap.Config.ARGB_8888)
+            gainBitmap.setPixels(gainPixels, 0, gw, 0, 0, gw, gh)
+            val gainmap = Gainmap(gainBitmap)
+            gainmap.setRatioMin(1f, 1f, 1f)
+            gainmap.setRatioMax(4f, 4f, 4f)
+            gainmap.setGamma(1f, 1f, 1f)
+            gainmap.setEpsilonSdr(0.0001f, 0.0001f, 0.0001f)
+            gainmap.setEpsilonHdr(0.0001f, 0.0001f, 0.0001f)
+            gainmap.setDisplayRatioForFullHdr(4f)
+            sdr.setGainmap(gainmap)
+            true
+        } catch (_: Throwable) {
+            false
+        } finally {
+            bright.recycle()
+            brightSmall?.recycle()
+            sdrSmall?.recycle()
+        }
     }
 
     private fun grad(y: IntArray, w: Int, h: Int): IntArray {

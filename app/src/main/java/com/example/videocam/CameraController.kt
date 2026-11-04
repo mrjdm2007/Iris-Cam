@@ -48,6 +48,7 @@ import android.view.Surface
 import android.view.TextureView
 import android.view.animation.AccelerateDecelerateInterpolator
 import android.view.animation.LinearInterpolator
+import java.io.ByteArrayOutputStream
 import java.text.SimpleDateFormat
 import java.util.concurrent.Executors
 import java.util.Date
@@ -81,6 +82,8 @@ class CameraController(
 
     private class Output(val uri: Uri, val pfd: ParcelFileDescriptor)
 
+    private class RawFrame(val image: Image, val result: TotalCaptureResult)
+
     private class Shot(
         val lens: String,
         val format: Int,
@@ -96,10 +99,13 @@ class CameraController(
         val glow: Boolean,
         val blue: Boolean,
         val filterId: Int,
-        val filterIntensity: Int
+        val filterIntensity: Int,
     ) {
-        var image: Image? = null // RAW only
-        var result: TotalCaptureResult? = null
+        // RAW Image timestamps are paired with CaptureResult.SENSOR_TIMESTAMP so each
+        // frame is developed with its own exposure, white balance and lens-shading metadata.
+        val rawImages = LinkedHashMap<Long, Image>()
+        val rawResults = LinkedHashMap<Long, TotalCaptureResult>()
+        var rawFrames: List<RawFrame> = emptyList()
         val jpegs = ArrayList<ByteArray>()
         var started = false
     }
@@ -128,15 +134,16 @@ class CameraController(
     private val motoProfileIds = listOf("5", "2", "0", "3", "1")
 
     val cameraIds: List<String> = try {
-        val advertised = manager.cameraIdList.toList()
-        val detected = advertised.filter { usable(it) }
-        if (isMotoEdge50NeoProfile()) {
-            val profile = motoProfileIds.filter { it in advertised && usable(it) }
-            (profile + detected.filterNot { it in profile }).distinct()
-        } else {
-            detected.sortedWith(compareBy({ lensRank(it) }, { it }))
-        }
-    } catch (e: Exception) {
+        // Match the working VideoCam implementation: append the known Motorola
+        // auxiliary IDs before querying characteristics. On this device the OEM
+        // exposes some usable camera IDs through Camera2 characteristics even
+        // though they are omitted from cameraIdList.
+        val candidates = manager.cameraIdList.toList() +
+            if (isMotoEdge50NeoProfile()) motoProfileIds else emptyList()
+        candidates.distinct()
+            .filter { usable(it) }
+            .sortedWith(compareBy({ lensRank(it) }, { it }))
+    } catch (_: Exception) {
         emptyList()
     }
 
@@ -145,6 +152,8 @@ class CameraController(
 
     private var device: CameraDevice? = null
     private var session: CameraCaptureSession? = null
+    private var closingSession: CameraCaptureSession? = null
+    private var restartAfterSessionClose = false
     private var previewSurface: Surface? = null
     private var recSurface: Surface? = null
     private var recorder: MediaRecorder? = null
@@ -177,6 +186,8 @@ class CameraController(
     var liveExpNs = 0L
         private set
     var rawSize: Size? = null
+        private set
+    var rawSizes: List<Size> = emptyList()
         private set
     var jpegSizes: List<Size> = emptyList()
         private set
@@ -269,23 +280,31 @@ class CameraController(
         val previewSizes = m?.getOutputSizes(SurfaceTexture::class.java)
         val hasPreviewOutput = !videoSizes.isNullOrEmpty() || !previewSizes.isNullOrEmpty()
         val backwardCompatible = caps.contains(CameraMetadata.REQUEST_AVAILABLE_CAPABILITIES_BACKWARD_COMPATIBLE)
-        // Some OEM auxiliary IDs omit the backward-compatible flag despite advertising
-        // preview/record output surfaces. Accept these only on the narrowly matched profile.
-        (backwardCompatible || (isMotoEdge50NeoProfile() && id in motoProfileIds)) && hasPreviewOutput
+        backwardCompatible && hasPreviewOutput
     } catch (e: Exception) {
         false
     }
 
-    private fun lensRank(id: String): Int = runCatching {
-        val c = manager.getCameraCharacteristics(id)
-        val caps = c.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES) ?: intArrayOf()
-        if (caps.contains(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_LOGICAL_MULTI_CAMERA)) return@runCatching 0
-        if (c.get(CameraCharacteristics.LENS_FACING) == CameraMetadata.LENS_FACING_FRONT) return@runCatching 10_000
-        val f = c.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.firstOrNull() ?: return@runCatching 500
-        val size = c.get(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE) ?: return@runCatching 500
-        val eq = f * 43.27f / hypot(size.width, size.height)
-        1 + (abs(eq - 24f) * 10f).roundToInt() // main-camera-equivalent focal length first
-    }.getOrDefault(9_999)
+    private fun lensRank(id: String): Int {
+        if (isMotoEdge50NeoProfile()) return when (id) {
+            "0" -> 0
+            "2" -> 1
+            "3" -> 2
+            "5" -> 3
+            "1" -> 9
+            else -> 4
+        }
+        return runCatching {
+            val c = manager.getCameraCharacteristics(id)
+            val caps = c.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES) ?: intArrayOf()
+            if (caps.contains(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_LOGICAL_MULTI_CAMERA)) return@runCatching 0
+            if (c.get(CameraCharacteristics.LENS_FACING) == CameraMetadata.LENS_FACING_FRONT) return@runCatching 10_000
+            val f = c.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.firstOrNull() ?: return@runCatching 500
+            val size = c.get(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE) ?: return@runCatching 500
+            val eq = f * 43.27f / hypot(size.width, size.height)
+            1 + (abs(eq - 24f) * 10f).roundToInt()
+        }.getOrDefault(9_999)
+    }
 
     private fun isFront(id: String): Boolean =
         manager.getCameraCharacteristics(id).get(CameraCharacteristics.LENS_FACING) ==
@@ -329,7 +348,8 @@ class CameraController(
                 ratio < 1.8f -> "0" // supplied main ID (1x)
                 else -> "3"          // supplied telephoto ID (2.7x)
             }
-            if (exact in cameraIds && !isFront(exact)) return exact
+            // User supplied the exact Edge 50 Neo auxiliary IDs; select them directly.
+            if (exact in cameraIds) return exact
         }
 
         fun isLogical(id: String): Boolean = runCatching {
@@ -427,11 +447,12 @@ class CameraController(
 
         val caps = c.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES) ?: intArrayOf()
         jpegSizes = areaDesc(map?.getOutputSizes(ImageFormat.JPEG))
-        rawSize = if (caps.contains(CameraMetadata.REQUEST_AVAILABLE_CAPABILITIES_RAW)) {
-            areaDesc(map?.getOutputSizes(ImageFormat.RAW_SENSOR)).firstOrNull()
+        rawSizes = if (caps.contains(CameraMetadata.REQUEST_AVAILABLE_CAPABILITIES_RAW)) {
+            areaDesc(map?.getOutputSizes(ImageFormat.RAW_SENSOR))
         } else {
-            null
+            emptyList()
         }
+        rawSize = rawSizes.firstOrNull()
         jprSizes = if (Build.VERSION.SDK_INT >= 34) areaDesc(map?.getOutputSizes(ImageFormat.JPEG_R)) else emptyList()
         manualSensor = caps.contains(CameraMetadata.REQUEST_AVAILABLE_CAPABILITIES_MANUAL_SENSOR)
         var safe = Long.MAX_VALUE
@@ -596,7 +617,7 @@ class CameraController(
     @SuppressLint("MissingPermission")
     private fun openCamera() {
         if (cameraIds.isEmpty()) {
-            ui.onMessage("No usable camera found")
+            ui.onMessage(if (isMotoEdge50NeoProfile()) "None of the forced Edge 50 Neo camera IDs (5, 2, 0, 3, 1) are advertised by this firmware" else "No usable camera found")
             return
         }
         val candidates = (listOf(cfg.cameraId) + cameraIds)
@@ -606,10 +627,16 @@ class CameraController(
     }
 
     /**
-     * Try the selected camera first, then other CameraManager-advertised cameras if an OEM
-     * auxiliary ID is present but cannot actually be opened. This keeps device-specific IDs
-     * from making the whole app unusable on a different firmware/build.
+     * On the Edge 50 Neo, never silently substitute another lens when a forced ID
+     * fails. Other devices retain the generic fallback behaviour.
      */
+    private fun tryNextCamera(candidates: List<String>, index: Int) {
+        if (isMotoEdge50NeoProfile()) {
+            ui.onMessage("Forced camera ID ${candidates.getOrNull(index - 1) ?: "unknown"} could not be opened. No lens substitution was made.")
+        } else {
+            openCameraCandidate(candidates, index)
+        }
+    }
     @SuppressLint("MissingPermission")
     private fun openCameraCandidate(candidates: List<String>, index: Int) {
         if (!started) return
@@ -655,10 +682,10 @@ class CameraController(
                         }
                         if (started) {
                             ui.onMessage("Trying another detected lens")
-                            handler.postDelayed({ openCameraCandidate(candidates, index + 1) }, 250)
+                            handler.postDelayed({ tryNextCamera(candidates, index + 1) }, 250)
                         }
                     } else if (settled.compareAndSet(false, true) && started) {
-                        openCameraCandidate(candidates, index + 1)
+                        tryNextCamera(candidates, index + 1)
                     }
                 }
 
@@ -680,10 +707,10 @@ class CameraController(
                         }
                         if (started) {
                             ui.onMessage("Trying another detected lens")
-                            handler.postDelayed({ openCameraCandidate(candidates, index + 1) }, 250)
+                            handler.postDelayed({ tryNextCamera(candidates, index + 1) }, 250)
                         }
                     } else if (settled.compareAndSet(false, true) && started) {
-                        openCameraCandidate(candidates, index + 1)
+                        tryNextCamera(candidates, index + 1)
                     } else if (!settled.get()) {
                         ui.onMessage("Camera error $error")
                     }
@@ -691,7 +718,7 @@ class CameraController(
             }, handler)
         } catch (_: Exception) {
             if (settled.compareAndSet(false, true)) {
-                handler.post { openCameraCandidate(candidates, index + 1) }
+                handler.post { tryNextCamera(candidates, index + 1) }
             }
         }
     }
@@ -819,7 +846,8 @@ class CameraController(
             rec.setVideoEncodingBitRate(cfg.bitrateMbps * 1_000_000)
             rec.setVideoFrameRate(cfg.fps)
             val os = outSize()
-            val cropIt = effRatio() > 0
+            // Route selected video looks through the GPU renderer even for standard 16:9 clips.
+            val cropIt = effRatio() > 0 || cfg.filterId > 0
             rec.setVideoSize(os.width, os.height)
             rec.setVideoEncoder(
                 if (cfg.hevc) MediaRecorder.VideoEncoder.HEVC else MediaRecorder.VideoEncoder.H264
@@ -838,7 +866,10 @@ class CameraController(
             recorder = rec
             if (cropIt) {
                 val rot = tv.display?.rotation ?: Surface.ROTATION_90
-                crop = CropRenderer(rec.surface, os.width, os.height, cfg.width, cfg.height, rot)
+                crop = CropRenderer(
+                    rec.surface, os.width, os.height, cfg.width, cfg.height, rot,
+                    cfg.filterId, cfg.filterIntensity
+                )
             }
         } catch (e: Exception) {
             recorder = null
@@ -909,8 +940,18 @@ class CameraController(
         }
         reader = null
         synchronized(lock) {
-            shot?.image?.close()
+            shot?.rawImages?.values?.forEach { runCatching { it.close() } }
+            shot?.rawImages?.clear()
             shot = null
+        }
+    }
+
+    private fun onCameraSessionClosed(closed: CameraCaptureSession) {
+        if (closingSession !== closed) return
+        closingSession = null
+        if (restartAfterSessionClose) {
+            restartAfterSessionClose = false
+            handler.post { if (started && device != null) configureAndStart() }
         }
     }
 
@@ -919,6 +960,27 @@ class CameraController(
     private fun configureAndStart() {
         if (!started) return
         val cd = device ?: return
+
+        // Camera2 sessions close asynchronously. Do not release their reader/recorder
+        // surfaces or create the next mode's session until onClosed confirms teardown.
+        if (closingSession != null) {
+            restartAfterSessionClose = true
+            return
+        }
+        val oldSession = session
+        if (oldSession != null) {
+            session = null
+            closingSession = oldSession
+            restartAfterSessionClose = true
+            try { oldSession.stopRepeating() } catch (_: Exception) {}
+            try { oldSession.abortCaptures() } catch (_: Exception) {}
+            try { oldSession.close() } catch (_: Exception) {
+                closingSession = null
+                restartAfterSessionClose = false
+                handler.postDelayed({ if (started) configureAndStart() }, 180)
+            }
+            return
+        }
         closeSession()
         releaseRecorder()
         aeLock = false
@@ -987,7 +1049,12 @@ class CameraController(
             }
 
             override fun onConfigureFailed(s: CameraCaptureSession) {
-                ui.onMessage("Camera rejected this resolution / fps / lens combo")
+                ui.onMessage("Video session failed on camera $cfg.cameraId: resolution ${cfg.width}x${cfg.height}, ${cfg.fps} fps. Try a lower frame rate or resolution.")
+                s.close()
+            }
+
+            override fun onClosed(s: CameraCaptureSession) {
+                onCameraSessionClosed(s)
             }
         }
         try {
@@ -1260,6 +1327,10 @@ class CameraController(
     val ultraHdrAvailable: Boolean get() = Build.VERSION.SDK_INT >= 34 && jprSizes.isNotEmpty()
 
     private fun captureFormat(): Int = when {
+        // HDR prefers sensor RAW brackets whenever this lens exposes RAW_SENSOR.
+        // JPEG brackets remain the compatibility path on cameras without RAW.
+        cfg.scene == 3 && rawAvail -> ImageFormat.RAW_SENSOR
+        cfg.scene == 3 -> ImageFormat.JPEG
         effMode() == 1 -> ImageFormat.RAW_SENSOR
         // JPEG_R must be saved byte-for-byte to preserve its gain map. If a pixel filter
         // is selected, use ordinary JPEG so the requested look is actually rendered.
@@ -1271,6 +1342,7 @@ class CameraController(
 
     /** Sizes the user can pick for the current capture mode. */
     fun captureSizes(): List<Size> = when {
+        captureFormat() == ImageFormat.RAW_SENSOR && cfg.scene == 3 -> rawSizes
         effMode() == 1 -> listOfNotNull(rawSize)
         captureFormat() == ImageFormat.JPEG_R -> jprSizes
         else -> jpegSizes
@@ -1280,6 +1352,12 @@ class CameraController(
     fun captureSize(): Size {
         val l = captureSizes()
         if (l.isEmpty()) return Size(4000, 3000)
+        if (cfg.scene == 3 && captureFormat() == ImageFormat.RAW_SENSOR) {
+            // Keep a three-frame RAW bracket within a sensible memory budget. Prefer
+            // the largest available mode up to ~12.6 MP; never inherit a saved 50 MP size.
+            val safe = l.filter { it.width.toLong() * it.height <= 8_000_000L }
+            return safe.firstOrNull() ?: l.last()
+        }
         l.firstOrNull { it.width == cfg.photoW && it.height == cfg.photoH }?.let { return it }
         if (effMode() == 1 || captureFormat() == ImageFormat.JPEG_R) return l.first()
         val target = min(12_600_000L, lensSafeArea)
@@ -1337,7 +1415,17 @@ class CameraController(
             }
 
             override fun onConfigureFailed(s: CameraCaptureSession) {
-                ui.onMessage("Camera rejected this lens / photo format combination")
+                val fmt = when (captureFormat()) {
+                    ImageFormat.RAW_SENSOR -> "RAW"
+                    ImageFormat.JPEG_R -> "Ultra HDR JPEG"
+                    else -> "JPEG"
+                }
+                ui.onMessage("Photo session failed on camera $cfg.cameraId ($fmt, ${cap.width}x${cap.height}). Try the main lens or standard JPEG.")
+                s.close()
+            }
+
+            override fun onClosed(s: CameraCaptureSession) {
+                onCameraSessionClosed(s)
             }
         }
         try {
@@ -1492,7 +1580,8 @@ class CameraController(
         } catch (_: Exception) {
         }
         synchronized(lock) {
-            shot?.image?.close()
+            shot?.rawImages?.values?.forEach { runCatching { it.close() } }
+            shot?.rawImages?.clear()
             shot = null
         }
         endLong()
@@ -1589,9 +1678,11 @@ class CameraController(
             return
         }
         try {
+            // HDR scene always uses standard JPEG brackets and the app's own
+            // HdrFusion merger. Do not invoke Camera2 JPEG_R / native Ultra HDR here.
             val fmt = captureFormat()
-            if (cfg.photoFormat == 3 && ultraHdrAvailable && fmt != ImageFormat.JPEG_R) {
-                handler.post { ui.onMessage("Photo filters are active; using standard JPEG so the selected look is applied. Turn filters off for native Ultra HDR.") }
+            if (cfg.scene != 3 && cfg.photoFormat == 3 && ultraHdrAvailable && fmt != ImageFormat.JPEG_R) {
+                handler.post { ui.onMessage("Photo processing is active; using standard JPEG so selected looks can be rendered. Turn them off for native Ultra HDR.") }
             }
             val plan = scenePlan()
             if (cfg.scene in 1..2 && plan == null) {
@@ -1601,7 +1692,7 @@ class CameraController(
             }
             val hplan = if (cfg.scene == 3) hdrPlan() else null
             if (cfg.scene == 3 && hplan == null) {
-                handler.post { ui.onMessage("Not enough exposure range for HDR here, taking a normal photo") }
+                handler.post { ui.onMessage("HDR bracket unavailable on this lens; taking a single RAW/JPEG frame instead") }
             }
             val reqs = ArrayList<CaptureRequest>()
             val count = hplan?.exp?.size ?: plan?.frames ?: 1
@@ -1647,14 +1738,19 @@ class CameraController(
     private val captureCb = object : CameraCaptureSession.CaptureCallback() {
         override fun onCaptureCompleted(s: CameraCaptureSession, r: CaptureRequest, res: TotalCaptureResult) {
             synchronized(lock) {
-                shot?.result = res
+                shot?.let { sh ->
+                    if (sh.format == ImageFormat.RAW_SENSOR) {
+                        res.get(CaptureResult.SENSOR_TIMESTAMP)?.let { sh.rawResults[it] = res }
+                    }
+                }
                 maybeProcess()
             }
         }
 
         override fun onCaptureFailed(s: CameraCaptureSession, r: CaptureRequest, f: CaptureFailure) {
             synchronized(lock) {
-                shot?.image?.close()
+                shot?.rawImages?.values?.forEach { runCatching { it.close() } }
+                shot?.rawImages?.clear()
                 shot = null
             }
             handler.post {
@@ -1676,7 +1772,7 @@ class CameraController(
             if (sh == null) {
                 img.close()
             } else if (sh.format == ImageFormat.RAW_SENSOR) {
-                if (sh.image != null) img.close() else sh.image = img
+                sh.rawImages[img.timestamp] = img
                 maybeProcess()
             } else {
                 // copy the JPEG out straight away so the reader is free for the next shot
@@ -1698,7 +1794,14 @@ class CameraController(
         val sh = shot ?: return
         if (sh.started) return
         if (sh.format == ImageFormat.RAW_SENSOR) {
-            if (sh.image == null || sh.result == null) return
+            val pairs = sh.rawResults.entries.mapNotNull { (timestamp, result) ->
+                sh.rawImages[timestamp]?.let { RawFrame(it, result) }
+            }
+            if (pairs.size < sh.expected) return
+            sh.rawFrames = pairs.take(sh.expected)
+            val used = sh.rawFrames.map { it.image }.toSet()
+            sh.rawImages.values.filter { it !in used }.forEach { runCatching { it.close() } }
+            sh.rawImages.clear()
         } else if (sh.jpegs.size < sh.expected) {
             return
         }
@@ -1711,7 +1814,18 @@ class CameraController(
             handler.post { ui.onBusy(false) }
         }
         jobCount.incrementAndGet()
-        procExec.execute { processShot(sh) }
+        try {
+            procExec.execute { processShot(sh) }
+        } catch (e: java.util.concurrent.RejectedExecutionException) {
+            sh.rawFrames.forEach { runCatching { it.image.close() } }
+            sh.rawImages.values.forEach { runCatching { it.close() } }
+            jobCount.decrementAndGet()
+            busy = false
+            handler.post {
+                ui.onBusy(false)
+                ui.onMessage("Photo processing stopped because Iris Cam is closing. Please reopen the camera.")
+            }
+        }
     }
 
     /** Applies look, lens colour trim and optional upscaling to an upright bitmap, recycling what it replaces. */
@@ -1755,6 +1869,42 @@ class CameraController(
         return out
     }
 
+    /** Encode a bracket at a bounded pixel count so three-frame fusion cannot exhaust the app heap. */
+    private fun encodeHdrBracket(bitmap: Bitmap, quality: Int = 96): ByteArray {
+        val area = bitmap.width.toLong() * bitmap.height
+        val maxPixels = 6_000_000L
+        val scaled = if (area > maxPixels) {
+            val factor = kotlin.math.sqrt(maxPixels.toDouble() / area)
+            Bitmap.createScaledBitmap(
+                bitmap,
+                (bitmap.width * factor).toInt().coerceAtLeast(1),
+                (bitmap.height * factor).toInt().coerceAtLeast(1),
+                true
+            )
+        } else bitmap
+        return try {
+            val bytes = ByteArrayOutputStream()
+            if (!scaled.compress(Bitmap.CompressFormat.JPEG, quality, bytes)) {
+                throw IllegalStateException("Couldn't encode HDR bracket")
+            }
+            bytes.toByteArray()
+        } finally {
+            if (scaled !== bitmap) scaled.recycle()
+            bitmap.recycle()
+        }
+    }
+
+    private fun downsampleHdrJpeg(bytes: ByteArray): ByteArray {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
+            throw IllegalStateException("Invalid HDR JPEG frame")
+        }
+        val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+            ?: throw IllegalStateException("Couldn't decode HDR JPEG frame")
+        return encodeHdrBracket(bitmap)
+    }
+
     private fun processShot(sh: Shot) {
         var saved: Uri? = null
         try {
@@ -1765,18 +1915,40 @@ class CameraController(
                 // Preserve the camera-generated Ultra HDR gain map byte-for-byte. Re-encoding
                 // through Bitmap/JPEG would destroy the HDR metadata and reduce highlight range.
                 saved = saveBytes(sh.jpegs.first(), "$base.jpg")
+            } else if (sh.format == ImageFormat.RAW_SENSOR && sh.hdr && sh.rawFrames.size >= 2) {
+                // Develop every RAW bracket with its own sensor metadata, then merge the
+                // resulting full-resolution frames. This avoids the old JPEG-only capture.
+                val brackets = ArrayList<ByteArray>(sh.rawFrames.size)
+                sh.rawFrames.forEach { frame ->
+                    val developed = try {
+                        RawDeveloper.develop(frame.image, sh.chars, frame.result, Trim())
+                    } finally {
+                        runCatching { frame.image.close() }
+                    }
+                    brackets.add(encodeHdrBracket(developed, 96))
+                }
+                val merged = HdrFusion.merge(brackets) ?: throw IllegalStateException("Couldn't merge the RAW exposure brackets")
+                val out = finishLook(rotateBy(merged, sh.rotDeg), sh, trim)
+                saved = saveBitmap(out, "$base.jpg", sh.quality)
+                out.recycle()
             } else if (sh.format == ImageFormat.RAW_SENSOR) {
-                val img = sh.image!!
-                val res = sh.result!!
-                val dev = RawDeveloper.develop(img, sh.chars, res, trim)
-                img.close()
-                sh.image = null
+                val frame = sh.rawFrames.firstOrNull() ?: throw IllegalStateException("RAW capture metadata was incomplete")
+                val dev = try {
+                    RawDeveloper.develop(frame.image, sh.chars, frame.result, trim)
+                } finally {
+                    runCatching { frame.image.close() }
+                }
                 val out = finishLook(rotateBy(dev, sh.rotDeg), sh, Trim())
                 saved = saveBitmap(out, "$base.jpg", sh.quality)
                 out.recycle()
             } else if (sh.hdr && sh.jpegs.size >= 2) {
-                val merged = HdrFusion.merge(sh.jpegs) ?: throw IllegalStateException("Couldn't combine the HDR frames")
+                // JPEG-only HDR can also arrive from high-resolution auxiliary sensors.
+                // Downsample each frame before the four-bitmap fusion stage.
+                val boundedFrames = sh.jpegs.map { downsampleHdrJpeg(it) }
+                val merged = HdrFusion.merge(boundedFrames) ?: throw IllegalStateException("Couldn't combine the HDR frames")
                 val out = finishLook(rotateBy(merged, sh.rotDeg), sh, trim)
+                // Exposure fusion is deliberately exported as a broadly compatible SDR JPEG.
+                // The camera-generated JPEG_R path is separate and is not used by HDR scene mode.
                 saved = saveBitmap(out, "$base.jpg", sh.quality)
                 out.recycle()
             } else if (sh.jpegs.size > 1) {
@@ -1787,7 +1959,7 @@ class CameraController(
                 out.recycle()
             } else {
                 val bytes = sh.jpegs[0]
-                saved = if (sh.bw || sh.blue || sh.flat || sh.upscale || sh.glow || !trim.isNeutral()) {
+                saved = if (sh.bw || sh.blue || sh.flat || sh.upscale || sh.glow || sh.filterId > 0 || !trim.isNeutral()) {
                     val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
                     val out = finishLook(rotateBy(bmp, sh.rotDeg), sh, trim)
                     val u = saveBitmap(out, "$base.jpg", sh.quality)
@@ -1798,10 +1970,8 @@ class CameraController(
                 }
             }
         } catch (t: Throwable) {
-            try {
-                sh.image?.close()
-            } catch (_: Exception) {
-            }
+            sh.rawFrames.forEach { runCatching { it.image.close() } }
+            sh.rawImages.values.forEach { runCatching { it.close() } }
             val msg = t.message ?: t.javaClass.simpleName
             handler.post { ui.onMessage("Photo failed: $msg") }
         } finally {
