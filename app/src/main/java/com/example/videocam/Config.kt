@@ -68,7 +68,7 @@ data class Config(
     var peak: Int = 0,               // focus peaking: 0 = off, 1 = low, 2 = medium, 3 = high
     var timer: Int = 0,              // self-timer seconds (0, 3, 5, 10)
     var mode: Int = 0,               // 0 = video, 1 = photo
-    var photoFormat: Int = 1,        // 0 = phone JPEG, 1 = RAW develop, 3 = native Ultra HDR JPEG_R
+    var photoFormat: Int = 0,        // 0 = phone JPEG (default), 1 = RAW develop, 3 = native Ultra HDR JPEG_R
     var saveDng: Boolean = false,
     var photoQuality: Int = 95,
     var photoW: Int = 0,             // 0 = largest available
@@ -90,7 +90,7 @@ data class Config(
     var lensKeys: Boolean = false,   // show the 0.5x / 1x / 2.7x shortcut buttons
     var haptics: Boolean = true,     // subtle shutter and manual slider feedback
     var steady: Boolean = false,     // super steady: record 4K with gyro log, make a stabilised 1080p copy
-    var ver: Int = 0
+    var ver: Int = 1
 ) {
     fun copyFrom(o: Config) {
         cameraId = o.cameraId
@@ -209,6 +209,10 @@ data class Config(
                 else -> 0
             }
             val selectedFilter = o.optInt("filterId", legacyFilter).coerceIn(0, 19)
+            // Version 1 changes the first-run photo format from RAW to standard JPEG.
+            // Migrate existing installs once; later explicit RAW/Ultra HDR choices are preserved.
+            val storedVersion = o.optInt("ver", 0)
+            val migratedPhotoFormat = if (storedVersion < 1) 0 else o.optInt("photoFormat", 0)
             return Config(
                 cameraId = o.optString("cameraId", d.cameraId),
                 width = o.optInt("width", d.width),
@@ -236,7 +240,7 @@ data class Config(
                 peak = o.optInt("peak", d.peak),
                 timer = o.optInt("timer", d.timer),
                 mode = o.optInt("mode", d.mode),
-                photoFormat = o.optInt("photoFormat", d.photoFormat),
+                photoFormat = migratedPhotoFormat,
                 saveDng = o.optBoolean("saveDng", d.saveDng),
                 photoQuality = o.optInt("photoQuality", d.photoQuality),
                 photoW = o.optInt("photoW", d.photoW),
