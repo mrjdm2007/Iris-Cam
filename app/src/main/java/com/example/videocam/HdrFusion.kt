@@ -233,13 +233,24 @@ object HdrFusion {
             val hdrPixels = IntArray(gw * gh)
             sdrSmall.getPixels(basePixels, 0, gw, 0, 0, gw, gh)
             brightSmall.getPixels(hdrPixels, 0, gw, 0, 0, gw, gh)
+            val baseLumaPixels = IntArray(gw * gh) { i ->
+                val p = basePixels[i]
+                (77 * ((p shr 16) and 255) + 150 * ((p shr 8) and 255) + 29 * (p and 255)) shr 8
+            }
+            val hdrLumaPixels = IntArray(gw * gh) { i ->
+                val p = hdrPixels[i]
+                (77 * ((p shr 16) and 255) + 150 * ((p shr 8) and 255) + 29 * (p and 255)) shr 8
+            }
+            val shift = align(grad(baseLumaPixels, gw, gh), grad(hdrLumaPixels, gw, gh), gw, gh)
             val gainPixels = IntArray(gw * gh)
             var useful = 0
             for (i in gainPixels.indices) {
+                val x = i % gw
+                val y = i / gw
                 val a = basePixels[i]
-                val b = hdrPixels[i]
-                val baseLuma = (77 * ((a shr 16) and 255) + 150 * ((a shr 8) and 255) + 29 * (a and 255)) / 256f
-                val hdrLuma = (77 * ((b shr 16) and 255) + 150 * ((b shr 8) and 255) + 29 * (b and 255)) / 256f
+                val b = hdrPixels[(y + shift[1]).coerceIn(0, gh - 1) * gw + (x + shift[0]).coerceIn(0, gw - 1)]
+                val baseLuma = baseLumaPixels[i].toFloat()
+                val hdrLuma = hdrLumaPixels[(y + shift[1]).coerceIn(0, gh - 1) * gw + (x + shift[0]).coerceIn(0, gw - 1)].toFloat()
                 val ratio = (hdrLuma / max(2f, baseLuma)).coerceIn(1f, 4f)
                 val normalized = (kotlin.math.ln(ratio) / kotlin.math.ln(4f)).coerceIn(0f, 1f)
                 val v = (normalized * 255f + 0.5f).toInt()
