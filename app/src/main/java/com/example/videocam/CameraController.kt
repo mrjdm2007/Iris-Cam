@@ -130,17 +130,17 @@ class CameraController(
     private val motoProfileIds = listOf("5", "2", "0", "3", "1")
 
     val cameraIds: List<String> = try {
-        val advertised = manager.cameraIdList.toList()
-        val detected = advertised.filter { usable(it) }
+        val advertised = manager.cameraIdList.toSet()
         if (isMotoEdge50NeoProfile()) {
-            // Restore the Edge 50 Neo's explicitly supplied camera IDs without
-            // filtering auxiliary modules by generic backward-compatibility checks.
-            val profile = motoProfileIds.filter { it in advertised }
-            (profile + detected.filterNot { it in profile }).distinct()
+            // Forced Edge 50 Neo lens order. Do not run usable(), capability,
+            // focal-length, or backward-compatibility detection on these IDs.
+            // Android can only open IDs that the device Camera HAL advertises.
+            motoProfileIds.filter { it in advertised }
         } else {
-            detected.sortedWith(compareBy({ lensRank(it) }, { it }))
+            advertised.filter { usable(it) }
+                .sortedWith(compareBy({ lensRank(it) }, { it }))
         }
-    } catch (e: Exception) {
+    } catch (_: Exception) {
         emptyList()
     }
 
@@ -334,7 +334,7 @@ class CameraController(
                 else -> "3"          // supplied telephoto ID (2.7x)
             }
             // User supplied the exact Edge 50 Neo auxiliary IDs; select them directly.
-            if (exact in manager.cameraIdList) return exact
+            if (exact in cameraIds) return exact
         }
 
         fun isLogical(id: String): Boolean = runCatching {
@@ -601,7 +601,7 @@ class CameraController(
     @SuppressLint("MissingPermission")
     private fun openCamera() {
         if (cameraIds.isEmpty()) {
-            ui.onMessage("No usable camera found")
+            ui.onMessage(if (isMotoEdge50NeoProfile()) "None of the forced Edge 50 Neo camera IDs (5, 2, 0, 3, 1) are advertised by this firmware" else "No usable camera found")
             return
         }
         val candidates = (listOf(cfg.cameraId) + cameraIds)
@@ -611,10 +611,16 @@ class CameraController(
     }
 
     /**
-     * Try the selected camera first, then other CameraManager-advertised cameras if an OEM
-     * auxiliary ID is present but cannot actually be opened. This keeps device-specific IDs
-     * from making the whole app unusable on a different firmware/build.
+     * On the Edge 50 Neo, never silently substitute another lens when a forced ID
+     * fails. Other devices retain the generic fallback behaviour.
      */
+    private fun tryNextCamera(candidates: List<String>, index: Int) {
+        if (isMotoEdge50NeoProfile()) {
+            ui.onMessage("Forced camera ID ${candidates.getOrNull(index - 1) ?: "unknown"} could not be opened. No lens substitution was made.")
+        } else {
+            openCameraCandidate(candidates, index)
+        }
+    }
     @SuppressLint("MissingPermission")
     private fun openCameraCandidate(candidates: List<String>, index: Int) {
         if (!started) return
@@ -660,10 +666,10 @@ class CameraController(
                         }
                         if (started) {
                             ui.onMessage("Trying another detected lens")
-                            handler.postDelayed({ openCameraCandidate(candidates, index + 1) }, 250)
+                            handler.postDelayed({ tryNextCamera(candidates, index + 1) }, 250)
                         }
                     } else if (settled.compareAndSet(false, true) && started) {
-                        openCameraCandidate(candidates, index + 1)
+                        tryNextCamera(candidates, index + 1)
                     }
                 }
 
@@ -685,10 +691,10 @@ class CameraController(
                         }
                         if (started) {
                             ui.onMessage("Trying another detected lens")
-                            handler.postDelayed({ openCameraCandidate(candidates, index + 1) }, 250)
+                            handler.postDelayed({ tryNextCamera(candidates, index + 1) }, 250)
                         }
                     } else if (settled.compareAndSet(false, true) && started) {
-                        openCameraCandidate(candidates, index + 1)
+                        tryNextCamera(candidates, index + 1)
                     } else if (!settled.get()) {
                         ui.onMessage("Camera error $error")
                     }
@@ -696,7 +702,7 @@ class CameraController(
             }, handler)
         } catch (_: Exception) {
             if (settled.compareAndSet(false, true)) {
-                handler.post { openCameraCandidate(candidates, index + 1) }
+                handler.post { tryNextCamera(candidates, index + 1) }
             }
         }
     }
