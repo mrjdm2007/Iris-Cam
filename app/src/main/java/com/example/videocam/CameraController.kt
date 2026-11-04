@@ -154,6 +154,9 @@ class CameraController(
     private var nextOut: Output? = null
     private var started = false
     private var reconfigurePosted = false
+    // Keep exactly one asynchronous Camera2 session configuration in flight.
+    private var configurationInFlight = false
+    private var configurationPending = false
     @Volatile
     private var released = false
     private var gen = 0
@@ -593,8 +596,8 @@ class CameraController(
     }
 
     fun reconfigure() {
-        // Camera session creation is asynchronous. Coalesce same-frame UI changes so
-        // rapid menu callbacks cannot tear down/recreate the recorder repeatedly.
+        // Serialize asynchronous session changes. If Camera2 is still configuring, remember
+        // only the latest requested settings and apply them after the current callback settles.
         if (recording || busy || released || !started || reconfigurePosted) return
         reconfigurePosted = true
         handler.post {
@@ -932,8 +935,38 @@ class CameraController(
     // ---------- session ----------
 
     private fun configureAndStart() {
-        if (!started) return
-        val cd = device ?: return
+        if (configurationInFlight) {
+            configurationPending = true
+            return
+        }
+        configurationInFlight = true
+        try {
+            configureAndStartInternal()
+        } catch (e: Exception) {
+            finishConfiguration()
+            throw e
+        }
+    }
+
+    private fun finishConfiguration() {
+        configurationInFlight = false
+        if (configurationPending && started && !released) {
+            configurationPending = false
+            handler.post { configureAndStart() }
+        } else if (!started || released) {
+            configurationPending = false
+        }
+    }
+
+    private fun configureAndStartInternal() {
+        if (!started) {
+            finishConfiguration()
+            return
+        }
+        val cd = device ?: run {
+            finishConfiguration()
+            return
+        }
         closeSession()
         releaseRecorder()
         aeLock = false
@@ -949,9 +982,13 @@ class CameraController(
             validateConfig()
         } catch (e: Exception) {
             ui.onMessage("Config error: ${e.message}")
+            finishConfiguration()
             return
         }
-        val st = tv.surfaceTexture ?: return
+        val st = tv.surfaceTexture ?: run {
+            finishConfiguration()
+            return
+        }
 
         try {
             prepareRecorder()
@@ -969,6 +1006,7 @@ class CameraController(
             if (!ok) {
                 val hint = if (cfg.fps > 30 && cfg.height >= 2160) " (try 4K30, this phone's encoder may not do 4K60)" else ""
                 ui.onMessage("Recorder setup failed: ${e.message}$hint")
+                finishConfiguration()
                 return
             }
         }
@@ -979,7 +1017,10 @@ class CameraController(
         previewSurface?.release()
         val preview = Surface(st)
         previewSurface = preview
-        val rs = (crop?.input ?: recorder?.surface) ?: return
+        val rs = (crop?.input ?: recorder?.surface) ?: run {
+            finishConfiguration()
+            return
+        }
         recSurface = rs
         ui.onPreviewSize(ps.width, ps.height)
 
@@ -993,16 +1034,25 @@ class CameraController(
             override fun onConfigured(s: CameraCaptureSession) {
                 if (my != gen || device !== cd) {
                     s.close()
+                    finishConfiguration()
                     return
                 }
                 session = s
-                refreshTransform()
-                updateRepeating()
-                ui.onReady()
+                try {
+                    refreshTransform()
+                    updateRepeating()
+                    ui.onReady()
+                } catch (e: Exception) {
+                    ui.onMessage("Preview setup failed: ${e.message}")
+                } finally {
+                    finishConfiguration()
+                }
             }
 
             override fun onConfigureFailed(s: CameraCaptureSession) {
+                s.close()
                 ui.onMessage("Camera rejected this resolution / fps / lens combo")
+                finishConfiguration()
             }
         }
         try {
@@ -1013,6 +1063,7 @@ class CameraController(
             }
         } catch (e: Exception) {
             ui.onMessage("Session error: ${e.message}")
+            finishConfiguration()
         }
     }
 
@@ -1343,16 +1394,25 @@ class CameraController(
             override fun onConfigured(s: CameraCaptureSession) {
                 if (my != gen || device !== cd) {
                     s.close()
+                    finishConfiguration()
                     return
                 }
                 session = s
-                refreshTransform()
-                updateRepeating()
-                ui.onReady()
+                try {
+                    refreshTransform()
+                    updateRepeating()
+                    ui.onReady()
+                } catch (e: Exception) {
+                    ui.onMessage("Photo preview setup failed: ${e.message}")
+                } finally {
+                    finishConfiguration()
+                }
             }
 
             override fun onConfigureFailed(s: CameraCaptureSession) {
+                s.close()
                 ui.onMessage("Camera rejected this lens / photo format combination")
+                finishConfiguration()
             }
         }
         try {
@@ -1360,6 +1420,7 @@ class CameraController(
             cd.createCaptureSession(listOf(preview, rd.surface), cb, handler)
         } catch (e: Exception) {
             ui.onMessage("Session error: ${e.message}")
+            finishConfiguration()
         }
     }
 
