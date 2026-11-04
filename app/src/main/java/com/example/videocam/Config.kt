@@ -203,7 +203,7 @@ data class Config(
             val legacyFilter = when {
                 o.optBoolean("bw", d.bw) -> 1
                 o.optBoolean("blue", d.blue) -> 11
-                o.optBoolean("glow", d.glow) -> 16
+                o.optBoolean("glow", d.glow) -> 14
                 o.optInt("photoLook", d.photoLook) == 1 -> 12
                 o.optInt("photoLook", d.photoLook) == 2 -> 13
                 else -> 0
