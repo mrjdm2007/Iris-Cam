@@ -1354,7 +1354,7 @@ class CameraController(
         if (cfg.scene == 3 && captureFormat() == ImageFormat.RAW_SENSOR) {
             // Keep a three-frame RAW bracket within a sensible memory budget. Prefer
             // the largest available mode up to ~12.6 MP; never inherit a saved 50 MP size.
-            val safe = l.filter { it.width.toLong() * it.height <= 12_600_000L }
+            val safe = l.filter { it.width.toLong() * it.height <= 8_000_000L }
             return safe.firstOrNull() ?: l.last()
         }
         l.firstOrNull { it.width == cfg.photoW && it.height == cfg.photoH }?.let { return it }
@@ -1813,7 +1813,18 @@ class CameraController(
             handler.post { ui.onBusy(false) }
         }
         jobCount.incrementAndGet()
-        procExec.execute { processShot(sh) }
+        try {
+            procExec.execute { processShot(sh) }
+        } catch (e: java.util.concurrent.RejectedExecutionException) {
+            sh.rawFrames.forEach { runCatching { it.image.close() } }
+            sh.rawImages.values.forEach { runCatching { it.close() } }
+            jobCount.decrementAndGet()
+            busy = false
+            handler.post {
+                ui.onBusy(false)
+                ui.onMessage("Photo processing stopped because Iris Cam is closing. Please reopen the camera.")
+            }
+        }
     }
 
     /** Applies look, lens colour trim and optional upscaling to an upright bitmap, recycling what it replaces. */
@@ -1857,6 +1868,42 @@ class CameraController(
         return out
     }
 
+    /** Encode a bracket at a bounded pixel count so three-frame fusion cannot exhaust the app heap. */
+    private fun encodeHdrBracket(bitmap: Bitmap, quality: Int = 96): ByteArray {
+        val area = bitmap.width.toLong() * bitmap.height
+        val maxPixels = 6_000_000L
+        val scaled = if (area > maxPixels) {
+            val factor = kotlin.math.sqrt(maxPixels.toDouble() / area)
+            Bitmap.createScaledBitmap(
+                bitmap,
+                (bitmap.width * factor).toInt().coerceAtLeast(1),
+                (bitmap.height * factor).toInt().coerceAtLeast(1),
+                true
+            )
+        } else bitmap
+        return try {
+            val bytes = ByteArrayOutputStream()
+            if (!scaled.compress(Bitmap.CompressFormat.JPEG, quality, bytes)) {
+                throw IllegalStateException("Couldn't encode HDR bracket")
+            }
+            bytes.toByteArray()
+        } finally {
+            if (scaled !== bitmap) scaled.recycle()
+            bitmap.recycle()
+        }
+    }
+
+    private fun downsampleHdrJpeg(bytes: ByteArray): ByteArray {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
+            throw IllegalStateException("Invalid HDR JPEG frame")
+        }
+        val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+            ?: throw IllegalStateException("Couldn't decode HDR JPEG frame")
+        return encodeHdrBracket(bitmap)
+    }
+
     private fun processShot(sh: Shot) {
         var saved: Uri? = null
         try {
@@ -1877,13 +1924,7 @@ class CameraController(
                     } finally {
                         runCatching { frame.image.close() }
                     }
-                    val bos = ByteArrayOutputStream()
-                    if (!developed.compress(Bitmap.CompressFormat.JPEG, 98, bos)) {
-                        developed.recycle()
-                        throw IllegalStateException("Couldn't encode a developed RAW bracket")
-                    }
-                    developed.recycle()
-                    brackets.add(bos.toByteArray())
+                    brackets.add(encodeHdrBracket(developed, 96))
                 }
                 val merged = HdrFusion.merge(brackets) ?: throw IllegalStateException("Couldn't merge the RAW exposure brackets")
                 val out = finishLook(rotateBy(merged, sh.rotDeg), sh, trim)
@@ -1900,7 +1941,10 @@ class CameraController(
                 saved = saveBitmap(out, "$base.jpg", sh.quality)
                 out.recycle()
             } else if (sh.hdr && sh.jpegs.size >= 2) {
-                val merged = HdrFusion.merge(sh.jpegs) ?: throw IllegalStateException("Couldn't combine the HDR frames")
+                // JPEG-only HDR can also arrive from high-resolution auxiliary sensors.
+                // Downsample each frame before the four-bitmap fusion stage.
+                val boundedFrames = sh.jpegs.map { downsampleHdrJpeg(it) }
+                val merged = HdrFusion.merge(boundedFrames) ?: throw IllegalStateException("Couldn't combine the HDR frames")
                 val out = finishLook(rotateBy(merged, sh.rotDeg), sh, trim)
                 // Exposure fusion is deliberately exported as a broadly compatible SDR JPEG.
                 // The camera-generated JPEG_R path is separate and is not used by HDR scene mode.
