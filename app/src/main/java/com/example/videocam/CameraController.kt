@@ -130,16 +130,15 @@ class CameraController(
     private val motoProfileIds = listOf("5", "2", "0", "3", "1")
 
     val cameraIds: List<String> = try {
-        val advertised = manager.cameraIdList.toSet()
-        if (isMotoEdge50NeoProfile()) {
-            // Forced Edge 50 Neo lens order. Do not run usable(), capability,
-            // focal-length, or backward-compatibility detection on these IDs.
-            // Android can only open IDs that the device Camera HAL advertises.
-            motoProfileIds.filter { it in advertised }
-        } else {
-            advertised.filter { usable(it) }
-                .sortedWith(compareBy({ lensRank(it) }, { it }))
-        }
+        // Match the working VideoCam implementation: append the known Motorola
+        // auxiliary IDs before querying characteristics. On this device the OEM
+        // exposes some usable camera IDs through Camera2 characteristics even
+        // though they are omitted from cameraIdList.
+        val candidates = manager.cameraIdList.toList() +
+            if (isMotoEdge50NeoProfile()) motoProfileIds else emptyList()
+        candidates.distinct()
+            .filter { usable(it) }
+            .sortedWith(compareBy({ lensRank(it) }, { it }))
     } catch (_: Exception) {
         emptyList()
     }
@@ -273,23 +272,31 @@ class CameraController(
         val previewSizes = m?.getOutputSizes(SurfaceTexture::class.java)
         val hasPreviewOutput = !videoSizes.isNullOrEmpty() || !previewSizes.isNullOrEmpty()
         val backwardCompatible = caps.contains(CameraMetadata.REQUEST_AVAILABLE_CAPABILITIES_BACKWARD_COMPATIBLE)
-        // Some OEM auxiliary IDs omit the backward-compatible flag despite advertising
-        // preview/record output surfaces. Accept these only on the narrowly matched profile.
-        (backwardCompatible || (isMotoEdge50NeoProfile() && id in motoProfileIds)) && hasPreviewOutput
+        backwardCompatible && hasPreviewOutput
     } catch (e: Exception) {
         false
     }
 
-    private fun lensRank(id: String): Int = runCatching {
-        val c = manager.getCameraCharacteristics(id)
-        val caps = c.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES) ?: intArrayOf()
-        if (caps.contains(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_LOGICAL_MULTI_CAMERA)) return@runCatching 0
-        if (c.get(CameraCharacteristics.LENS_FACING) == CameraMetadata.LENS_FACING_FRONT) return@runCatching 10_000
-        val f = c.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.firstOrNull() ?: return@runCatching 500
-        val size = c.get(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE) ?: return@runCatching 500
-        val eq = f * 43.27f / hypot(size.width, size.height)
-        1 + (abs(eq - 24f) * 10f).roundToInt() // main-camera-equivalent focal length first
-    }.getOrDefault(9_999)
+    private fun lensRank(id: String): Int {
+        if (isMotoEdge50NeoProfile()) return when (id) {
+            "0" -> 0
+            "2" -> 1
+            "3" -> 2
+            "5" -> 3
+            "1" -> 9
+            else -> 4
+        }
+        return runCatching {
+            val c = manager.getCameraCharacteristics(id)
+            val caps = c.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES) ?: intArrayOf()
+            if (caps.contains(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_LOGICAL_MULTI_CAMERA)) return@runCatching 0
+            if (c.get(CameraCharacteristics.LENS_FACING) == CameraMetadata.LENS_FACING_FRONT) return@runCatching 10_000
+            val f = c.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.firstOrNull() ?: return@runCatching 500
+            val size = c.get(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE) ?: return@runCatching 500
+            val eq = f * 43.27f / hypot(size.width, size.height)
+            1 + (abs(eq - 24f) * 10f).roundToInt()
+        }.getOrDefault(9_999)
+    }
 
     private fun isFront(id: String): Boolean =
         manager.getCameraCharacteristics(id).get(CameraCharacteristics.LENS_FACING) ==
