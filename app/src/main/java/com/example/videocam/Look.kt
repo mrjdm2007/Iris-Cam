@@ -235,7 +235,97 @@ object Look {
     fun previewFilter(id: Int, intensity: Int): ColorMatrixColorFilter =
         ColorMatrixColorFilter(intensityMatrix(id, intensity))
 
-    /** Render a selected look into a saved still. Effects are deliberately photo-only until a GPU video path exists. */
+    /** Build a broad highlight-only bloom layer at low resolution to keep memory use bounded. */
+    private fun bloomLayer(src: Bitmap, strength: Int, threshold: Int, tint: Int): Bitmap {
+        val sw = (src.width / 8).coerceAtLeast(1)
+        val sh = (src.height / 8).coerceAtLeast(1)
+        val low = Bitmap.createScaledBitmap(src, sw, sh, true)
+        val px = IntArray(sw * sh)
+        low.getPixels(px, 0, sw, 0, 0, sw, sh)
+        val tr = (tint shr 16) and 255
+        val tg = (tint shr 8) and 255
+        val tb = tint and 255
+        for (i in px.indices) {
+            val p = px[i]
+            val r = (p shr 16) and 255
+            val g = (p shr 8) and 255
+            val b = p and 255
+            val l = (r * 54 + g * 183 + b * 19) shr 8
+            val gate = ((l - threshold) * 255 / (255 - threshold).coerceAtLeast(1)).coerceIn(0, 255)
+            val a = (gate * strength / 100 * 0.88f).toInt().coerceIn(0, 210)
+            val rr = (r * (255 - a) + tr * a) / 255
+            val gg = (g * (255 - a) + tg * a) / 255
+            val bb = (b * (255 - a) + tb * a) / 255
+            px[i] = (a shl 24) or (rr shl 16) or (gg shl 8) or bb
+        }
+        low.setPixels(px, 0, sw, 0, 0, sw, sh)
+        return low
+    }
+
+    /** Soft, visible dream glow: a broad highlight bloom over the still-sharp original. */
+    private fun dreamGlow(src: Bitmap, strength: Int): Bitmap {
+        val layer = bloomLayer(src, strength, 105, 0xFFFFF1E5.toInt())
+        val out = Bitmap.createBitmap(src.width, src.height, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(out)
+        canvas.drawBitmap(src, 0f, 0f, Paint(Paint.FILTER_BITMAP_FLAG))
+        val paint = Paint(Paint.FILTER_BITMAP_FLAG).apply {
+            alpha = (strength * 1.15f).toInt().coerceIn(0, 220)
+            xfermode = android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.SCREEN)
+        }
+        canvas.drawBitmap(layer, null, android.graphics.Rect(0, 0, src.width, src.height), paint)
+        layer.recycle()
+        return out
+    }
+
+    /** Warm red/orange halation concentrated around bright highlights, not a global colour tint. */
+    private fun halation(src: Bitmap, strength: Int): Bitmap {
+        val layer = bloomLayer(src, strength, 132, 0xFFFF6848.toInt())
+        val out = Bitmap.createBitmap(src.width, src.height, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(out)
+        canvas.drawBitmap(src, 0f, 0f, Paint(Paint.FILTER_BITMAP_FLAG))
+        val paint = Paint(Paint.FILTER_BITMAP_FLAG).apply {
+            alpha = (strength * 1.25f).toInt().coerceIn(0, 235)
+            xfermode = android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.SCREEN)
+        }
+        canvas.drawBitmap(layer, null, android.graphics.Rect(0, 0, src.width, src.height), paint)
+        layer.recycle()
+        return out
+    }
+
+    /** Row-wise VHS treatment: chroma bleed, scan lines, tape jitter and restrained analogue noise. */
+    private fun vhs(src: Bitmap, strength: Int): Bitmap {
+        val amount = strength.coerceIn(0, 100) / 100f
+        val w = src.width
+        val h = src.height
+        val out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        val row = IntArray(w)
+        val dst = IntArray(w)
+        val period = (h / 11).coerceAtLeast(24)
+        for (y in 0 until h) {
+            src.getPixels(row, 0, w, 0, y, w, 1)
+            val tear = ((y * 37 + 11) % period) < (2 + (amount * 3).toInt())
+            val shift = if (tear) (2 + amount * 10).toInt() else 0
+            val scan = if (y % 3 == 0) 1f - 0.30f * amount else 1f - 0.07f * amount
+            for (x in 0 until w) {
+                val sx = (x + shift).coerceIn(0, w - 1)
+                val left = row[(sx - (1 + (amount * 2).toInt())).coerceAtLeast(0)]
+                val center = row[sx]
+                val right = row[(sx + (1 + (amount * 2).toInt())).coerceAtMost(w - 1)]
+                val noise = (((x * 1103515245L + y * 12345L + 0x13579B).ushr(16) and 15L).toInt() - 7)
+                val r = ((((left shr 16) and 255) * 0.72f + ((center shr 16) and 255) * 0.28f) + noise * amount * 1.8f).toInt()
+                val g = (((center shr 8) and 255) + noise * amount).toInt()
+                val b = (((right and 255) * 0.72f + (center and 255) * 0.28f) - noise * amount * 1.4f).toInt()
+                val rr = (r * scan).toInt().coerceIn(0, 255)
+                val gg = (g * scan).toInt().coerceIn(0, 255)
+                val bb = (b * scan).toInt().coerceIn(0, 255)
+                dst[x] = (0xFF shl 24) or (rr shl 16) or (gg shl 8) or bb
+            }
+            out.setPixels(dst, 0, w, 0, y, w, 1)
+        }
+        return out
+    }
+
+    /** Render a selected look into a saved still. */
     fun applyPreset(src: Bitmap, id: Int, intensity: Int): Bitmap {
         if (id <= 0 || intensity <= 0) return src
         val strength = intensity.coerceIn(0, 100)
@@ -249,7 +339,8 @@ object Look {
             base = graded
         }
         val result = when (id) {
-            14 -> glow(base, (strength * 0.9f).toInt())
+            13 -> dreamGlow(base, strength)
+            14 -> halation(base, strength)
             15 -> {
                 val sw = (base.width / 10).coerceAtLeast(1)
                 val sh = (base.height / 10).coerceAtLeast(1)
@@ -258,7 +349,7 @@ object Look {
                 val c = Canvas(out)
                 c.drawBitmap(base, 0f, 0f, Paint(Paint.FILTER_BITMAP_FLAG))
                 c.drawBitmap(low, null, android.graphics.Rect(0, 0, base.width, base.height),
-                    Paint(Paint.FILTER_BITMAP_FLAG).apply { alpha = (strength * 0.16f).toInt() })
+                    Paint(Paint.FILTER_BITMAP_FLAG).apply { alpha = (strength * 0.24f).toInt() })
                 low.recycle()
                 out
             }
@@ -268,7 +359,7 @@ object Look {
                 val noise = Bitmap.createBitmap(sw, sh, Bitmap.Config.ARGB_8888)
                 val px = IntArray(sw * sh)
                 var seed = 0x13579B
-                val alpha = (strength * 0.12f).toInt().coerceIn(0, 12)
+                val alpha = (strength * 0.18f).toInt().coerceIn(0, 20)
                 for (i in px.indices) {
                     seed = seed * 1103515245 + 12345
                     val n = ((seed ushr 16) and 31) - 15
@@ -284,46 +375,7 @@ object Look {
                 noise.recycle()
                 out
             }
-            19 -> {
-                val sw = (base.width / 32).coerceAtLeast(1)
-                val sh = (base.height / 32).coerceAtLeast(1)
-                val small = Bitmap.createScaledBitmap(base, sw, sh, true)
-                val pixels = IntArray(sw * sh)
-                small.getPixels(pixels, 0, sw, 0, 0, sw, sh)
-                small.recycle()
-                var bestRow = -1
-                var bestLuma = 0
-                for (y in 0 until sh) {
-                    var sum = 0L
-                    for (x in 0 until sw) {
-                        val c = pixels[y * sw + x]
-                        sum += (((c shr 16) and 255) * 54 + ((c shr 8) and 255) * 183 + (c and 255) * 19) shr 8
-                    }
-                    val avg = (sum / sw).toInt()
-                    if (avg > bestLuma) {
-                        bestLuma = avg
-                        bestRow = y
-                    }
-                }
-                val out = Bitmap.createBitmap(base.width, base.height, Bitmap.Config.ARGB_8888)
-                val canvas = Canvas(out)
-                canvas.drawBitmap(base, 0f, 0f, Paint(Paint.FILTER_BITMAP_FLAG))
-                if (bestRow >= 0 && bestLuma > 170) {
-                    val y = (bestRow + 0.5f) * base.height / sh
-                    val flare = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                        style = Paint.Style.STROKE
-                        strokeWidth = (base.height * 0.0035f).coerceAtLeast(2f)
-                        alpha = (strength * 1.2f).toInt().coerceIn(0, 150)
-                        shader = LinearGradient(
-                            0f, y, base.width.toFloat(), y,
-                            intArrayOf(0x00FFFFFF, 0xBFFFFFFF.toInt(), 0x00FFFFFF),
-                            floatArrayOf(0f, 0.5f, 1f), Shader.TileMode.CLAMP
-                        )
-                    }
-                    canvas.drawLine(0f, y, base.width.toFloat(), y, flare)
-                }
-                out
-            }
+            19 -> vhs(base, strength)
             else -> base
         }
         if (base !== src && base !== result) base.recycle()
