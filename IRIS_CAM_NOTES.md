@@ -19,6 +19,8 @@ This project is an in-progress source update. It is not represented as a device-
 - Kept both Wi-Fi monitoring and USB monitoring through ADB reverse. When a pixel filter is enabled, the app switches from native Ultra HDR JPEG_R to standard JPEG so the filter is rendered rather than silently skipped; native gain-map files remain untouched when filters are off. USB instructions are shown in the app; example: `adb reverse tcp:8080 tcp:8080`, then open `http://localhost:8080/?pin=...` using the PIN shown by the app.
 - Expanded laptop `.cube` parsing to accept standard 3D LUTs and 1D-only LUTs, and added shader/program error reporting. The laptop applies the LUT locally in WebGL; the phone does not apply it to the monitoring stream.
 - Kept the laptop REC/CAPTURE control and the focus, zoom and exposure controls with their A/B marks and timed racks.
+- Photos and videos are published through Android MediaStore under `Pictures/Iris Cam` and `Movies/Iris Cam`, with `IS_PENDING` cleared after writing. This makes the local folders available to media providers such as Google Photos; cloud backup remains controlled by the user's Google Photos settings.
+- Removed the obsolete Good Take flagging/renaming/favourite-marking backend.
 - Monitoring is stopped from the app when it leaves the foreground. The monitor server now recreates its worker pool on restart, so opening the monitor again after stopping it does not reuse a shut-down executor.
 
 ## Important limitations still requiring implementation or device validation
