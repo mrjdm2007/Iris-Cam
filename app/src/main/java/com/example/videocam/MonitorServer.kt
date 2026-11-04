@@ -23,7 +23,8 @@ class MonitorServer(private val host: Host, val pin: String) {
     }
 
     private var ss: ServerSocket? = null
-    private val pool = Executors.newCachedThreadPool()
+    @Volatile
+    private var pool = Executors.newCachedThreadPool()
     private val frameLock = Object()
 
     @Volatile
@@ -43,8 +44,13 @@ class MonitorServer(private val host: Host, val pin: String) {
     var port = 8080
         private set
 
+    @Synchronized
     fun start(): Boolean {
         if (running) return true
+        // stop() shuts the executor down; recreate it so the monitor can be started again
+        // after the user leaves and re-enters the monitor panel.
+        if (pool.isShutdown || pool.isTerminated) pool = Executors.newCachedThreadPool()
+        val executor = pool
         for (p in 8080..8090) {
             try {
                 ss = ServerSocket(p)
@@ -55,11 +61,11 @@ class MonitorServer(private val host: Host, val pin: String) {
         }
         val s = ss ?: return false
         running = true
-        pool.execute {
+        executor.execute {
             while (running) {
                 try {
                     val c = s.accept()
-                    pool.execute { handle(c) }
+                    executor.execute { handle(c) }
                 } catch (_: Exception) {
                     if (!running) break
                 }
@@ -68,6 +74,7 @@ class MonitorServer(private val host: Host, val pin: String) {
         return true
     }
 
+    @Synchronized
     fun stop() {
         running = false
         try {
