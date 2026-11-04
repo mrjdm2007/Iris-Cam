@@ -1882,9 +1882,10 @@ class CameraController(
             }
             finishImageUri(uri)
             return uri
-        } catch (t: Throwable) {
+        } catch (_: Throwable) {
             ctx.contentResolver.delete(uri, null, null)
-            throw t
+            // Keep the fused photo even if a particular Android 14 encoder rejects JPEG_R.
+            return saveBitmap(bmp, name, q)
         }
     }
 
