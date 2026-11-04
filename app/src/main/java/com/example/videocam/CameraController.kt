@@ -234,11 +234,6 @@ class CameraController(
     var lastClipUri: Uri? = null
     var lastPhotoUri: Uri? = null
 
-    /** Flagged as a good take while the current recording is running. */
-    @Volatile
-    var goodPending = false
-        private set
-
     @Volatile
     private var steadyLog: SteadyLog? = null
     private val steadyRec = SteadyRecorder(ctx)
@@ -728,10 +723,6 @@ class CameraController(
             ctx.contentResolver.update(o.uri, v, null, null)
         } catch (_: Exception) {
         }
-        if (goodPending) {
-            goodPending = false
-            markGood(o.uri)
-        }
     }
 
     /** A new, empty video file for a stabilised copy. */
@@ -779,38 +770,6 @@ class CameraController(
         }
         try {
             ctx.contentResolver.delete(o.uri, null, null)
-        } catch (_: Exception) {
-        }
-    }
-
-    // ---------- good take flag ----------
-
-    /** Marks the clip being recorded (or the last clip / photo) as a good take. Returns false if there is nothing to flag. */
-    fun flagGood(): Boolean {
-        if (recording) {
-            goodPending = true
-            return true
-        }
-        val u = (if (cfg.mode == 1) lastPhotoUri else lastClipUri) ?: return false
-        procExec.execute { markGood(u) }
-        return true
-    }
-
-    private fun markGood(uri: Uri) {
-        try {
-            val cr = ctx.contentResolver
-            var name: String? = null
-            cr.query(uri, arrayOf(MediaStore.MediaColumns.DISPLAY_NAME), null, null, null)?.use {
-                if (it.moveToFirst()) name = it.getString(0)
-            }
-            val v = ContentValues()
-            val n = name
-            if (n != null && !n.contains("_GOOD")) {
-                val dot = n.lastIndexOf('.')
-                v.put(MediaStore.MediaColumns.DISPLAY_NAME, if (dot > 0) n.substring(0, dot) + "_GOOD" + n.substring(dot) else n + "_GOOD")
-            }
-            if (Build.VERSION.SDK_INT >= 30) v.put(MediaStore.MediaColumns.IS_FAVORITE, 1)
-            if (v.size() > 0) cr.update(uri, v, null, null)
         } catch (_: Exception) {
         }
     }
@@ -2199,7 +2158,6 @@ class CameraController(
             recorder?.start()
             crop?.active = true
             recording = true
-            goodPending = false
             if (cfg.steady && steadyPossible() == null) {
                 val l = SteadyLog()
                 val f = chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.firstOrNull()
