@@ -962,6 +962,10 @@ class CameraController(
 
         // Camera2 sessions close asynchronously. Do not release their reader/recorder
         // surfaces or create the next mode's session until onClosed confirms teardown.
+        if (closingSession != null) {
+            restartAfterSessionClose = true
+            return
+        }
         val oldSession = session
         if (oldSession != null) {
             session = null
@@ -1347,12 +1351,14 @@ class CameraController(
     fun captureSize(): Size {
         val l = captureSizes()
         if (l.isEmpty()) return Size(4000, 3000)
-        l.firstOrNull { it.width == cfg.photoW && it.height == cfg.photoH }?.let { return it }
-        if (effMode() == 1 || captureFormat() == ImageFormat.JPEG_R) return l.first()
         if (cfg.scene == 3 && captureFormat() == ImageFormat.RAW_SENSOR) {
+            // Keep a three-frame RAW bracket within a sensible memory budget. Prefer
+            // the largest available mode up to ~12.6 MP; never inherit a saved 50 MP size.
             val safe = l.filter { it.width.toLong() * it.height <= 12_600_000L }
             return safe.firstOrNull() ?: l.last()
         }
+        l.firstOrNull { it.width == cfg.photoW && it.height == cfg.photoH }?.let { return it }
+        if (effMode() == 1 || captureFormat() == ImageFormat.JPEG_R) return l.first()
         val target = min(12_600_000L, lensSafeArea)
         val ok = l.filter { it.width.toLong() * it.height <= target }
         return ok.firstOrNull { it.width * 3 == it.height * 4 } ?: ok.firstOrNull() ?: l.last()
