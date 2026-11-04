@@ -346,7 +346,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
         thermalListener = null
         if (::cam.isInitialized) cam.release()
         procExec.shutdownNow()
-        steadyExec.shutdownNow()
+        steadyExec.shutdown()
         super.onDestroy()
     }
 
