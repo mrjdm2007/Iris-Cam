@@ -5,6 +5,8 @@ import android.graphics.Canvas
 import android.graphics.ColorMatrix
 import android.graphics.ColorMatrixColorFilter
 import android.graphics.Paint
+import android.graphics.LinearGradient
+import android.graphics.Shader
 
 /** Photo looks applied to the saved picture: the flat profile (same curve as video) and high-contrast black and white. */
 object Look {
@@ -168,7 +170,7 @@ object Look {
         "Natural", "Black and White", "Kodak 2383", "Kodak 250D", "Kodak 500T",
         "Fuji Eterna", "Teal & Orange", "Bleach Bypass", "Vintage Fade", "Noir",
         "Leica Colour", "Blue Cinematic", "Golden Hour", "Dream Glow",
-        "Halation", "Soft Diffusion", "Film Grain"
+        "Halation", "Soft Diffusion", "Film Grain", "Anamorphic Flare"
     )
 
     private fun filterMatrix(id: Int): ColorMatrix {
@@ -215,6 +217,7 @@ object Look {
             14 -> basic(1.03f, 1.02f, 4f, 0f, -3f)
             15 -> basic(0.98f, 0.94f, 2f, 2f, 2f)
             16 -> basic(1.02f, 1.00f, 0f, 0f, 0f)
+            17 -> basic(1.00f, 1.00f, 0f, 0f, 0f)
             else -> ColorMatrix()
         }
     }
@@ -277,6 +280,46 @@ object Look {
                 c.drawBitmap(noise, null, android.graphics.Rect(0, 0, base.width, base.height),
                     Paint(Paint.FILTER_BITMAP_FLAG).apply { xfermode = android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.OVERLAY) })
                 noise.recycle()
+                out
+            }
+            17 -> {
+                val sw = (base.width / 32).coerceAtLeast(1)
+                val sh = (base.height / 32).coerceAtLeast(1)
+                val small = Bitmap.createScaledBitmap(base, sw, sh, true)
+                val pixels = IntArray(sw * sh)
+                small.getPixels(pixels, 0, sw, 0, 0, sw, sh)
+                small.recycle()
+                var bestRow = -1
+                var bestLuma = 0
+                for (y in 0 until sh) {
+                    var sum = 0L
+                    for (x in 0 until sw) {
+                        val c = pixels[y * sw + x]
+                        sum += (((c shr 16) and 255) * 54 + ((c shr 8) and 255) * 183 + (c and 255) * 19) shr 8
+                    }
+                    val avg = (sum / sw).toInt()
+                    if (avg > bestLuma) {
+                        bestLuma = avg
+                        bestRow = y
+                    }
+                }
+                val out = Bitmap.createBitmap(base.width, base.height, Bitmap.Config.ARGB_8888)
+                val canvas = Canvas(out)
+                canvas.drawBitmap(base, 0f, 0f, Paint(Paint.FILTER_BITMAP_FLAG))
+                if (bestRow >= 0 && bestLuma > 170) {
+                    val y = (bestRow + 0.5f) * base.height / sh
+                    val flare = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                        style = Paint.Style.STROKE
+                        strokeWidth = (base.height * 0.0035f).coerceAtLeast(2f)
+                        alpha = (strength * 1.2f).toInt().coerceIn(0, 150)
+                        shader = LinearGradient(
+                            0f, y, base.width.toFloat(), y,
+                            intArrayOf(0x00FFFFFF, 0xBFFFFFFF.toInt(), 0x00FFFFFF),
+                            floatArrayOf(0f, 0.5f, 1f), Shader.TileMode.CLAMP
+                        )
+                    }
+                    canvas.drawLine(0f, y, base.width.toFloat(), y, flare)
+                }
                 out
             }
             else -> base
