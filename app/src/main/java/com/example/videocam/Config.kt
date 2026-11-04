@@ -80,6 +80,7 @@ data class Config(
     var hdrFrames: Int = 3,          // multi-frame HDR fusion: 2 or 3 exposures
     var upscale: Boolean = false,    // upscale photos to 12.6 MP
     var bw: Boolean = false,         // photo black and white, high contrast
+    var glow: Boolean = false,       // soft highlight bloom photo filter
     var photoLook: Int = 0,          // 0 natural, 1 golden hour, 2 dream glow
     var photoNr: Int = 1,            // photo noise reduction: 0 minimal, 1 standard, 2 high
     var squeeze: Int = 0,            // anamorphic de-squeeze of the preview: 0 off, 1 1.33x, 2 1.5x, 3 1.8x, 4 2x
@@ -127,6 +128,7 @@ data class Config(
         hdrFrames = o.hdrFrames
         upscale = o.upscale
         bw = o.bw
+        glow = o.glow
         photoLook = o.photoLook
         photoNr = o.photoNr
         squeeze = o.squeeze
@@ -175,6 +177,7 @@ data class Config(
         .put("hdrFrames", hdrFrames)
         .put("upscale", upscale)
         .put("bw", bw)
+        .put("glow", glow)
         .put("photoLook", photoLook)
         .put("photoNr", photoNr)
         .put("squeeze", squeeze)
@@ -227,6 +230,7 @@ data class Config(
                 hdrFrames = o.optInt("hdrFrames", d.hdrFrames).let { if (it == 2) 2 else 3 },
                 upscale = o.optBoolean("upscale", d.upscale),
                 bw = o.optBoolean("bw", d.bw),
+                glow = o.optBoolean("glow", d.glow),
                 photoLook = o.optInt("photoLook", d.photoLook).coerceIn(0, 2),
                 photoNr = o.optInt("photoNr", if (o.optBoolean("photoNrOff", false)) 0 else d.photoNr),
                 squeeze = o.optInt("squeeze", d.squeeze),
