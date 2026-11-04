@@ -326,6 +326,23 @@ class MainActivity : Activity(), CameraController.Callbacks {
         super.onPause()
     }
 
+    override fun onDestroy() {
+        // Stop all producers before shutting down their worker threads. onPause handles
+        // normal backgrounding; this is the final release when the Activity is destroyed.
+        ui.removeCallbacks(ticker)
+        ui.removeCallbacks(monitorTick)
+        cancelCountdown()
+        cancelExpPull()
+        oriListener.disable()
+        stopMonitor()
+        tap?.stop()
+        tap = null
+        if (::cam.isInitialized) cam.release()
+        procExec.shutdownNow()
+        steadyExec.shutdownNow()
+        super.onDestroy()
+    }
+
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
         if (hasFocus) hideBars()
@@ -2549,7 +2566,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
     }
 
     /**
-     * Produce a flat 720p monitoring image. LUT processing intentionally remains on the laptop;
+     * Produce a flat 720p/1080p monitoring image. LUT processing intentionally remains on the laptop;
      * the phone only scales/encodes its current preview. Work is moved off the UI thread and a
      * single reusable bitmap avoids the previous per-frame bitmap copy/allocation.
      */
