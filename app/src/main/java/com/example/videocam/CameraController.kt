@@ -627,10 +627,19 @@ class CameraController(
                     cd.close()
                     if (wasActive) {
                         device = null
-                        closeSession()
-                        releaseRecorder()
+                        if (recording) {
+                            stopRecording()
+                            ui.onMessage("Recording stopped because the camera disconnected")
+                        } else {
+                            closeSession()
+                            releaseRecorder()
+                            if (busy) {
+                                endLong()
+                                finishBusy()
+                            }
+                        }
                         if (started) {
-                            ui.onMessage("Camera disconnected; trying another detected lens")
+                            ui.onMessage("Trying another detected lens")
                             handler.postDelayed({ openCameraCandidate(candidates, index + 1) }, 250)
                         }
                     } else if (settled.compareAndSet(false, true) && started) {
@@ -643,10 +652,19 @@ class CameraController(
                     cd.close()
                     if (wasActive) {
                         device = null
-                        closeSession()
-                        releaseRecorder()
+                        if (recording) {
+                            stopRecording()
+                            ui.onMessage("Recording stopped after camera error $error")
+                        } else {
+                            closeSession()
+                            releaseRecorder()
+                            if (busy) {
+                                endLong()
+                                finishBusy()
+                            }
+                        }
                         if (started) {
-                            ui.onMessage("Camera error $error; trying another detected lens")
+                            ui.onMessage("Trying another detected lens")
                             handler.postDelayed({ openCameraCandidate(candidates, index + 1) }, 250)
                         }
                     } else if (settled.compareAndSet(false, true) && started) {
