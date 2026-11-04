@@ -94,6 +94,11 @@ class MainActivity : Activity(), CameraController.Callbacks {
     private lateinit var cam: CameraController
 
     private lateinit var root: FrameLayout
+    private lateinit var transitionCover: View
+    private var transitionStartedAt = 0L
+    private val finishCameraTransition = Runnable {
+        if (::transitionCover.isInitialized) transitionCover.visibility = View.GONE
+    }
     private lateinit var tv: TextureView
     private lateinit var falseView: ImageView
     private lateinit var peakView: ImageView
@@ -812,7 +817,31 @@ class MainActivity : Activity(), CameraController.Callbacks {
         root.addView(recEdge, lp(MATCH, MATCH, Gravity.TOP))
         meter.visibility = View.GONE
 
+        transitionCover = View(this).apply {
+            setBackgroundColor(Color.BLACK)
+            visibility = View.GONE
+            isClickable = true
+            isFocusable = true
+        }
+        root.addView(transitionCover, lp(MATCH, MATCH, Gravity.CENTER))
         setContentView(root)
+    }
+
+    private fun beginCameraTransition() {
+        if (!::transitionCover.isInitialized) return
+        ui.removeCallbacks(finishCameraTransition)
+        transitionStartedAt = SystemClock.elapsedRealtime()
+        transitionCover.visibility = View.VISIBLE
+        // Never leave the cover up indefinitely if a camera callback is lost.
+        ui.postDelayed(finishCameraTransition, 260L)
+    }
+
+    private fun completeCameraTransition() {
+        if (!::transitionCover.isInitialized || transitionCover.visibility != View.VISIBLE) return
+        ui.removeCallbacks(finishCameraTransition)
+        val elapsed = SystemClock.elapsedRealtime() - transitionStartedAt
+        // A very short minimum masks the surface teardown; readiness ends the transition.
+        ui.postDelayed(finishCameraTransition, (100L - elapsed).coerceAtLeast(0L))
     }
 
     private fun setRecLook(on: Boolean) {
@@ -1490,6 +1519,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
 
     private fun streamChanged() {
         store.save("last", cfg)
+        beginCameraTransition()
         cam.reconfigure()
         refreshUi()
     }
@@ -1551,6 +1581,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
         updateOrientationMode()
         updateAudioTap()
         rebuildSamplers()
+        beginCameraTransition()
         cam.reconfigure()
         loadLatestClip()
         refreshUi()
@@ -2771,6 +2802,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
     }
 
     override fun onReady() {
+        completeCameraTransition()
         store.save("last", cfg)
         refreshZoomSlider()
         expSliderManual = null
