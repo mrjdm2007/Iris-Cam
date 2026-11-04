@@ -133,7 +133,7 @@ class CropRenderer(
             "else if(uFilter==14){x+=max(y-0.58,0.0)*vec3(0.10,0.08,0.06)*uIntensity;}" +
             "else if(uFilter==15){x=mix(c,vec3(y),0.02*uIntensity);x=(x-0.5)*mix(1.0,0.94,uIntensity)+0.5;}" +
             "else if(uFilter==16){float n=fract(sin(dot(gl_FragCoord.xy,vec2(12.9898,78.233)))*43758.5453)-0.5;x+=n*0.035*uIntensity;}" +
-            "else if(uFilter==17){float flare=max(0.0,1.0-abs(vTc.y-0.5)*18.0);x+=vec3(flare*0.18*uIntensity);}" +
+            "else if(uFilter==17){float flare=max(0.0,1.0-abs(vTc.y-0.5)*18.0);x+=vec3(flare*0.18*uIntensity);}else if(uFilter==18){x=mix(vec3(y),x,1.18);x=(x-0.5)*1.12+0.5;x+=vec3(0.008,0.006,0.012);}else if(uFilter==19){float band=step(0.985,fract(gl_FragCoord.y*0.19));float noise=fract(sin(dot(gl_FragCoord.xy,vec2(12.9898,78.233)))*43758.5453);float tear=step(0.992,fract(gl_FragCoord.y*0.013));x.r=texture2D(sTex,vTc+vec2(0.0025*uIntensity/100.0,0.0)).r;x.b=texture2D(sTex,vTc-vec2(0.0025*uIntensity/100.0,0.0)).b;x*=1.0-(band*0.10*uIntensity/100.0);x+=vec3((noise-0.5)*0.045*uIntensity/100.0);x=mix(x,vec3(y),0.12*uIntensity/100.0);x+=vec3(tear*0.025*uIntensity/100.0);}" +
             "return clamp(x,0.0,1.0);}" +
             "void main(){vec4 color=texture2D(sTex,vTc);color.rgb=grade(color.rgb);gl_FragColor=color;}"
         program = link(compile(GLES20.GL_VERTEX_SHADER, vs), compile(GLES20.GL_FRAGMENT_SHADER, fs))
@@ -204,7 +204,7 @@ class CropRenderer(
             GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
             GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, texId)
             GLES20.glUniformMatrix4fv(uTex, 1, false, tm, 0)
-            GLES20.glUniform1i(GLES20.glGetUniformLocation(program, "uFilter"), filterId.coerceIn(0, 17))
+            GLES20.glUniform1i(GLES20.glGetUniformLocation(program, "uFilter"), filterId.coerceIn(0, 19))
             GLES20.glUniform1f(GLES20.glGetUniformLocation(program, "uIntensity"), filterIntensity.coerceIn(0, 100) / 100f)
             verts.position(0)
             GLES20.glEnableVertexAttribArray(aPos)
