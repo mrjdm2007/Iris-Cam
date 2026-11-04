@@ -19,7 +19,7 @@ This project is an in-progress source update. It is not represented as a device-
 - Kept both Wi-Fi monitoring and USB monitoring through ADB reverse. USB instructions are shown in the app; example: `adb reverse tcp:8080 tcp:8080`, then open `http://localhost:8080/?pin=...` using the PIN shown by the app.
 - Expanded laptop `.cube` parsing to accept standard 3D LUTs and 1D-only LUTs, and added shader/program error reporting. The laptop applies the LUT locally in WebGL; the phone does not apply it to the monitoring stream.
 - Kept the laptop REC/CAPTURE control and the focus, zoom and exposure controls with their A/B marks and timed racks.
-- Monitoring is stopped from the app when it leaves the foreground.
+- Monitoring is stopped from the app when it leaves the foreground. The monitor server now recreates its worker pool on restart, so opening the monitor again after stopping it does not reuse a shut-down executor.
 
 ## Important limitations still requiring implementation or device validation
 
