@@ -1099,6 +1099,10 @@ class MainActivity : Activity(), CameraController.Callbacks {
             cfg.bw = !cfg.bw
             applyLive()
         },
+        "Glow filter: ${if (cfg.glow) "On" else "Off"}" to {
+            cfg.glow = !cfg.glow
+            applyLive()
+        },
         "Aux-lens upscale to 12.6 MP: ${if (cfg.upscale) "On" else "Off"}" to {
             cfg.upscale = !cfg.upscale
             applyLive()
