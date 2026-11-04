@@ -93,7 +93,6 @@ class MonitorServer(private val host: Host, val pin: String) {
         audioClients.clear()
         h264Clients.forEach { it.close() }
         h264Clients.clear()
-        h264Count.set(0)
         latestH264Config = null
         pool.shutdownNow()
     }
