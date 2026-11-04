@@ -823,7 +823,8 @@ class CameraController(
             rec.setVideoEncodingBitRate(cfg.bitrateMbps * 1_000_000)
             rec.setVideoFrameRate(cfg.fps)
             val os = outSize()
-            val cropIt = effRatio() > 0
+            // Route selected video looks through the GPU renderer even for standard 16:9 clips.
+            val cropIt = effRatio() > 0 || cfg.filterId > 0
             rec.setVideoSize(os.width, os.height)
             rec.setVideoEncoder(
                 if (cfg.hevc) MediaRecorder.VideoEncoder.HEVC else MediaRecorder.VideoEncoder.H264
@@ -842,7 +843,10 @@ class CameraController(
             recorder = rec
             if (cropIt) {
                 val rot = tv.display?.rotation ?: Surface.ROTATION_90
-                crop = CropRenderer(rec.surface, os.width, os.height, cfg.width, cfg.height, rot)
+                crop = CropRenderer(
+                    rec.surface, os.width, os.height, cfg.width, cfg.height, rot,
+                    cfg.filterId, cfg.filterIntensity
+                )
             }
         } catch (e: Exception) {
             recorder = null
