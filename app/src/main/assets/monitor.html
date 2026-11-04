@@ -17,8 +17,8 @@
   #wrap { position: relative; width: 100%; background: #000; display: flex; justify-content: center; }
   #wrap.recording { box-shadow: inset 0 0 0 3px #e53935; }
   #stage { position: relative; width: 100%; max-height: 72vh; }
-  #v, #c { display: block; width: 100%; }
-  #c { position: absolute; left: 0; top: 0; display: none; }
+  #v, #c, #h264 { display: block; width: 100%; }
+  #c { position: absolute; left: 0; top: 0; display: none; }\n  #h264 { display:none; width:100%; height:100%; object-fit:contain; }
   #meter { position: absolute; right: 8px; top: 8px; bottom: 8px; width: 8px; background: #222a; border-radius: 4px; overflow: hidden; }
   #meterFill { position: absolute; left: 0; right: 0; bottom: 0; height: 0; background: linear-gradient(#e53935, #ffb300 25%, #43a047 60%); }
   #panel { display:flex; flex-wrap:wrap; gap:12px; padding:14px 18px; max-width:1600px; margin:auto; }
@@ -100,9 +100,86 @@
   var img = $('v');
   var st = {};
 
-  function connect() { img.src = '/stream?pin=' + encodeURIComponent(pin) + '&t=' + Date.now(); }
-  img.onerror = function () { setTimeout(connect, 1500); };
-  connect();
+  function connectMjpeg() {
+    $('h264').style.display = 'none';
+    img.style.display = 'block';
+    img.src = '/stream?pin=' + encodeURIComponent(pin) + '&t=' + Date.now();
+  }
+  img.onerror = function () { setTimeout(connectMjpeg, 1500); };
+
+  // H.264 over WebSocket, decoded by WebCodecs. Fall back to MJPEG on older browsers.
+  var h264Socket = null, h264Decoder = null, h264Fallback = false, waitingForKey = true;
+  function h264FallbackToMjpeg() {
+    if (h264Fallback) return;
+    h264Fallback = true;
+    try { if (h264Socket) h264Socket.close(); } catch (_) {}
+    try { if (h264Decoder) h264Decoder.close(); } catch (_) {}
+    h264Socket = null; h264Decoder = null;
+    $('info').textContent = 'H.264 unavailable · MJPEG fallback';
+    connectMjpeg();
+  }
+  function connectH264() {
+    if (!('VideoDecoder' in window) || !('EncodedVideoChunk' in window) || !('WebSocket' in window)) {
+      h264FallbackToMjpeg(); return;
+    }
+    try {
+      h264Socket = new WebSocket('ws://' + location.host + '/ws?type=h264&pin=' + encodeURIComponent(pin));
+      h264Socket.binaryType = 'arraybuffer';
+    } catch (_) { h264FallbackToMjpeg(); return; }
+    h264Socket.onopen = function () {
+      $('info').textContent = 'H.264 live monitor';
+    };
+    h264Socket.onerror = h264FallbackToMjpeg;
+    h264Socket.onclose = function () { if (!h264Fallback) h264FallbackToMjpeg(); };
+    h264Socket.onmessage = function (event) {
+      if (typeof event.data === 'string') { h264FallbackToMjpeg(); return; }
+      var p = new Uint8Array(event.data);
+      if (!p.length || p[0] === 3) { h264FallbackToMjpeg(); return; }
+      if (p[0] === 1) {
+        if (p.length < 16) return;
+        var w = (p[1] << 8) | p[2], h = (p[3] << 8) | p[4];
+        var desc = p.slice(5);
+        if (desc.length < 7) return;
+        var hex = function(v){ return v.toString(16).padStart(2, '0'); };
+        var codec = 'avc1.' + hex(desc[1]) + hex(desc[2]) + hex(desc[3]);
+        try {
+          if (h264Decoder) h264Decoder.close();
+          h264Decoder = new VideoDecoder({
+            output: function(frame) {
+              var cv = $('h264'), ctx = cv.getContext('2d');
+              if (cv.width !== frame.displayWidth || cv.height !== frame.displayHeight) {
+                cv.width = frame.displayWidth; cv.height = frame.displayHeight;
+                $('stage').style.aspectRatio = cv.width + ' / ' + cv.height;
+              }
+              ctx.drawImage(frame, 0, 0, cv.width, cv.height);
+              frame.close();
+            },
+            error: function() { h264FallbackToMjpeg(); }
+          });
+          h264Decoder.configure({
+            codec: codec, codedWidth: w, codedHeight: h, description: desc,
+            optimizeForLatency: true, hardwareAcceleration: 'prefer-hardware'
+          });
+          $('h264').style.display = 'block';
+          img.style.display = 'none';
+          waitingForKey = true;
+        } catch (_) { h264FallbackToMjpeg(); }
+      } else if (p[0] === 2 && h264Decoder && h264Decoder.state === 'configured') {
+        var key = (p[1] & 1) !== 0;
+        if (waitingForKey && !key) return;
+        if (key) waitingForKey = false;
+        if (h264Decoder.decodeQueueSize > 8 && !key) { waitingForKey = true; return; }
+        var view = new DataView(p.buffer, p.byteOffset, p.byteLength);
+        var ts = Number(view.getBigUint64(2, false));
+        try {
+          h264Decoder.decode(new EncodedVideoChunk({
+            type: key ? 'key' : 'delta', timestamp: ts, data: p.subarray(10)
+          }));
+        } catch (_) { waitingForKey = true; }
+      }
+    };
+  }
+  connectH264();
 
   var focusDrag = false, zoomDrag = false;
   function update(s) {
