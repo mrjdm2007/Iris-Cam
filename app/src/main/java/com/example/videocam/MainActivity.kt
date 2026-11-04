@@ -1139,7 +1139,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
                     cfg.flat = false
                     cfgDirty = true
                     applyLive()
-                    toast(if (cfg.mode == 0 && id != 0) "Preview only in video mode; recorded video is unchanged" else "${Look.FILTER_NAMES[id]} selected")
+                    toast(if (cfg.mode == 0 && id != 0) "${Look.FILTER_NAMES[id]} applied to video preview and recording" else "${Look.FILTER_NAMES[id]} selected")
                 }
             }
         }
@@ -2416,7 +2416,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
     // ---------- black & white preview ----------
 
     private fun applyBwLook() {
-        // Display-only TextureView grade. The recorded video stream remains untouched.
+        // TextureView preview grade; the GPU recorder renderer applies the matching grade to saved video.
         tv.setLayerPaint(
             if (cfg.filterId > 0) Paint().apply {
                 colorFilter = Look.previewFilter(cfg.filterId, cfg.filterIntensity)
