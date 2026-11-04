@@ -818,11 +818,20 @@ class MainActivity : Activity(), CameraController.Callbacks {
         root.addView(recEdge, lp(MATCH, MATCH, Gravity.TOP))
         meter.visibility = View.GONE
 
-        transitionCover = View(this).apply {
+        transitionCover = FrameLayout(this).apply {
             setBackgroundColor(Color.BLACK)
             visibility = View.GONE
             isClickable = true
             isFocusable = true
+            addView(TextView(this@MainActivity).apply {
+                text = "LOADING"
+                setTextColor(Color.WHITE)
+                textSize = 14f
+                typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+                letterSpacing = 0.22f
+                gravity = Gravity.CENTER
+                setShadowLayer(8f, 0f, 0f, Color.BLACK)
+            }, FrameLayout.LayoutParams(WRAP, WRAP, Gravity.CENTER))
         }
         root.addView(transitionCover, lp(MATCH, MATCH, Gravity.CENTER))
         setContentView(root)
@@ -2541,55 +2550,84 @@ class MainActivity : Activity(), CameraController.Callbacks {
         toast("Copied $label")
     }
 
+    private fun addCopyRow(parent: LinearLayout, title: String, value: String) {
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(8), dp(5), dp(4), dp(5))
+        }
+        val label = TextView(this).apply {
+            text = "$title\n$value"
+            setTextColor(Color.WHITE)
+            textSize = 12f
+            maxLines = 3
+            setPadding(0, 0, dp(8), 0)
+        }
+        row.addView(label, LinearLayout.LayoutParams(0, WRAP, 1f))
+        val copy = android.widget.Button(this).apply {
+            text = "COPY"
+            isAllCaps = true
+            setOnClickListener { copyToClipboard(title, value) }
+        }
+        row.addView(copy, LinearLayout.LayoutParams(WRAP, WRAP))
+        parent.addView(row, LinearLayout.LayoutParams(MATCH, WRAP))
+    }
+
     private fun showUsbCommands() {
         val m = monitor
         val port = m?.port ?: 8080
         val url = if (m != null) "http://localhost:$port/?pin=${m.pin}" else "http://localhost:$port"
-        val options = arrayOf(
-            "Copy adb devices",
-            "Copy ADB reverse command",
-            "Copy laptop monitor URL",
-            "Copy disconnect command"
-        )
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(8), dp(20), dp(4))
+        }
+        TextView(this).apply {
+            text = "Connect your phone to the Mac with USB debugging enabled. Start Laptop Monitor first to get its live PIN."
+            setTextColor(Color.WHITE)
+            textSize = 13f
+        }.also { content.addView(it) }
+        addCopyRow(content, "ADB devices command", "adb devices")
+        addCopyRow(content, "ADB reverse command", "adb reverse tcp:$port tcp:$port")
+        addCopyRow(content, "Laptop monitor URL", url)
+        addCopyRow(content, "Disconnect command", "adb reverse --remove tcp:$port")
         MaterialAlertDialogBuilder(this)
             .setTitle("USB monitoring on Mac")
-            .setMessage("Enable Developer options and USB debugging on your phone, connect a data-capable USB cable to your Mac, then authorize the Mac. Start Laptop Monitor first to get the live PIN and full URL.")
-            .setItems(options) { _, which ->
-                when (which) {
-                    0 -> copyToClipboard("adb devices", "adb devices")
-                    1 -> copyToClipboard("ADB reverse command", "adb reverse tcp:$port tcp:$port")
-                    2 -> copyToClipboard("monitor URL", url)
-                    3 -> copyToClipboard("disconnect command", "adb reverse --remove tcp:$port")
-                }
-            }
+            .setView(content)
             .setNegativeButton(if (m != null) "Turn off monitor" else "Close") { _, _ -> if (m != null) stopMonitor() }
+            .setPositiveButton("Done", null)
             .show()
     }
 
     private fun showMonitorInfo() {
         val m = monitor ?: return
         val ip = localIp()
-        val wifi = if (ip == null) "Wi-Fi: unavailable (connect both devices to the same network)" else
-            "WI-FI\nOpen on your laptop: http://$ip:${m.port}/?pin=${m.pin}"
-        val usb = "USB-C (ADB)\n1. Enable Developer options and USB debugging.\n2. Connect phone to Mac with a data cable and authorize.\n3. Run: adb reverse tcp:${m.port} tcp:${m.port}\n4. Open: http://localhost:${m.port}/?pin=${m.pin}"
-        val options = arrayOf(
-            "Copy adb devices",
-            "Copy ADB reverse command",
-            "Copy complete laptop URL (with PIN)",
-            "Copy disconnect command"
-        )
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(8), dp(20), dp(4))
+        }
+        TextView(this).apply {
+            text = "Laptop camera monitor · PIN ${m.pin}\n\nThe feed is served locally on your network or through USB ADB."
+            setTextColor(Color.WHITE)
+            textSize = 13f
+        }.also { content.addView(it) }
+        if (ip != null) {
+            addCopyRow(content, "Wi-Fi monitor URL", "http://$ip:${m.port}/?pin=${m.pin}")
+        } else {
+            TextView(this).apply {
+                text = "Wi-Fi address unavailable. Connect both devices to the same network."
+                setTextColor(Color.LTGRAY)
+                textSize = 12f
+            }.also { content.addView(it) }
+        }
+        addCopyRow(content, "ADB devices command", "adb devices")
+        addCopyRow(content, "ADB reverse command", "adb reverse tcp:${m.port} tcp:${m.port}")
+        addCopyRow(content, "USB monitor URL", "http://localhost:${m.port}/?pin=${m.pin}")
+        addCopyRow(content, "Disconnect command", "adb reverse --remove tcp:${m.port}")
         MaterialAlertDialogBuilder(this)
-            .setTitle("Laptop camera monitor · PIN ${m.pin}")
-            .setMessage("$wifi\n\n$usb\n\nSelect a row below to copy it. The feed is served locally; no cloud upload is used by this monitor server.")
-            .setItems(options) { _, which ->
-                when (which) {
-                    0 -> copyToClipboard("adb devices", "adb devices")
-                    1 -> copyToClipboard("ADB reverse command", "adb reverse tcp:${m.port} tcp:${m.port}")
-                    2 -> copyToClipboard("monitor URL", "http://localhost:${m.port}/?pin=${m.pin}")
-                    3 -> copyToClipboard("disconnect command", "adb reverse --remove tcp:${m.port}")
-                }
-            }
+            .setTitle("Laptop camera monitor")
+            .setView(content)
             .setNegativeButton("Turn off") { _, _ -> stopMonitor() }
+            .setPositiveButton("Done", null)
             .show()
     }
 
