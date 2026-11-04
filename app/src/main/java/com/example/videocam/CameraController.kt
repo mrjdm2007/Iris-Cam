@@ -320,7 +320,7 @@ class CameraController(
         }
     }.getOrDefault(false)
 
-    /** Resolve a lens shortcut to a real advertised camera ID, never a digital zoom substitute. */
+    /** Resolve a shortcut only to a real, advertised physical lens with a close focal-length match. */
     fun cameraIdForShortcut(ratio: Float): String? {
         if (isMotoEdge50NeoProfile()) {
             val exact = when {
@@ -330,19 +330,33 @@ class CameraController(
             }
             if (exact in cameraIds && !isFront(exact)) return exact
         }
-        val back = cameraIds.filterNot { isFront(it) }
-        if (back.isEmpty()) return null
+
+        fun isLogical(id: String): Boolean = runCatching {
+            val caps = manager.getCameraCharacteristics(id)
+                .get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES) ?: intArrayOf()
+            caps.contains(CameraMetadata.REQUEST_AVAILABLE_CAPABILITIES_LOGICAL_MULTI_CAMERA)
+        }.getOrDefault(false)
+
         fun equivalent(id: String): Float? = runCatching {
             val c = manager.getCameraCharacteristics(id)
-            val f = c.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.firstOrNull() ?: return@runCatching null
-            val size = c.get(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE) ?: return@runCatching null
+            val f = c.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.firstOrNull()
+                ?: return@runCatching null
+            val size = c.get(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE)
+                ?: return@runCatching null
             f * 43.27f / hypot(size.width, size.height)
         }.getOrNull()
-        val baseline = back.mapNotNull { id -> equivalent(id)?.let { id to it } }
-            .minByOrNull { abs(it.second - 24f) }?.second ?: return back.firstOrNull()
+
+        val physicalBack = cameraIds.filter { !isFront(it) && !isLogical(it) }
+        if (physicalBack.isEmpty()) return null
+        val measured = physicalBack.mapNotNull { id -> equivalent(id)?.let { id to it } }
+        val baseline = measured.minByOrNull { abs(it.second - 24f) }?.second ?: return null
         val target = baseline * ratio
-        return back.mapNotNull { id -> equivalent(id)?.let { id to it } }
-            .minByOrNull { abs(it.second - target) }?.first
+        val match = measured.minByOrNull { abs(it.second - target) } ?: return null
+
+        // Avoid pretending a single main camera is an ultrawide/telephoto lens.
+        // A 30% tolerance accommodates sensor/crop differences across manufacturers.
+        val relativeError = abs(match.second - target) / target.coerceAtLeast(1f)
+        return match.first.takeIf { relativeError <= 0.30f }
     }
 
     fun cameraLabel(id: String): String {
@@ -570,32 +584,66 @@ class CameraController(
             ui.onMessage("No usable camera found")
             return
         }
-        if (cfg.cameraId !in cameraIds) cfg.cameraId = cameraIds.first()
+        val candidates = (listOf(cfg.cameraId) + cameraIds)
+            .filter { it in cameraIds }
+            .distinct()
+        openCameraCandidate(candidates, 0)
+    }
+
+    /**
+     * Try the selected camera first, then other CameraManager-advertised cameras if an OEM
+     * auxiliary ID is present but cannot actually be opened. This keeps device-specific IDs
+     * from making the whole app unusable on a different firmware/build.
+     */
+    @SuppressLint("MissingPermission")
+    private fun openCameraCandidate(candidates: List<String>, index: Int) {
+        if (!started) return
+        if (index >= candidates.size) {
+            ui.onMessage("Couldn't open any detected camera. Check camera permission and close other camera apps.")
+            return
+        }
+
+        val id = candidates[index]
+        val settled = java.util.concurrent.atomic.AtomicBoolean(false)
         try {
-            loadChars(cfg.cameraId)
-            manager.openCamera(cfg.cameraId, object : CameraDevice.StateCallback() {
+            loadChars(id)
+            manager.openCamera(id, object : CameraDevice.StateCallback() {
                 override fun onOpened(cd: CameraDevice) {
-                    if (!started) {
+                    if (!settled.compareAndSet(false, true) || !started) {
                         cd.close()
                         return
                     }
                     device = cd
+                    if (cfg.cameraId != id) {
+                        cfg.cameraId = id
+                        store.save("last", cfg)
+                        ui.onMessage("Selected lens unavailable; using ${cameraLabel(id)} instead")
+                    }
                     configureAndStart()
                 }
 
                 override fun onDisconnected(cd: CameraDevice) {
                     cd.close()
                     if (device === cd) device = null
+                    if (settled.compareAndSet(false, true) && started) {
+                        openCameraCandidate(candidates, index + 1)
+                    }
                 }
 
                 override fun onError(cd: CameraDevice, error: Int) {
                     cd.close()
                     if (device === cd) device = null
-                    ui.onMessage("Camera error $error")
+                    if (settled.compareAndSet(false, true) && started) {
+                        openCameraCandidate(candidates, index + 1)
+                    } else {
+                        ui.onMessage("Camera error $error")
+                    }
                 }
             }, handler)
-        } catch (e: Exception) {
-            ui.onMessage("Couldn't open camera: ${e.message}")
+        } catch (_: Exception) {
+            if (settled.compareAndSet(false, true)) {
+                handler.post { openCameraCandidate(candidates, index + 1) }
+            }
         }
     }
 
