@@ -125,7 +125,6 @@ class MainActivity : Activity(), CameraController.Callbacks {
     private lateinit var eB: TextView
     private lateinit var aChip: TextView
     private lateinit var bChip: TextView
-    private val lensChips = LinkedHashMap<String, TextView>()
 
     private lateinit var formatChip: TextView
     private lateinit var imageChip: TextView
@@ -1334,7 +1333,6 @@ class MainActivity : Activity(), CameraController.Callbacks {
         setRecLook(cam.recording)
 
         setActive(t2x, cam.zoom >= 1.9f)
-        lensChips.forEach { (id, c) -> setActive(c, cfg.cameraId == id) }
         setActive(tPeak, cfg.peak > 0)
         setActive(tFalse, falseOn)
         setActive(tTorch, if (photo) cfg.flashMode != 0 else cam.torch)
@@ -1428,19 +1426,6 @@ class MainActivity : Activity(), CameraController.Callbacks {
             cam.zoomRange.lower, cam.zoomHi(), true, listOf(0.5f, 1f, 2f, 3f, 5f, 7f)
         ) { fmtZoom(it) }
         zoomSlider.setZoomSilently(cam.zoom)
-    }
-
-    private fun addLensChips() {
-        var idx = 0
-        for ((id, name) in listOf("2" to "0.7x", "0" to "1x", "3" to "2.7x")) {
-            if (!cam.cameraIds.contains(id)) continue
-            val c = chip(name) { switchLens(id) }
-            c.maxLines = 1
-            c.textSize = 12f
-            c.setPadding(dp(4), dp(6), dp(4), dp(6))
-            lensChips[id] = c
-            toolsCol.addView(c, idx++, LinearLayout.LayoutParams(dp(70), WRAP).apply { setMargins(0, dp(3), 0, dp(3)) })
-        }
     }
 
     private fun switchLens(id: String) {
@@ -2906,6 +2891,5 @@ class MainActivity : Activity(), CameraController.Callbacks {
         zoomLabel.text = "ZOOM " + fmtZoom(z)
         zoomSlider.setZoomSilently(z)
         setActive(t2x, z >= 1.9f)
-        lensKeyChips.forEach { (c, r) -> setActive(c, abs(z - r) < 0.08f) }
     }
 }
