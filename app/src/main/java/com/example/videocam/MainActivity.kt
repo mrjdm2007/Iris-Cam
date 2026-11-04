@@ -2628,7 +2628,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
                     monitorBmp = b
                 }
                 if (!tv.isAvailable) return@execute
-                tv.getBitmap(b) ?: return@execute
+                tv.getBitmap(b)
                 val deg = when (tv.display?.rotation ?: Surface.ROTATION_90) {
                     Surface.ROTATION_90 -> 270
                     Surface.ROTATION_270 -> 90
