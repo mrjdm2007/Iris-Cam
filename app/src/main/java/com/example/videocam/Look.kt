@@ -55,12 +55,27 @@ object Look {
     }
 
     /** Returns [src] untouched when no look is wanted, otherwise a new bitmap with the look applied. */
-    fun apply(src: Bitmap, bw: Boolean, flat: Boolean, photoLook: Int = 0): Bitmap {
+    fun apply(src: Bitmap, bw: Boolean, flat: Boolean, photoLook: Int = 0, blue: Boolean = false): Bitmap {
         if (bw) {
             val out = Bitmap.createBitmap(src.width, src.height, Bitmap.Config.ARGB_8888)
             val p = Paint(Paint.FILTER_BITMAP_FLAG)
             p.colorFilter = bwFilter()
             Canvas(out).drawBitmap(src, 0f, 0f, p)
+            return out
+        }
+        if (blue) {
+            // Cool cinematic blue grade: gently cools shadows and midtones without
+            // crushing the image or applying a fake depth/subject mask.
+            val out = Bitmap.createBitmap(src.width, src.height, Bitmap.Config.ARGB_8888)
+            val matrix = ColorMatrix(floatArrayOf(
+                0.88f, 0.04f, 0.02f, 0f, -2f,
+                0.02f, 0.94f, 0.04f, 0f, 1f,
+                0.02f, 0.08f, 1.12f, 0f, 7f,
+                0f, 0f, 0f, 1f, 0f
+            ))
+            Canvas(out).drawBitmap(src, 0f, 0f, Paint(Paint.FILTER_BITMAP_FLAG).apply {
+                colorFilter = ColorMatrixColorFilter(matrix)
+            })
             return out
         }
         if (photoLook == 1) {
@@ -116,11 +131,25 @@ object Look {
     }
 
 
-    /** Soft highlight bloom: downsampled light is screened over the original, preserving detail. */
-    fun glow(src: Bitmap, strength: Int = 72): Bitmap {
+    /** Highlight-selective soft bloom. The source remains sharp; only bright areas bleed softly. */
+    fun glow(src: Bitmap, strength: Int = 78): Bitmap {
         val w = src.width
         val h = src.height
-        val low = Bitmap.createScaledBitmap(src, (w / 7).coerceAtLeast(1), (h / 7).coerceAtLeast(1), true)
+        val sw = (w / 8).coerceAtLeast(1)
+        val sh = (h / 8).coerceAtLeast(1)
+        val low = Bitmap.createScaledBitmap(src, sw, sh, true)
+        val pixels = IntArray(sw * sh)
+        low.getPixels(pixels, 0, sw, 0, 0, sw, sh)
+        for (i in pixels.indices) {
+            val c = pixels[i]
+            val r = (c shr 16) and 255
+            val g = (c shr 8) and 255
+            val b = c and 255
+            val luma = (r * 54 + g * 183 + b * 19) shr 8
+            val gate = ((luma - 150).coerceAtLeast(0) * 255 / 105).coerceIn(0, 255)
+            pixels[i] = (gate shl 24) or (r shl 16) or (g shl 8) or b
+        }
+        low.setPixels(pixels, 0, sw, 0, 0, sw, sh)
         val out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(out)
         canvas.drawBitmap(src, 0f, 0f, Paint(Paint.FILTER_BITMAP_FLAG))
