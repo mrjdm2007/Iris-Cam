@@ -269,6 +269,12 @@ class MainActivity : Activity(), CameraController.Callbacks {
             cfg.ver = 2
             store.save("last", cfg)
         }
+        if (cfg.ver < 3) {
+            // New default: standard JPEG. Ultra HDR and RAW remain available as explicit modes.
+            cfg.photoFormat = 0
+            cfg.ver = 3
+            store.save("last", cfg)
+        }
         slider.onChange = { f ->
             cam.cancelRack()
             cam.setFocus(f)
