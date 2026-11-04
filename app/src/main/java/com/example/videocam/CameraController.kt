@@ -785,19 +785,39 @@ class CameraController(
     }
 
     private fun closeSession() {
+        // Invalidate callbacks before tearing down the old mode's outputs.
         gen++
+        val oldSession = session
+        session = null
         try {
-            session?.close()
+            oldSession?.stopRepeating()
         } catch (_: Exception) {
         }
-        session = null
+        try {
+            oldSession?.abortCaptures()
+        } catch (_: Exception) {
+        }
+        try {
+            oldSession?.close()
+        } catch (_: Exception) {
+        }
+
+        // Release outputs only after asking Camera2 to stop using the old session.
+        try {
+            previewSurface?.release()
+        } catch (_: Exception) {
+        }
+        previewSurface = null
         try {
             reader?.close()
         } catch (_: Exception) {
         }
         reader = null
         synchronized(lock) {
-            shot?.image?.close()
+            try {
+                shot?.image?.close()
+            } catch (_: Exception) {
+            }
             shot = null
         }
     }
@@ -884,7 +904,6 @@ class CameraController(
         val ps = previewSize()
         lastPreview = ps
         st.setDefaultBufferSize(ps.width, ps.height)
-        previewSurface?.release()
         val preview = Surface(st)
         previewSurface = preview
         val rs = (crop?.input ?: recorder?.surface) ?: run {
@@ -1253,7 +1272,6 @@ class CameraController(
         val ps = previewSizeForPhoto(cap)
         lastPreview = ps
         st.setDefaultBufferSize(ps.width, ps.height)
-        previewSurface?.release()
         val preview = Surface(st)
         previewSurface = preview
 
