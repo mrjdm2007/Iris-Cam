@@ -251,18 +251,19 @@ class MainActivity : Activity(), CameraController.Callbacks {
         rebuildSamplers()
         cam = CameraController(this, tv, cfg, store, this)
         if (cfg.photoFormat == 3 && !cam.ultraHdrAvailable) cfg.photoFormat = 0
+        // Apply the first-run camera default before advancing the schema version.
+        // Existing explicit user lens choices are preserved.
+        if (cfg.ver < 1) {
+            if (cfg.cameraId.isBlank() && cam.cameraIds.contains("5")) cfg.cameraId = "5"
+            cfg.ver = 1
+            store.save("last", cfg)
+        }
         if (cfg.ver < 2) {
             cfg.bitrateMbps = 50
             cfg.stab = 2
             cfg.saveDng = false
             cfg.scene = 0
             cfg.ver = 2
-            store.save("last", cfg)
-        }
-        if (cfg.ver < 1) {
-            // first run of this version: use the all-lenses camera so the zoom slider switches lenses by itself
-            if (cam.cameraIds.contains("5")) cfg.cameraId = "5"
-            cfg.ver = 1
             store.save("last", cfg)
         }
         slider.onChange = { f ->
@@ -1364,15 +1365,23 @@ class MainActivity : Activity(), CameraController.Callbacks {
     private fun showLensDropdown(anchor: View, shortcutRatio: Float) {
         if (!idle()) return
         val suggested = cam.cameraIdForShortcut(shortcutRatio)
-        val ids = cam.cameraIds.toMutableList()
-        if (suggested != null && suggested in ids) {
-            ids.remove(suggested)
-            ids.add(0, suggested)
+
+        // A shortcut selects the matching physical camera immediately when one is genuinely
+        // advertised. Do not silently map an unavailable auxiliary lens to the main camera.
+        if (suggested != null) {
+            switchLens(suggested)
+            return
+        }
+
+        // On devices without a matching auxiliary lens, retain the normal camera picker.
+        val ids = cam.cameraIds
+        if (ids.isEmpty()) {
+            toast("No compatible camera lens was detected")
+            return
         }
         val menu = PopupMenu(this, anchor)
         ids.forEachIndexed { index, id ->
-            val label = cam.cameraLabel(id) + if (id == suggested) " · shortcut target" else ""
-            menu.menu.add(0, index, index, label)
+            menu.menu.add(0, index, index, cam.cameraLabel(id))
         }
         menu.setOnMenuItemClickListener { item ->
             ids.getOrNull(item.itemId)?.let { switchLens(it) }
