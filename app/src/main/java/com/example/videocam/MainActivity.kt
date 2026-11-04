@@ -1344,7 +1344,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
 
     private fun refreshZoomSlider() {
         zoomSlider.configure(
-            cam.zoomRange.lower, cam.zoomHi(), true, listOf(0.6f, 1f, 2f, 3f, 5f, 7f)
+            cam.zoomRange.lower, cam.zoomHi(), true, listOf(0.5f, 1f, 2f, 3f, 5f, 7f)
         ) { fmtZoom(it) }
         zoomSlider.setZoomSilently(cam.zoom)
     }
