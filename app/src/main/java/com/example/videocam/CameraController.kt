@@ -96,7 +96,9 @@ class CameraController(
         val glow: Boolean,
         val blue: Boolean,
         val filterId: Int,
-        val filterIntensity: Int
+        val filterIntensity: Int,
+        val portrait: Boolean,
+        val portraitBlurStrength: Int
     ) {
         var image: Image? = null // RAW only
         var result: TotalCaptureResult? = null
@@ -1627,7 +1629,7 @@ class CameraController(
             val sh = Shot(
                 cfg.cameraId, fmt, chars, needRotation(), cfg.photoQuality, reqs.size,
                 cfg.bw, cfg.flat && !cfg.bw, cfg.photoLook, hplan != null, cfg.upscale && currentLensNeedsUpscale(), cfg.glow, cfg.blue,
-                cfg.filterId, cfg.filterIntensity
+                cfg.filterId, cfg.filterIntensity, cfg.portrait, cfg.portraitBlurStrength
             )
             synchronized(lock) { shot = sh }
             if (plan != null && plan.expNs * reqs.size >= 1_500_000_000L) {
@@ -1739,6 +1741,13 @@ class CameraController(
             out.recycle()
             out = bloomed
         }
+        if (sh.portrait) {
+            val portrait = PortraitProcessor.apply(out, sh.portraitBlurStrength)
+            if (portrait !== out) {
+                out.recycle()
+                out = portrait
+            }
+        }
         if (!trim.isNeutral()) {
             val t = ColorTrim.apply(out, trim, 0)
             out.recycle()
@@ -1776,7 +1785,13 @@ class CameraController(
             } else if (sh.hdr && sh.jpegs.size >= 2) {
                 val merged = HdrFusion.merge(sh.jpegs) ?: throw IllegalStateException("Couldn't combine the HDR frames")
                 val out = finishLook(rotateBy(merged, sh.rotDeg), sh, trim)
-                saved = saveBitmap(out, "$base.jpg", sh.quality)
+                val canWriteGainmap = Build.VERSION.SDK_INT >= 34 &&
+                    sh.filterId == 0 && !sh.bw && !sh.flat && !sh.blue && !sh.glow &&
+                    sh.photoLook == 0 && !sh.portrait && !sh.upscale && trim.isNeutral()
+                val gainmapAdded = canWriteGainmap &&
+                    HdrFusion.attachGainmap(out, sh.jpegs.last(), sh.rotDeg)
+                saved = if (gainmapAdded) saveHdrBitmap(out, "$base.jpg", sh.quality)
+                    else saveBitmap(out, "$base.jpg", sh.quality)
                 out.recycle()
             } else if (sh.jpegs.size > 1) {
                 // astro: several long frames added together (linear light) to make up the full exposure
@@ -1786,7 +1801,7 @@ class CameraController(
                 out.recycle()
             } else {
                 val bytes = sh.jpegs[0]
-                saved = if (sh.bw || sh.blue || sh.flat || sh.upscale || sh.glow || !trim.isNeutral()) {
+                saved = if (sh.bw || sh.blue || sh.flat || sh.upscale || sh.glow || sh.portrait || sh.filterId > 0 || !trim.isNeutral()) {
                     val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
                     val out = finishLook(rotateBy(bmp, sh.rotDeg), sh, trim)
                     val u = saveBitmap(out, "$base.jpg", sh.quality)
@@ -1853,6 +1868,24 @@ class CameraController(
         ctx.contentResolver.openOutputStream(uri)!!.use { bmp.compress(Bitmap.CompressFormat.JPEG, q, it) }
         finishImageUri(uri)
         return uri
+    }
+
+    /** Writes an Android 14 Ultra HDR JPEG_R after a gain map has been attached to the bitmap. */
+    @android.annotation.TargetApi(34)
+    private fun saveHdrBitmap(bmp: Bitmap, name: String, q: Int): Uri {
+        val uri = newImageUri(name, "image/jpeg")
+        try {
+            ctx.contentResolver.openOutputStream(uri)!!.use {
+                if (!bmp.compress(Bitmap.CompressFormat.JPEG_R, q, it)) {
+                    throw IllegalStateException("JPEG_R encoder rejected the HDR bitmap")
+                }
+            }
+            finishImageUri(uri)
+            return uri
+        } catch (t: Throwable) {
+            ctx.contentResolver.delete(uri, null, null)
+            throw t
+        }
     }
 
     /** Sensor details per lens, shown in Phone capabilities while in photo mode. */
