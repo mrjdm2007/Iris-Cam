@@ -213,13 +213,13 @@ object Look {
                 0f, 0f, 0f, 1f, 0f
             ))
             12 -> basic(1.08f, 1.04f, 12f, 4f, -10f)
-            13 -> basic(1.02f, 0.96f, 5f, 2f, 7f)
-            14 -> basic(1.03f, 1.02f, 4f, 0f, -3f)
+            13 -> basic(1.16f, 1.06f, 18f, 12f, 6f) // visible warm lifted bloom base
+            14 -> basic(1.10f, 1.08f, 16f, 2f, -12f) // warm highlight separation for halation
             15 -> basic(0.98f, 0.94f, 2f, 2f, 2f)
             16 -> basic(1.02f, 1.00f, 0f, 0f, 0f)
             17 -> basic(1.00f, 1.00f, 0f, 0f, 0f)
             18 -> basic(1.22f, 1.12f, 3f, 2f, 8f) // vivid colour with controlled saturation
-            19 -> basic(0.88f, 1.08f, 2f, 1f, 5f) // VHS base grade
+            19 -> basic(0.72f, 1.16f, 5f, 3f, 10f) // visible faded/chromatically cool VHS base grade
             else -> ColorMatrix()
         }
     }
