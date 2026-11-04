@@ -31,6 +31,10 @@ This project is an in-progress source update. It is not represented as a device-
 - A true depth-aware portrait blur, video VHS/Glow effects, and a dedicated H.264/WebCodecs monitor transport remain outstanding. The in-app photo viewer now uses ImageDecoder and detects native JPEG_R gain maps. A lifecycle pass now adds terminal CameraController release, shuts down Activity worker executors on destruction, and unregisters the thermal listener; broader crash and device testing remains outstanding. The Blue cinematic filter is a colour grade only and does not simulate portrait depth. The new Glow toggle is a saved-photo filter, not a live video effect. Golden Hour and Dream Glow are already available as photo looks; they are not depth-aware portrait effects. The linked zoom/focus A/B rack for Dolly Zoom is already implemented.
 - Camera mode/orientation crash fixes, physical lens switching, the 0.5x–7x zoom endpoints, runtime camera recovery, and the new adaptive 1080p monitor path require physical testing across the target phone and other devices. GitHub Actions has successfully compiled the Android debug APK for the previous lifecycle update. Physical camera and media-provider behaviour still requires testing on the Edge 50 Neo and another Android device.
 
+## Build verification
+
+The current source tree was rechecked against the Android debug build workflow after the Kotlin API/compiler fixes. The successful Actions build verifies compilation and APK packaging only; portrait-mask quality, HDR gain-map output behavior, memory use on high-resolution captures, and camera hardware operation still require device testing.
+
 ## Build
 
 The GitHub Actions workflow builds `:app:assembleDebug` using JDK 17 and Gradle 8.7. The latest lifecycle, audio-teardown and Good Take cleanup changes compile successfully in run #75. The project still requires physical-device validation on the Edge 50 Neo and another Android device.
