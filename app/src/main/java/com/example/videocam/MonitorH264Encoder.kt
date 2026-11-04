@@ -160,8 +160,11 @@ class MonitorH264Encoder(
 
     private fun sendConfig(format: MediaFormat) {
         if (configSent) return
-        val sps = format.getByteBuffer("csd-0")?.let { extractNals(copyBuffer(it)) }?.firstOrNull { nalType(it) == 7 }
-        val pps = format.getByteBuffer("csd-1")?.let { extractNals(copyBuffer(it)) }?.firstOrNull { nalType(it) == 8 }
+        val all = ArrayList<ByteArray>()
+        try { format.getByteBuffer("csd-0")?.let { all.addAll(extractNals(copyBuffer(it))) } } catch (_: Exception) {}
+        try { format.getByteBuffer("csd-1")?.let { all.addAll(extractNals(copyBuffer(it))) } } catch (_: Exception) {}
+        val sps = all.firstOrNull { nalType(it) == 7 }
+        val pps = all.firstOrNull { nalType(it) == 8 }
         if (sps != null && pps != null) sendConfig(sps, pps)
     }
 
@@ -216,14 +219,32 @@ class MonitorH264Encoder(
                 starts.add(i to 4); i += 4
             } else i++
         }
-        if (starts.isEmpty()) return if (data.isNotEmpty()) listOf(data) else emptyList()
-        val result = ArrayList<ByteArray>()
-        for (n in starts.indices) {
-            val begin = starts[n].first + starts[n].second
-            val end = if (n + 1 < starts.size) starts[n + 1].first else data.size
-            if (end > begin) result.add(data.copyOfRange(begin, end))
+        if (starts.isNotEmpty()) {
+            val result = ArrayList<ByteArray>()
+            for (n in starts.indices) {
+                val begin = starts[n].first + starts[n].second
+                val end = if (n + 1 < starts.size) starts[n + 1].first else data.size
+                if (end > begin) result.add(data.copyOfRange(begin, end))
+            }
+            return result
         }
-        return result
+        // Some encoders expose CSD / access units as four-byte length-prefixed NAL units.
+        val lengthPrefixed = ArrayList<ByteArray>()
+        var pos = 0
+        while (pos + 4 <= data.size) {
+            val len = ((data[pos].toInt() and 255) shl 24) or
+                ((data[pos + 1].toInt() and 255) shl 16) or
+                ((data[pos + 2].toInt() and 255) shl 8) or
+                (data[pos + 3].toInt() and 255)
+            if (len <= 0 || pos + 4 + len > data.size) {
+                lengthPrefixed.clear()
+                break
+            }
+            lengthPrefixed.add(data.copyOfRange(pos + 4, pos + 4 + len))
+            pos += 4 + len
+        }
+        return if (lengthPrefixed.isNotEmpty() && pos == data.size) lengthPrefixed
+        else if (data.isNotEmpty()) listOf(data) else emptyList()
     }
 
     private fun toAvcc(data: ByteArray): ByteArray {
