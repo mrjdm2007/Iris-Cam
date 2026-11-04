@@ -170,7 +170,7 @@ object Look {
         "Natural", "Black and White", "Kodak 2383", "Kodak 250D", "Kodak 500T",
         "Fuji Eterna", "Teal & Orange", "Bleach Bypass", "Vintage Fade", "Noir",
         "Leica Colour", "Blue Cinematic", "Golden Hour", "Dream Glow",
-        "Halation", "Soft Diffusion", "Film Grain", "Anamorphic Flare"
+        "Halation", "Soft Diffusion", "Film Grain", "Anamorphic Flare", "Vivid", "VHS"
     )
 
     private fun filterMatrix(id: Int): ColorMatrix {
@@ -218,6 +218,8 @@ object Look {
             15 -> basic(0.98f, 0.94f, 2f, 2f, 2f)
             16 -> basic(1.02f, 1.00f, 0f, 0f, 0f)
             17 -> basic(1.00f, 1.00f, 0f, 0f, 0f)
+            18 -> basic(1.22f, 1.12f, 3f, 2f, 8f) // vivid colour with controlled saturation
+            19 -> basic(0.88f, 1.08f, 2f, 1f, 5f) // VHS base grade
             else -> ColorMatrix()
         }
     }
@@ -282,7 +284,7 @@ object Look {
                 noise.recycle()
                 out
             }
-            17 -> {
+            19 -> {
                 val sw = (base.width / 32).coerceAtLeast(1)
                 val sh = (base.height / 32).coerceAtLeast(1)
                 val small = Bitmap.createScaledBitmap(base, sw, sh, true)
