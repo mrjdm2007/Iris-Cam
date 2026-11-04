@@ -36,8 +36,17 @@ object PortraitProcessor {
         if (amount == 0 || source.width < 64 || source.height < 64) return source
 
         var background: Bitmap? = null
+        var inferenceBitmap: Bitmap? = null
         try {
-            val input = InputImage.fromBitmap(source, 0)
+            // Bound the ML mask to 1280 px on the long edge. Raw-size masks at 50 MP
+            // would consume hundreds of MB and can cause capture-time OOMs.
+            val inferScale = min(1f, 1280f / max(source.width, source.height))
+            val inferW = (source.width * inferScale).toInt().coerceAtLeast(1)
+            val inferH = (source.height * inferScale).toInt().coerceAtLeast(1)
+            val inference = if (inferW != source.width || inferH != source.height) {
+                Bitmap.createScaledBitmap(source, inferW, inferH, true).also { inferenceBitmap = it }
+            } else source
+            val input = InputImage.fromBitmap(inference, 0)
             val mask = Tasks.await(segmenter.process(input))
             val maskBuffer = mask.buffer.asReadOnlyBuffer()
             val maskWidth = mask.width
@@ -81,6 +90,7 @@ object PortraitProcessor {
             return source
         } finally {
             background?.recycle()
+            inferenceBitmap?.recycle()
         }
     }
 
