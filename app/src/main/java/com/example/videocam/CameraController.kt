@@ -92,7 +92,8 @@ class CameraController(
         val flat: Boolean,
         val photoLook: Int,
         val hdr: Boolean,
-        val upscale: Boolean
+        val upscale: Boolean,
+        val glow: Boolean
     ) {
         var image: Image? = null // RAW only
         var result: TotalCaptureResult? = null
@@ -1640,7 +1641,7 @@ class CameraController(
             }
             val sh = Shot(
                 cfg.cameraId, fmt, chars, needRotation(), cfg.photoQuality, reqs.size,
-                cfg.bw, cfg.flat && !cfg.bw, cfg.photoLook, hplan != null, cfg.upscale && currentLensNeedsUpscale()
+                cfg.bw, cfg.flat && !cfg.bw, cfg.photoLook, hplan != null, cfg.upscale && currentLensNeedsUpscale(), cfg.glow
             )
             synchronized(lock) { shot = sh }
             if (plan != null && plan.expNs * reqs.size >= 1_500_000_000L) {
@@ -1734,6 +1735,11 @@ class CameraController(
             out.recycle()
             out = styled
         }
+        if (sh.glow) {
+            val bloomed = Look.glow(out)
+            out.recycle()
+            out = bloomed
+        }
         if (!trim.isNeutral()) {
             val t = ColorTrim.apply(out, trim, 0)
             out.recycle()
@@ -1781,7 +1787,7 @@ class CameraController(
                 out.recycle()
             } else {
                 val bytes = sh.jpegs[0]
-                saved = if (sh.bw || sh.flat || sh.upscale || !trim.isNeutral()) {
+                saved = if (sh.bw || sh.flat || sh.upscale || sh.glow || !trim.isNeutral()) {
                     val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
                     val out = finishLook(rotateBy(bmp, sh.rotDeg), sh, trim)
                     val u = saveBitmap(out, "$base.jpg", sh.quality)
