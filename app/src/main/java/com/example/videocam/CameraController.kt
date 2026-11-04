@@ -805,6 +805,7 @@ class CameraController(
         else -> MediaRecorder.AudioSource.CAMCORDER
     }
 
+    @Suppress("DEPRECATION") // Required for API 29–30; API 31+ uses the Context constructor.
     private fun prepareRecorder() {
         val rec = if (Build.VERSION.SDK_INT >= 31) MediaRecorder(ctx) else MediaRecorder()
         try {
