@@ -120,21 +120,23 @@ class CameraController(
     private fun isMotoEdge50NeoProfile(): Boolean {
         val maker = Build.MANUFACTURER.lowercase(Locale.US)
         val model = Build.MODEL.lowercase(Locale.US)
-        // The explicit auxiliary-ID profile is restricted to Motorola's Edge 50 Neo family.
-        // Every ID is still checked against CameraManager before it is exposed.
+        // Restrict the device-specific ID map to the Edge 50 Neo family. IDs are selected
+        // from CameraManager's advertised list, but are not filtered by generic capability flags.
         return maker.contains("motorola") && (model.contains("edge 50 neo") || model.contains("xt2409"))
     }
 
     private val motoProfileIds = listOf("5", "2", "0", "3", "1")
 
     val cameraIds: List<String> = try {
-        val advertised = manager.cameraIdList.toList()
-        val detected = advertised.filter { usable(it) }
+        val advertised = manager.cameraIdList.toSet()
         if (isMotoEdge50NeoProfile()) {
-            val profile = motoProfileIds.filter { it in advertised && usable(it) }
-            (profile + detected.filterNot { it in profile }).distinct()
+            // These are the user's confirmed Edge 50 Neo IDs from the working VideoCam build.
+            // Do not run generic usable()/capability filtering on OEM auxiliary IDs: Motorola
+            // omits standard capability flags for some of these cameras.
+            motoProfileIds.filter { it in advertised }
         } else {
-            detected.sortedWith(compareBy({ lensRank(it) }, { it }))
+            advertised.filter { usable(it) }
+                .sortedWith(compareBy({ lensRank(it) }, { it }))
         }
     } catch (e: Exception) {
         emptyList()
