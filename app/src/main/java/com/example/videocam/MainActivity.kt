@@ -333,6 +333,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
     }
 
     override fun onDestroy() {
+        ui.removeCallbacks(finishCameraTransition)
         // Stop all producers before shutting down their worker threads. onPause handles
         // normal backgrounding; this is the final release when the Activity is destroyed.
         ui.removeCallbacks(ticker)
@@ -1499,6 +1500,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
         }
         cfg.cameraId = target
         store.save("last", cfg)
+        beginCameraTransition()
         cam.reopen()
         refreshUi()
     }
@@ -1800,6 +1802,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
         choose("Lens", ids.map { cam.cameraLabel(it) }) {
             cfg.cameraId = ids[it]
             store.save("last", cfg)
+            beginCameraTransition()
             cam.reopen()
             refreshUi()
         }
@@ -1877,6 +1880,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
         }
         cfg.copyFrom(p)
         store.save("last", cfg)
+        beginCameraTransition()
         cam.reopen()
         refreshUi()
         toast("Loaded P$i")
