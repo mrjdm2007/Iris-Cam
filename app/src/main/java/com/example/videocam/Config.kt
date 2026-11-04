@@ -75,8 +75,7 @@ data class Config(
     var photoH: Int = 0,
     var flashMode: Int = 0,          // 0 off, 1 on, 2 auto
     var photoNrOff: Boolean = false,
-    var portrait: Boolean = false,       // enable ML subject segmentation + optical-style background blur
-    var portraitBlurStrength: Int = 65,  // background blur strength, 0..100
+    var portrait: Boolean = false,       // portrait/landscape orientation preference
     var scene: Int = 0,              // photo scene: 0 normal, 1 night, 2 astro, 3 multi-frame HDR fusion
     var hdrFrames: Int = 3,          // multi-frame HDR fusion: 2 or 3 exposures
     var upscale: Boolean = false,    // upscale photos to 12.6 MP
@@ -128,7 +127,6 @@ data class Config(
         flashMode = o.flashMode
         photoNrOff = o.photoNrOff
         portrait = o.portrait
-        portraitBlurStrength = o.portraitBlurStrength
         scene = o.scene
         hdrFrames = o.hdrFrames
         upscale = o.upscale
@@ -181,7 +179,6 @@ data class Config(
         .put("flashMode", flashMode)
         .put("photoNrOff", photoNrOff)
         .put("portrait", portrait)
-        .put("portraitBlurStrength", portraitBlurStrength)
         .put("scene", scene)
         .put("hdrFrames", hdrFrames)
         .put("upscale", upscale)
@@ -247,7 +244,6 @@ data class Config(
                 flashMode = o.optInt("flashMode", d.flashMode),
                 photoNrOff = o.optBoolean("photoNrOff", d.photoNrOff),
                 portrait = o.optBoolean("portrait", d.portrait),
-                portraitBlurStrength = o.optInt("portraitBlurStrength", d.portraitBlurStrength).coerceIn(0, 100),
                 scene = o.optInt("scene", d.scene),
                 hdrFrames = o.optInt("hdrFrames", d.hdrFrames).let { if (it == 2) 2 else 3 },
                 upscale = o.optBoolean("upscale", d.upscale),
