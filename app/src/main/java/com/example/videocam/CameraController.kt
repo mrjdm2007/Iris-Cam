@@ -48,6 +48,7 @@ import android.view.Surface
 import android.view.TextureView
 import android.view.animation.AccelerateDecelerateInterpolator
 import android.view.animation.LinearInterpolator
+import java.io.ByteArrayOutputStream
 import java.text.SimpleDateFormat
 import java.util.concurrent.Executors
 import java.util.Date
@@ -81,6 +82,8 @@ class CameraController(
 
     private class Output(val uri: Uri, val pfd: ParcelFileDescriptor)
 
+    private class RawFrame(val image: Image, val result: TotalCaptureResult)
+
     private class Shot(
         val lens: String,
         val format: Int,
@@ -98,8 +101,11 @@ class CameraController(
         val filterId: Int,
         val filterIntensity: Int,
     ) {
-        var image: Image? = null // RAW only
-        var result: TotalCaptureResult? = null
+        // RAW Image timestamps are paired with CaptureResult.SENSOR_TIMESTAMP so each
+        // frame is developed with its own exposure, white balance and lens-shading metadata.
+        val rawImages = LinkedHashMap<Long, Image>()
+        val rawResults = LinkedHashMap<Long, TotalCaptureResult>()
+        var rawFrames: List<RawFrame> = emptyList()
         val jpegs = ArrayList<ByteArray>()
         var started = false
     }
@@ -146,6 +152,8 @@ class CameraController(
 
     private var device: CameraDevice? = null
     private var session: CameraCaptureSession? = null
+    private var closingSession: CameraCaptureSession? = null
+    private var restartAfterSessionClose = false
     private var previewSurface: Surface? = null
     private var recSurface: Surface? = null
     private var recorder: MediaRecorder? = null
@@ -178,6 +186,8 @@ class CameraController(
     var liveExpNs = 0L
         private set
     var rawSize: Size? = null
+        private set
+    var rawSizes: List<Size> = emptyList()
         private set
     var jpegSizes: List<Size> = emptyList()
         private set
@@ -437,11 +447,12 @@ class CameraController(
 
         val caps = c.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES) ?: intArrayOf()
         jpegSizes = areaDesc(map?.getOutputSizes(ImageFormat.JPEG))
-        rawSize = if (caps.contains(CameraMetadata.REQUEST_AVAILABLE_CAPABILITIES_RAW)) {
-            areaDesc(map?.getOutputSizes(ImageFormat.RAW_SENSOR)).firstOrNull()
+        rawSizes = if (caps.contains(CameraMetadata.REQUEST_AVAILABLE_CAPABILITIES_RAW)) {
+            areaDesc(map?.getOutputSizes(ImageFormat.RAW_SENSOR))
         } else {
-            null
+            emptyList()
         }
+        rawSize = rawSizes.firstOrNull()
         jprSizes = if (Build.VERSION.SDK_INT >= 34) areaDesc(map?.getOutputSizes(ImageFormat.JPEG_R)) else emptyList()
         manualSensor = caps.contains(CameraMetadata.REQUEST_AVAILABLE_CAPABILITIES_MANUAL_SENSOR)
         var safe = Long.MAX_VALUE
@@ -1279,8 +1290,9 @@ class CameraController(
     val ultraHdrAvailable: Boolean get() = Build.VERSION.SDK_INT >= 34 && jprSizes.isNotEmpty()
 
     private fun captureFormat(): Int = when {
-        // HDR fusion requires a bracket of ordinary JPEG frames. Never let a stale
-        // Ultra HDR preference route this capture through the camera's JPEG_R pipeline.
+        // HDR prefers sensor RAW brackets whenever this lens exposes RAW_SENSOR.
+        // JPEG brackets remain the compatibility path on cameras without RAW.
+        cfg.scene == 3 && rawAvail -> ImageFormat.RAW_SENSOR
         cfg.scene == 3 -> ImageFormat.JPEG
         effMode() == 1 -> ImageFormat.RAW_SENSOR
         // JPEG_R must be saved byte-for-byte to preserve its gain map. If a pixel filter
@@ -1293,6 +1305,7 @@ class CameraController(
 
     /** Sizes the user can pick for the current capture mode. */
     fun captureSizes(): List<Size> = when {
+        captureFormat() == ImageFormat.RAW_SENSOR && cfg.scene == 3 -> rawSizes
         effMode() == 1 -> listOfNotNull(rawSize)
         captureFormat() == ImageFormat.JPEG_R -> jprSizes
         else -> jpegSizes
@@ -1304,6 +1317,10 @@ class CameraController(
         if (l.isEmpty()) return Size(4000, 3000)
         l.firstOrNull { it.width == cfg.photoW && it.height == cfg.photoH }?.let { return it }
         if (effMode() == 1 || captureFormat() == ImageFormat.JPEG_R) return l.first()
+        if (cfg.scene == 3 && captureFormat() == ImageFormat.RAW_SENSOR) {
+            val safe = l.filter { it.width.toLong() * it.height <= 12_600_000L }
+            return safe.firstOrNull() ?: l.last()
+        }
         val target = min(12_600_000L, lensSafeArea)
         val ok = l.filter { it.width.toLong() * it.height <= target }
         return ok.firstOrNull { it.width * 3 == it.height * 4 } ?: ok.firstOrNull() ?: l.last()
