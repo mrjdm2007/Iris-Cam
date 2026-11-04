@@ -149,6 +149,8 @@ class CameraController(
     private var out: Output? = null
     private var nextOut: Output? = null
     private var started = false
+    @Volatile
+    private var released = false
     private var gen = 0
     private var rackAnim: ValueAnimator? = null
     private var lastPreview = Size(1920, 1080)
@@ -544,6 +546,7 @@ class CameraController(
     // ---------- lifecycle ----------
 
     fun start() {
+        if (released) return
         started = true
         if (device == null && tv.isAvailable) openCamera()
     }
@@ -551,6 +554,7 @@ class CameraController(
     fun stop() {
         started = false
         rackAnim?.cancel()
+        cancelZoomPull()
         if (recording) stopRecording()
         closeSession()
         releaseRecorder()
@@ -558,6 +562,18 @@ class CameraController(
         device = null
         previewSurface?.release()
         previewSurface = null
+    }
+
+    /**
+     * Final Activity teardown. stop() is intentionally reusable across onPause/onResume;
+     * release() is terminal and closes the controller-owned worker resources as well.
+     */
+    fun release() {
+        if (released) return
+        released = true
+        stop()
+        procExec.shutdownNow()
+        cbThread.quitSafely()
     }
 
     fun reopen() {
