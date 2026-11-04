@@ -152,6 +152,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
     @Volatile
     private var lastMeterAt = 0L
     private var bwOn = false
+    private var thermalListener: PowerManager.OnThermalStatusChangedListener? = null
     private val steadyExec = Executors.newSingleThreadExecutor()
     private lateinit var chipRow: HorizontalScrollView
     private lateinit var topBar: LinearLayout
@@ -337,6 +338,12 @@ class MainActivity : Activity(), CameraController.Callbacks {
         stopMonitor()
         tap?.stop()
         tap = null
+        if (Build.VERSION.SDK_INT >= 29) {
+            thermalListener?.let { listener ->
+                (getSystemService(POWER_SERVICE) as PowerManager).removeThermalStatusListener(listener)
+            }
+        }
+        thermalListener = null
         if (::cam.isInitialized) cam.release()
         procExec.shutdownNow()
         steadyExec.shutdownNow()
@@ -2288,9 +2295,11 @@ class MainActivity : Activity(), CameraController.Callbacks {
     }
 
     private fun registerThermal() {
-        if (Build.VERSION.SDK_INT >= 29) {
+        if (Build.VERSION.SDK_INT >= 29 && thermalListener == null) {
             val pm = getSystemService(POWER_SERVICE) as PowerManager
-            pm.addThermalStatusListener(mainExecutor) { thermal = it }
+            val listener = PowerManager.OnThermalStatusChangedListener { thermal = it }
+            thermalListener = listener
+            pm.addThermalStatusListener(mainExecutor, listener)
         }
     }
 
