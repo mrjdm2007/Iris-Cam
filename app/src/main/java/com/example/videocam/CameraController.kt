@@ -94,7 +94,9 @@ class CameraController(
         val hdr: Boolean,
         val upscale: Boolean,
         val glow: Boolean,
-        val blue: Boolean
+        val blue: Boolean,
+        val filterId: Int,
+        val filterIntensity: Int
     ) {
         var image: Image? = null // RAW only
         var result: TotalCaptureResult? = null
@@ -1261,7 +1263,7 @@ class CameraController(
         // JPEG_R must be saved byte-for-byte to preserve its gain map. If a pixel filter
         // is selected, use ordinary JPEG so the requested look is actually rendered.
         cfg.photoFormat == 3 && ultraHdrAvailable &&
-            !cfg.glow && !cfg.bw && !cfg.blue && !cfg.flat && !cfg.upscale &&
+            cfg.filterId == 0 && !cfg.flat && !cfg.upscale &&
             store.trim(cfg.cameraId).isNeutral() -> ImageFormat.JPEG_R
         else -> ImageFormat.JPEG
     }
@@ -1624,7 +1626,8 @@ class CameraController(
             }
             val sh = Shot(
                 cfg.cameraId, fmt, chars, needRotation(), cfg.photoQuality, reqs.size,
-                cfg.bw, cfg.flat && !cfg.bw, cfg.photoLook, hplan != null, cfg.upscale && currentLensNeedsUpscale(), cfg.glow, cfg.blue
+                cfg.bw, cfg.flat && !cfg.bw, cfg.photoLook, hplan != null, cfg.upscale && currentLensNeedsUpscale(), cfg.glow, cfg.blue,
+                cfg.filterId, cfg.filterIntensity
             )
             synchronized(lock) { shot = sh }
             if (plan != null && plan.expNs * reqs.size >= 1_500_000_000L) {
@@ -1713,10 +1716,23 @@ class CameraController(
     /** Applies look, lens colour trim and optional upscaling to an upright bitmap, recycling what it replaces. */
     private fun finishLook(bmp: Bitmap, sh: Shot, trim: Trim): Bitmap {
         var out = bmp
-        val styled = Look.apply(out, sh.bw, sh.flat, sh.photoLook, sh.blue)
+        val styled = Look.apply(
+            out,
+            sh.filterId == 0 && sh.bw,
+            sh.filterId == 0 && sh.flat,
+            if (sh.filterId == 0) sh.photoLook else 0,
+            sh.filterId == 0 && sh.blue
+        )
         if (styled !== out) {
             out.recycle()
             out = styled
+        }
+        if (sh.filterId > 1) {
+            val filtered = Look.applyPreset(out, sh.filterId, sh.filterIntensity)
+            if (filtered !== out) {
+                out.recycle()
+                out = filtered
+            }
         }
         if (sh.glow) {
             val bloomed = Look.glow(out)
