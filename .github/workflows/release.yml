@@ -35,7 +35,7 @@ jobs:
         shell: bash
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          VERSION_CODE="${GITHUB_RUN_NUMBER}"
+          VERSION_CODE="$((1000 + GITHUB_RUN_NUMBER))"
           mkdir -p dist
           if [[ -n "${ANDROID_KEYSTORE_BASE64}" ]]; then
             gradle assembleRelease --no-daemon -PVERSION_CODE="$VERSION_CODE" -PVERSION_NAME="$VERSION"
