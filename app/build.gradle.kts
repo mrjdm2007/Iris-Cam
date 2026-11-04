@@ -1,3 +1,5 @@
+import java.util.Base64
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -22,7 +24,7 @@ android {
         if (!encodedKey.isNullOrBlank()) {
             create("release") {
                 val keyFile = rootProject.file("iris-upload-key.jks")
-                keyFile.writeBytes(java.util.Base64.getDecoder().decode(encodedKey))
+                keyFile.writeBytes(Base64.getDecoder().decode(encodedKey))
                 storeFile = keyFile
                 storePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
                 keyAlias = System.getenv("ANDROID_KEY_ALIAS")
