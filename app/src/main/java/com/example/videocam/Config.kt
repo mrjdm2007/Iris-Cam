@@ -80,6 +80,10 @@ data class Config(
     var hdrFrames: Int = 2,          // faster default: two-exposure HDR fusion; 3 remains selectable
     var upscale: Boolean = false,    // upscale photos to 12.6 MP
     var bw: Boolean = false,         // photo black and white, high contrast
+    var blue: Boolean = false,        // cool blue cinematic photo filter
+    var glow: Boolean = false,       // legacy setting migrated to filterId
+    var filterId: Int = 0,           // selected cinematic photo filter; 0 = Natural
+    var filterIntensity: Int = 100,  // selected filter strength, 0..100
     var photoLook: Int = 0,          // 0 natural, 1 golden hour, 2 dream glow
     var photoNr: Int = 1,            // photo noise reduction: 0 minimal, 1 standard, 2 high
     var squeeze: Int = 0,            // anamorphic de-squeeze of the preview: 0 off, 1 1.33x, 2 1.5x, 3 1.8x, 4 2x
@@ -127,6 +131,10 @@ data class Config(
         hdrFrames = o.hdrFrames
         upscale = o.upscale
         bw = o.bw
+        blue = o.blue
+        glow = o.glow
+        filterId = o.filterId
+        filterIntensity = o.filterIntensity
         photoLook = o.photoLook
         photoNr = o.photoNr
         squeeze = o.squeeze
@@ -175,6 +183,10 @@ data class Config(
         .put("hdrFrames", hdrFrames)
         .put("upscale", upscale)
         .put("bw", bw)
+        .put("blue", blue)
+        .put("glow", glow)
+        .put("filterId", filterId)
+        .put("filterIntensity", filterIntensity)
         .put("photoLook", photoLook)
         .put("photoNr", photoNr)
         .put("squeeze", squeeze)
@@ -188,6 +200,15 @@ data class Config(
         fun fromJson(s: String): Config {
             val d = Config()
             val o = JSONObject(s)
+            val legacyFilter = when {
+                o.optBoolean("bw", d.bw) -> 1
+                o.optBoolean("blue", d.blue) -> 11
+                o.optBoolean("glow", d.glow) -> 14
+                o.optInt("photoLook", d.photoLook) == 1 -> 12
+                o.optInt("photoLook", d.photoLook) == 2 -> 13
+                else -> 0
+            }
+            val selectedFilter = o.optInt("filterId", legacyFilter).coerceIn(0, 17)
             return Config(
                 cameraId = o.optString("cameraId", d.cameraId),
                 width = o.optInt("width", d.width),
@@ -226,8 +247,12 @@ data class Config(
                 scene = o.optInt("scene", d.scene),
                 hdrFrames = o.optInt("hdrFrames", d.hdrFrames).let { if (it == 2) 2 else 3 },
                 upscale = o.optBoolean("upscale", d.upscale),
-                bw = o.optBoolean("bw", d.bw),
-                photoLook = o.optInt("photoLook", d.photoLook).coerceIn(0, 2),
+                bw = selectedFilter == 1,
+                blue = false,
+                glow = false,
+                filterId = selectedFilter,
+                filterIntensity = o.optInt("filterIntensity", 100).coerceIn(0, 100),
+                photoLook = 0,
                 photoNr = o.optInt("photoNr", if (o.optBoolean("photoNrOff", false)) 0 else d.photoNr),
                 squeeze = o.optInt("squeeze", d.squeeze),
                 lensKeys = o.optBoolean("lensKeys", d.lensKeys),
