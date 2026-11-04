@@ -32,7 +32,9 @@ class CropRenderer(
     private val outH: Int,
     private val srcW: Int,
     private val srcH: Int,
-    private val rotation: Int
+    private val rotation: Int,
+    private val filterId: Int = 0,
+    private val filterIntensity: Int = 100
 ) {
     private val thread = HandlerThread("crop-gl").apply { start() }
     private val handler = Handler(thread.looper)
@@ -113,8 +115,27 @@ class CropRenderer(
         val vs = "uniform mat4 uTex;attribute vec4 aPos;attribute vec2 aTc;varying vec2 vTc;" +
             "void main(){gl_Position=aPos;vTc=(uTex*vec4(aTc,0.0,1.0)).xy;}"
         val fs = "#extension GL_OES_EGL_image_external : require\n" +
-            "precision mediump float;varying vec2 vTc;uniform samplerExternalOES sTex;" +
-            "void main(){gl_FragColor=texture2D(sTex,vTc);}"
+            "precision mediump float;varying vec2 vTc;uniform samplerExternalOES sTex;uniform int uFilter;uniform float uIntensity;" +
+            "vec3 grade(vec3 c){vec3 x=c;float y=dot(c,vec3(0.299,0.587,0.114));" +
+            "if(uFilter==1){x=mix(c,vec3(y),uIntensity);x=(x-0.5)*mix(1.0,1.42,uIntensity)+0.5;}" +
+            "else if(uFilter==2){x=(c-0.5)*mix(1.0,1.12,uIntensity)+0.5+vec3(0.020,0.008,-0.020)*uIntensity;x=mix(vec3(y),x,mix(1.0,1.08,uIntensity));}" +
+            "else if(uFilter==3){x=mix(vec3(y),c,mix(1.0,1.04,uIntensity));x+=vec3(0.020,0.008,-0.012)*uIntensity;}" +
+            "else if(uFilter==4){x=mix(vec3(y),c,mix(1.0,1.02,uIntensity));x+=vec3(-0.012,0.0,0.024)*uIntensity;}" +
+            "else if(uFilter==5){x=mix(vec3(y),c,mix(1.0,0.84,uIntensity));x=(x-0.5)*mix(1.0,0.91,uIntensity)+0.5+vec3(0.004,0.016,0.020)*uIntensity;}" +
+            "else if(uFilter==6){x+=vec3(0.020,0.0,0.028)*uIntensity;x.r+=(-c.b)*0.04*uIntensity;x.b+=(-c.r)*0.03*uIntensity;}" +
+            "else if(uFilter==7){x=mix(vec3(y),c,mix(1.0,0.48,uIntensity));x=(x-0.5)*mix(1.0,1.34,uIntensity)+0.5;}" +
+            "else if(uFilter==8){x=mix(vec3(y),c,mix(1.0,0.78,uIntensity));x=(x-0.5)*mix(1.0,0.82,uIntensity)+0.5+vec3(0.059,0.035,0.004)*uIntensity;}" +
+            "else if(uFilter==9){x=mix(c,vec3(y),uIntensity);x=(x-0.5)*mix(1.0,1.62,uIntensity)+0.5;}" +
+            "else if(uFilter==10){x+=vec3(0.020,0.004,0.012)*uIntensity;x.r*=mix(1.0,1.13,uIntensity);x.b*=mix(1.0,1.10,uIntensity);}" +
+            "else if(uFilter==11){x+=vec3(-0.008,0.004,0.028)*uIntensity;x.b*=mix(1.0,1.12,uIntensity);}" +
+            "else if(uFilter==12){x+=vec3(0.047,0.016,-0.039)*uIntensity;x.r*=mix(1.0,1.08,uIntensity);}" +
+            "else if(uFilter==13){x+=vec3(0.020,0.008,0.028)*uIntensity;x=(x-0.5)*mix(1.0,0.96,uIntensity)+0.5;}" +
+            "else if(uFilter==14){x+=max(y-0.58,0.0)*vec3(0.10,0.08,0.06)*uIntensity;}" +
+            "else if(uFilter==15){x=mix(c,vec3(y),0.02*uIntensity);x=(x-0.5)*mix(1.0,0.94,uIntensity)+0.5;}" +
+            "else if(uFilter==16){float n=fract(sin(dot(gl_FragCoord.xy,vec2(12.9898,78.233)))*43758.5453)-0.5;x+=n*0.035*uIntensity;}" +
+            "else if(uFilter==17){float flare=max(0.0,1.0-abs(vTc.y-0.5)*18.0);x+=vec3(flare*0.18*uIntensity);}" +
+            "return clamp(mix(c,x,uIntensity),0.0,1.0);}" +
+            "void main(){vec4 color=texture2D(sTex,vTc);color.rgb=grade(color.rgb);gl_FragColor=color;}"
         program = link(compile(GLES20.GL_VERTEX_SHADER, vs), compile(GLES20.GL_FRAGMENT_SHADER, fs))
         uTex = GLES20.glGetUniformLocation(program, "uTex")
         aPos = GLES20.glGetAttribLocation(program, "aPos")
@@ -183,6 +204,8 @@ class CropRenderer(
             GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
             GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, texId)
             GLES20.glUniformMatrix4fv(uTex, 1, false, tm, 0)
+            GLES20.glUniform1i(GLES20.glGetUniformLocation(program, "uFilter"), filterId.coerceIn(0, 17))
+            GLES20.glUniform1f(GLES20.glGetUniformLocation(program, "uIntensity"), filterIntensity.coerceIn(0, 100) / 100f)
             verts.position(0)
             GLES20.glEnableVertexAttribArray(aPos)
             GLES20.glVertexAttribPointer(aPos, 2, GLES20.GL_FLOAT, false, 16, verts)
