@@ -1119,7 +1119,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
         val sz = runCatching { cam.captureSize() }.getOrNull()
         val mp = if (sz != null) "%.1fMP".format(sz.width * sz.height / 1e6) else "--"
         val m = when {
-            cfg.photoFormat == 3 && cam.ultraHdrAvailable -> "ULTRA HDR"
+            cfg.photoFormat == 3 && cam.ultraHdrAvailable && !cfg.glow && !cfg.bw && !cfg.flat && !cfg.upscale -> "ULTRA HDR"
             cfg.scene == 1 -> "NIGHT"
             cfg.scene == 2 -> "ASTRO"
             cfg.scene == 3 -> "HDR"
@@ -1138,7 +1138,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
         val sz = runCatching { cam.captureSize() }.getOrNull()
         val mp = if (sz != null) "%.1f MP".format(sz.width * sz.height / 1e6) else "?"
         val mode = when {
-            cfg.photoFormat == 3 && cam.ultraHdrAvailable -> "Ultra HDR (native JPEG_R)"
+            cfg.photoFormat == 3 && cam.ultraHdrAvailable && !cfg.glow && !cfg.bw && !cfg.flat && !cfg.upscale -> "Ultra HDR (native JPEG_R)"
             cam.effMode() == 1 -> "RAW develop"
             else -> "Phone JPEG"
         }
