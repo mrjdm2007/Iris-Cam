@@ -115,6 +115,25 @@ object Look {
         return out
     }
 
+
+    /** Soft highlight bloom: downsampled light is screened over the original, preserving detail. */
+    fun glow(src: Bitmap, strength: Int = 72): Bitmap {
+        val w = src.width
+        val h = src.height
+        val low = Bitmap.createScaledBitmap(src, (w / 7).coerceAtLeast(1), (h / 7).coerceAtLeast(1), true)
+        val out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(out)
+        canvas.drawBitmap(src, 0f, 0f, Paint(Paint.FILTER_BITMAP_FLAG))
+        val bloomPaint = Paint(Paint.FILTER_BITMAP_FLAG).apply {
+            alpha = strength.coerceIn(0, 120)
+            xfermode = android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.SCREEN)
+        }
+        canvas.drawBitmap(low, null, android.graphics.Rect(0, 0, w, h), bloomPaint)
+        bloomPaint.xfermode = null
+        low.recycle()
+        return out
+    }
+
     /** Scales a picture up to about [targetPixels] (never down), then sharpens a little to offset the softness. */
     fun upscale(src: Bitmap, targetPixels: Long): Bitmap {
         val area = src.width.toLong() * src.height
