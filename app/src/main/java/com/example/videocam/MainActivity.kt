@@ -320,8 +320,8 @@ class MainActivity : Activity(), CameraController.Callbacks {
         cancelCountdown()
         cancelExpPull()
         oriListener.disable()
-        tap?.stop()
         stopMonitor() // release the Wi-Fi/ADB monitor server when the app leaves the foreground
+        tap?.stop() // stop again after stopMonitor updates audio state; never leave mic capture running in background
         if (cfgDirty) store.save("last", cfg)
         cam.stop()
         super.onPause()
