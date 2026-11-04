@@ -2121,76 +2121,8 @@ class MainActivity : Activity(), CameraController.Callbacks {
         }.start()
     }
 
-    /** In-app still viewer. ImageDecoder preserves JPEG_R gain maps on Android 14+;
-     * ImageView/HWUI can then render the HDR rendition on a compatible HDR display. */
-    private fun showPhotoViewer(uri: Uri) {
-        val dialog = Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen)
-        val frame = FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
-        val image = ImageView(this).apply {
-            scaleType = ImageView.ScaleType.FIT_CENTER
-            adjustViewBounds = true
-        }
-        val loading = ProgressBar(this)
-        val title = TextView(this).apply {
-            text = "PHOTO"
-            textSize = 12f
-            setTextColor(Color.WHITE)
-            setPadding(dp(14), dp(10), dp(14), dp(10))
-            setBackground(roundBg(0x99000000.toInt(), 18))
-        }
-        val close = TextView(this).apply {
-            text = "✕"
-            textSize = 20f
-            gravity = Gravity.CENTER
-            setTextColor(Color.WHITE)
-            setBackground(roundBg(0x99000000.toInt(), 24))
-            setOnClickListener { dialog.dismiss() }
-        }
-        frame.addView(image, FrameLayout.LayoutParams(MATCH, MATCH))
-        frame.addView(loading, lp(dp(44), dp(44), Gravity.CENTER))
-        frame.addView(title, lp(WRAP, WRAP, Gravity.TOP or Gravity.START, dp(16), dp(18)))
-        frame.addView(close, lp(dp(44), dp(44), Gravity.TOP or Gravity.END, 0, dp(16), dp(16)))
-        dialog.setContentView(frame)
-        dialog.window?.setLayout(MATCH, MATCH)
-        dialog.show()
-        dialog.window?.setLayout(MATCH, MATCH)
-
-        Thread {
-            try {
-                val bitmap = if (Build.VERSION.SDK_INT >= 28) {
-                    ImageDecoder.decodeBitmap(ImageDecoder.createSource(contentResolver, uri)) { decoder, _, _ ->
-                        decoder.allocator = ImageDecoder.ALLOCATOR_HARDWARE
-                        decoder.isMutableRequired = false
-                    }
-                } else {
-                    @Suppress("DEPRECATION")
-                    MediaStore.Images.Media.getBitmap(contentResolver, uri)
-                }
-                val hasGainmap = Build.VERSION.SDK_INT >= 34 && bitmap.gainmap != null
-                runOnUiThread {
-                    if (!dialog.isShowing) return@runOnUiThread
-                    image.setImageBitmap(bitmap)
-                    title.text = if (hasGainmap) "ULTRA HDR · GAIN MAP" else "PHOTO"
-                    loading.visibility = View.GONE
-                }
-            } catch (e: Exception) {
-                runOnUiThread {
-                    if (dialog.isShowing) {
-                        loading.visibility = View.GONE
-                        title.text = "COULDN'T LOAD PHOTO"
-                        toast("Couldn't open photo: ${e.message ?: "unknown error"}")
-                    }
-                }
-            }
-        }.start()
-    }
-
     private fun openClip(uri: Uri) {
         val mime = contentResolver.getType(uri) ?: if (cfg.mode == 1) "image/jpeg" else "video/mp4"
-        if (mime.startsWith("image/")) {
-            showPhotoViewer(uri)
-            return
-        }
         val base = Intent(Intent.ACTION_VIEW).setDataAndType(uri, mime).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         try {
             // straight into Google Photos, so Android has nothing to ask about
