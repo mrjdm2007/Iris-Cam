@@ -944,11 +944,37 @@ class CameraController(
         }
     }
 
+    private fun onCameraSessionClosed(closed: CameraCaptureSession) {
+        if (closingSession !== closed) return
+        closingSession = null
+        if (restartAfterSessionClose) {
+            restartAfterSessionClose = false
+            handler.post { if (started && device != null) configureAndStart() }
+        }
+    }
+
     // ---------- session ----------
 
     private fun configureAndStart() {
         if (!started) return
         val cd = device ?: return
+
+        // Camera2 sessions close asynchronously. Do not release their reader/recorder
+        // surfaces or create the next mode's session until onClosed confirms teardown.
+        val oldSession = session
+        if (oldSession != null) {
+            session = null
+            closingSession = oldSession
+            restartAfterSessionClose = true
+            try { oldSession.stopRepeating() } catch (_: Exception) {}
+            try { oldSession.abortCaptures() } catch (_: Exception) {}
+            try { oldSession.close() } catch (_: Exception) {
+                closingSession = null
+                restartAfterSessionClose = false
+                handler.postDelayed({ if (started) configureAndStart() }, 180)
+            }
+            return
+        }
         closeSession()
         releaseRecorder()
         aeLock = false
@@ -1017,7 +1043,12 @@ class CameraController(
             }
 
             override fun onConfigureFailed(s: CameraCaptureSession) {
-                ui.onMessage("Camera rejected this resolution / fps / lens combo")
+                ui.onMessage("Video session failed on camera $cfg.cameraId: resolution ${cfg.width}x${cfg.height}, ${cfg.fps} fps. Try a lower frame rate or resolution.")
+                s.close()
+            }
+
+            override fun onClosed(s: CameraCaptureSession) {
+                onCameraSessionClosed(s)
             }
         }
         try {
@@ -1376,7 +1407,17 @@ class CameraController(
             }
 
             override fun onConfigureFailed(s: CameraCaptureSession) {
-                ui.onMessage("Camera rejected this lens / photo format combination")
+                val fmt = when (captureFormat()) {
+                    ImageFormat.RAW_SENSOR -> "RAW"
+                    ImageFormat.JPEG_R -> "Ultra HDR JPEG"
+                    else -> "JPEG"
+                }
+                ui.onMessage("Photo session failed on camera $cfg.cameraId ($fmt, ${cap.width}x${cap.height}). Try the main lens or standard JPEG.")
+                s.close()
+            }
+
+            override fun onClosed(s: CameraCaptureSession) {
+                onCameraSessionClosed(s)
             }
         }
         try {
