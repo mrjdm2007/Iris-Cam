@@ -6,6 +6,8 @@ import android.app.Activity
 import android.app.AlertDialog
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import android.content.ContentUris
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.ActivityInfo
@@ -31,6 +33,7 @@ import android.os.SystemClock
 import android.provider.MediaStore
 import android.util.Size
 import android.view.GestureDetector
+import android.view.HapticFeedbackConstants
 import android.view.Gravity
 import android.view.KeyEvent
 import android.view.MotionEvent
@@ -187,6 +190,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
     private var expAnim: ValueAnimator? = null
     private var expSliderManual: Boolean? = null
     private var cfgDirty = false
+    private var lastSliderHapticMs = 0L
     private var countdown = 0
     private var askedPerms = false
     private var lastClip: Uri? = null
@@ -264,11 +268,13 @@ class MainActivity : Activity(), CameraController.Callbacks {
         slider.onChange = { f ->
             cam.cancelRack()
             cam.setFocus(f)
+            subtleSliderHaptic(slider)
             refreshUi()
         }
         zoomSlider.onChange = { z ->
             cam.cancelZoomPull()
             cam.setZoom(z)
+            subtleSliderHaptic(zoomSlider)
         }
         expSlider.onChange = { v ->
             cancelExpPull()
@@ -678,8 +684,9 @@ class MainActivity : Activity(), CameraController.Callbacks {
             orientation = LinearLayout.HORIZONTAL
             visibility = View.GONE
         }
-        for ((name, ratio) in listOf("0.7x" to 0.7f, "1x" to 1f, "2.7x" to 2.7f)) {
-            val c = chip(name) { cam.setZoom(ratio) }
+        for ((name, ratio) in listOf("0.5x" to 0.5f, "1x" to 1f, "2.7x" to 2.7f)) {
+            lateinit var c: TextView
+            c = chip(name) { showLensDropdown(c, ratio) }
             c.maxLines = 1
             c.textSize = 12f
             c.setPadding(dp(8), dp(5), dp(8), dp(5))
@@ -715,7 +722,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
 
         // ----- record, thumbnail -----
         recBtn = View(this)
-        recBtn.setOnClickListener { toggleRec() }
+        recBtn.setOnClickListener { shutterHaptic(recBtn); toggleRec() }
         setRecLook(false)
         drag("rec", recBtn, dp(64), dp(64), Gravity.END or Gravity.BOTTOM, 0, 0, dp(88), dp(16))
 
@@ -1134,6 +1141,12 @@ class MainActivity : Activity(), CameraController.Callbacks {
         return listOf(
             "Photo size: $mp" to { pickPhotoRes() },
             "Capture mode: $mode" to { pickCaptureMode() },
+            "Photo look: ${listOf("Natural", "Golden Hour", "Dream Glow")[cfg.photoLook.coerceIn(0, 2)]}" to {
+                choose("Photo look (Black and White remains unchanged)", listOf("Natural", "Golden Hour", "Dream Glow")) {
+                    cfg.photoLook = it
+                    applyLive()
+                }
+            },
             "JPEG quality: ${cfg.photoQuality}" to { pickQuality() },
             "Scene: ${arrayOf("Normal", "Night (1 s, ISO 1000)", "Astro (5 min, ISO 100)", "HDR (${cfg.hdrFrames} frames)")[cfg.scene.coerceIn(0, 3)]}" to { pickScene() },
             "HDR merge: ${cfg.hdrFrames} frames" to { pickHdrFrames() },
@@ -1196,12 +1209,24 @@ class MainActivity : Activity(), CameraController.Callbacks {
                 applyLive()
             }
         },
-        "Lens shortcuts (0.7x / 1x / 2.7x): ${if (cfg.lensKeys) "On" else "Off"}" to {
+        "Lens shortcuts (0.5x / 1x / 2.7x): ${if (cfg.lensKeys) "On" else "Off"}" to {
             cfg.lensKeys = !cfg.lensKeys
             cfgDirty = true
             refreshUi()
         },
         "Laptop monitor (Wi-Fi / USB): ${if (monitor != null) "On \u2014 tap for connection" else "Off"}" to { toggleMonitor() },
+        "USB monitoring commands (Mac)" to { showUsbCommands() },
+        "Dolly Zoom (linked zoom + focus): ${if (zoomLinked) "On" else "Off"}" to {
+            zoomLinked = !zoomLinked
+            refreshUi()
+            toast(if (zoomLinked) "Dolly Zoom enabled: set zoom A/B and focus A/B, then run the zoom rack" else "Dolly Zoom disabled")
+        },
+        "Haptic feedback: ${if (cfg.haptics) "On" else "Off"}" to {
+            cfg.haptics = !cfg.haptics
+            cfgDirty = true
+            toast("Haptic feedback ${if (cfg.haptics) "enabled" else "disabled"}")
+            refreshUi()
+        },
         "Edit layout" to { setEditing(true) },
         "Phone capabilities" to { showCapabilities() }
     )
@@ -1334,6 +1359,26 @@ class MainActivity : Activity(), CameraController.Callbacks {
             lensChips[id] = c
             toolsCol.addView(c, idx++, LinearLayout.LayoutParams(dp(70), WRAP).apply { setMargins(0, dp(3), 0, dp(3)) })
         }
+    }
+
+    private fun showLensDropdown(anchor: View, shortcutRatio: Float) {
+        if (!idle()) return
+        val suggested = cam.cameraIdForShortcut(shortcutRatio)
+        val ids = cam.cameraIds.toMutableList()
+        if (suggested != null && suggested in ids) {
+            ids.remove(suggested)
+            ids.add(0, suggested)
+        }
+        val menu = PopupMenu(this, anchor)
+        ids.forEachIndexed { index, id ->
+            val label = cam.cameraLabel(id) + if (id == suggested) " · shortcut target" else ""
+            menu.menu.add(0, index, index, label)
+        }
+        menu.setOnMenuItemClickListener { item ->
+            ids.getOrNull(item.itemId)?.let { switchLens(it) }
+            true
+        }
+        menu.show()
     }
 
     private fun switchLens(id: String) {
@@ -2294,19 +2339,75 @@ class MainActivity : Activity(), CameraController.Callbacks {
         return fallback
     }
 
+    private fun copyToClipboard(label: String, text: String) {
+        val clipboard = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
+        clipboard.setPrimaryClip(ClipData.newPlainText(label, text))
+        toast("Copied $label")
+    }
+
+    private fun showUsbCommands() {
+        val m = monitor
+        val port = m?.port ?: 8080
+        val url = if (m != null) "http://localhost:$port/?pin=${m.pin}" else "http://localhost:$port"
+        val options = arrayOf(
+            "Copy adb devices",
+            "Copy ADB reverse command",
+            "Copy laptop monitor URL",
+            "Copy disconnect command"
+        )
+        MaterialAlertDialogBuilder(this)
+            .setTitle("USB monitoring on Mac")
+            .setMessage("Enable Developer options and USB debugging on your phone, connect a data-capable USB cable to your Mac, then authorize the Mac. Start Laptop Monitor first to get the live PIN and full URL.")
+            .setItems(options) { _, which ->
+                when (which) {
+                    0 -> copyToClipboard("adb devices", "adb devices")
+                    1 -> copyToClipboard("ADB reverse command", "adb reverse tcp:$port tcp:$port")
+                    2 -> copyToClipboard("monitor URL", url)
+                    3 -> copyToClipboard("disconnect command", "adb reverse --remove tcp:$port")
+                }
+            }
+            .setNegativeButton(if (m != null) "Turn off monitor" else "Close") { _, _ -> if (m != null) stopMonitor() }
+            .show()
+    }
+
     private fun showMonitorInfo() {
         val m = monitor ?: return
         val ip = localIp()
         val wifi = if (ip == null) "Wi-Fi: unavailable (connect both devices to the same network)" else
             "WI-FI\nOpen on your laptop: http://$ip:${m.port}/?pin=${m.pin}"
-        val usb = "USB-C (ADB)\n1. Enable Developer options and USB debugging.\n2. Connect the phone to your laptop and authorize it.\n3. Run on the laptop: adb reverse tcp:${m.port} tcp:${m.port}\n4. Open: http://localhost:${m.port}/?pin=${m.pin}"
-        val msg = "$wifi\n\n$usb\n\nMonitor PIN: ${m.pin}\n\nThe same monitor page works over either connection."
+        val usb = "USB-C (ADB)\n1. Enable Developer options and USB debugging.\n2. Connect phone to Mac with a data cable and authorize.\n3. Run: adb reverse tcp:${m.port} tcp:${m.port}\n4. Open: http://localhost:${m.port}/?pin=${m.pin}"
+        val options = arrayOf(
+            "Copy adb devices",
+            "Copy ADB reverse command",
+            "Copy complete laptop URL (with PIN)",
+            "Copy disconnect command"
+        )
         MaterialAlertDialogBuilder(this)
-            .setTitle("Laptop camera monitor")
-            .setMessage(msg)
-            .setPositiveButton("OK", null)
+            .setTitle("Laptop camera monitor · PIN ${m.pin}")
+            .setMessage("$wifi\n\n$usb\n\nSelect a row below to copy it. The feed is served locally; no cloud upload is used by this monitor server.")
+            .setItems(options) { _, which ->
+                when (which) {
+                    0 -> copyToClipboard("adb devices", "adb devices")
+                    1 -> copyToClipboard("ADB reverse command", "adb reverse tcp:${m.port} tcp:${m.port}")
+                    2 -> copyToClipboard("monitor URL", "http://localhost:${m.port}/?pin=${m.pin}")
+                    3 -> copyToClipboard("disconnect command", "adb reverse --remove tcp:${m.port}")
+                }
+            }
             .setNegativeButton("Turn off") { _, _ -> stopMonitor() }
             .show()
+    }
+
+    private fun shutterHaptic(view: View) {
+        if (cfg.haptics) view.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
+    }
+
+    private fun subtleSliderHaptic(view: View) {
+        if (!cfg.haptics) return
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastSliderHapticMs >= 65L) {
+            lastSliderHapticMs = now
+            view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+        }
     }
 
     private fun toggleMonitor() {

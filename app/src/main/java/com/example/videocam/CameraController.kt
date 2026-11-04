@@ -90,6 +90,7 @@ class CameraController(
         val expected: Int,
         val bw: Boolean,
         val flat: Boolean,
+        val photoLook: Int,
         val hdr: Boolean,
         val upscale: Boolean
     ) {
@@ -112,12 +113,25 @@ class CameraController(
     private val cbThread = HandlerThread("cam-results").apply { start() }
     private val cbHandler = Handler(cbThread.looper)
 
+    private fun isMotoEdge50NeoProfile(): Boolean {
+        val maker = Build.MANUFACTURER.lowercase(Locale.US)
+        val model = Build.MODEL.lowercase(Locale.US)
+        // The explicit auxiliary-ID profile is restricted to Motorola's Edge 50 Neo family.
+        // Every ID is still checked against CameraManager before it is exposed.
+        return maker.contains("motorola") && (model.contains("edge 50 neo") || model.contains("xt2409"))
+    }
+
+    private val motoProfileIds = listOf("5", "2", "0", "3", "1")
+
     val cameraIds: List<String> = try {
-        // Use only IDs actually advertised by CameraManager. Hard-coded IDs from one handset
-        // caused false lens matches and crashes on devices with a different camera layout.
-        manager.cameraIdList.toList()
-            .filter { usable(it) }
-            .sortedWith(compareBy({ lensRank(it) }, { it }))
+        val advertised = manager.cameraIdList.toList()
+        val detected = advertised.filter { usable(it) }
+        if (isMotoEdge50NeoProfile()) {
+            val profile = motoProfileIds.filter { it in advertised && usable(it) }
+            (profile + detected.filterNot { it in profile }).distinct()
+        } else {
+            detected.sortedWith(compareBy({ lensRank(it) }, { it }))
+        }
     } catch (e: Exception) {
         emptyList()
     }
@@ -250,9 +264,13 @@ class CameraController(
         val c = manager.getCameraCharacteristics(id)
         val caps = c.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES) ?: intArrayOf()
         val m = c.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
-        val sz = m?.getOutputSizes(MediaRecorder::class.java) ?: m?.getOutputSizes(SurfaceTexture::class.java)
-        caps.contains(CameraMetadata.REQUEST_AVAILABLE_CAPABILITIES_BACKWARD_COMPATIBLE) &&
-            sz != null && sz.isNotEmpty()
+        val videoSizes = m?.getOutputSizes(MediaRecorder::class.java)
+        val previewSizes = m?.getOutputSizes(SurfaceTexture::class.java)
+        val hasPreviewOutput = !videoSizes.isNullOrEmpty() || !previewSizes.isNullOrEmpty()
+        val backwardCompatible = caps.contains(CameraMetadata.REQUEST_AVAILABLE_CAPABILITIES_BACKWARD_COMPATIBLE)
+        // Some OEM auxiliary IDs omit the backward-compatible flag despite advertising
+        // preview/record output surfaces. Accept these only on the narrowly matched profile.
+        (backwardCompatible || (isMotoEdge50NeoProfile() && id in motoProfileIds)) && hasPreviewOutput
     } catch (e: Exception) {
         false
     }
@@ -301,6 +319,31 @@ class CameraController(
             eq < 20f || eq > 40f
         }
     }.getOrDefault(false)
+
+    /** Resolve a lens shortcut to a real advertised camera ID, never a digital zoom substitute. */
+    fun cameraIdForShortcut(ratio: Float): String? {
+        if (isMotoEdge50NeoProfile()) {
+            val exact = when {
+                ratio < 0.75f -> "2" // supplied ultrawide ID (0.7x)
+                ratio < 1.8f -> "0" // supplied main ID (1x)
+                else -> "3"          // supplied telephoto ID (2.7x)
+            }
+            if (exact in cameraIds && !isFront(exact)) return exact
+        }
+        val back = cameraIds.filterNot { isFront(it) }
+        if (back.isEmpty()) return null
+        fun equivalent(id: String): Float? = runCatching {
+            val c = manager.getCameraCharacteristics(id)
+            val f = c.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.firstOrNull() ?: return@runCatching null
+            val size = c.get(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE) ?: return@runCatching null
+            f * 43.27f / hypot(size.width, size.height)
+        }.getOrNull()
+        val baseline = back.mapNotNull { id -> equivalent(id)?.let { id to it } }
+            .minByOrNull { abs(it.second - 24f) }?.second ?: return back.firstOrNull()
+        val target = baseline * ratio
+        return back.mapNotNull { id -> equivalent(id)?.let { id to it } }
+            .minByOrNull { abs(it.second - target) }?.first
+    }
 
     fun cameraLabel(id: String): String {
         val c = manager.getCameraCharacteristics(id)
@@ -1515,7 +1558,7 @@ class CameraController(
             }
             val sh = Shot(
                 cfg.cameraId, fmt, chars, needRotation(), cfg.photoQuality, reqs.size,
-                cfg.bw, cfg.flat && !cfg.bw, hplan != null, cfg.upscale && currentLensNeedsUpscale()
+                cfg.bw, cfg.flat && !cfg.bw, cfg.photoLook, hplan != null, cfg.upscale && currentLensNeedsUpscale()
             )
             synchronized(lock) { shot = sh }
             if (plan != null && plan.expNs * reqs.size >= 1_500_000_000L) {
@@ -1604,7 +1647,7 @@ class CameraController(
     /** Applies look, lens colour trim and optional upscaling to an upright bitmap, recycling what it replaces. */
     private fun finishLook(bmp: Bitmap, sh: Shot, trim: Trim): Bitmap {
         var out = bmp
-        val styled = Look.apply(out, sh.bw, sh.flat)
+        val styled = Look.apply(out, sh.bw, sh.flat, sh.photoLook)
         if (styled !== out) {
             out.recycle()
             out = styled

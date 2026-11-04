@@ -80,9 +80,11 @@ data class Config(
     var hdrFrames: Int = 3,          // multi-frame HDR fusion: 2 or 3 exposures
     var upscale: Boolean = false,    // upscale photos to 12.6 MP
     var bw: Boolean = false,         // photo black and white, high contrast
+    var photoLook: Int = 0,          // 0 natural, 1 golden hour, 2 dream glow
     var photoNr: Int = 1,            // photo noise reduction: 0 minimal, 1 standard, 2 high
     var squeeze: Int = 0,            // anamorphic de-squeeze of the preview: 0 off, 1 1.33x, 2 1.5x, 3 1.8x, 4 2x
-    var lensKeys: Boolean = false,   // show the 0.7x / 1x / 2.7x shortcut buttons
+    var lensKeys: Boolean = false,   // show the 0.5x / 1x / 2.7x shortcut buttons
+    var haptics: Boolean = true,     // subtle shutter and manual slider feedback
     var steady: Boolean = false,     // super steady: record 4K with gyro log, make a stabilised 1080p copy
     var ver: Int = 0
 ) {
@@ -125,9 +127,11 @@ data class Config(
         hdrFrames = o.hdrFrames
         upscale = o.upscale
         bw = o.bw
+        photoLook = o.photoLook
         photoNr = o.photoNr
         squeeze = o.squeeze
         lensKeys = o.lensKeys
+        haptics = o.haptics
         steady = o.steady
         ver = o.ver
     }
@@ -171,9 +175,11 @@ data class Config(
         .put("hdrFrames", hdrFrames)
         .put("upscale", upscale)
         .put("bw", bw)
+        .put("photoLook", photoLook)
         .put("photoNr", photoNr)
         .put("squeeze", squeeze)
         .put("lensKeys", lensKeys)
+        .put("haptics", haptics)
         .put("steady", steady)
         .put("ver", ver)
         .toString()
@@ -221,9 +227,11 @@ data class Config(
                 hdrFrames = o.optInt("hdrFrames", d.hdrFrames).let { if (it == 2) 2 else 3 },
                 upscale = o.optBoolean("upscale", d.upscale),
                 bw = o.optBoolean("bw", d.bw),
+                photoLook = o.optInt("photoLook", d.photoLook).coerceIn(0, 2),
                 photoNr = o.optInt("photoNr", if (o.optBoolean("photoNrOff", false)) 0 else d.photoNr),
                 squeeze = o.optInt("squeeze", d.squeeze),
                 lensKeys = o.optBoolean("lensKeys", d.lensKeys),
+                haptics = o.optBoolean("haptics", d.haptics),
                 steady = o.optBoolean("steady", d.steady),
                 ver = o.optInt("ver", d.ver)
             )
