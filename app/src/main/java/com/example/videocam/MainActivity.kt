@@ -1515,6 +1515,10 @@ class MainActivity : Activity(), CameraController.Callbacks {
     }
 
     private fun idle(): Boolean {
+        if (::transitionCover.isInitialized && transitionCover.visibility == View.VISIBLE) {
+            toast("Camera is switching. Please wait.")
+            return false
+        }
         if (cam.recording || cam.busy || cam.jobs > 0) {
             toast(if (cam.busy || cam.jobs > 0) "Wait for the photo to finish" else "Stop recording first")
             return false
