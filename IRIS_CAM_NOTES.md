@@ -33,4 +33,4 @@ This project is an in-progress source update. It is not represented as a device-
 
 ## Build
 
-The GitHub Actions workflow builds `:app:assembleDebug` using JDK 17 and Gradle 8.7. The lifecycle-release change compiled successfully in run #58; the follow-up thermal-listener cleanup has a separate workflow run pending. The project still requires physical-device validation on the Edge 50 Neo and another Android device.
+The GitHub Actions workflow builds `:app:assembleDebug` using JDK 17 and Gradle 8.7. The latest lifecycle, audio-teardown and Good Take cleanup changes compile successfully in run #75. The project still requires physical-device validation on the Edge 50 Neo and another Android device.
