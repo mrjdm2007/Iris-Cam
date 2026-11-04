@@ -151,6 +151,7 @@ class CameraController(
     private var out: Output? = null
     private var nextOut: Output? = null
     private var started = false
+    private var reconfigurePosted = false
     @Volatile
     private var released = false
     private var gen = 0
@@ -590,7 +591,19 @@ class CameraController(
     }
 
     fun reconfigure() {
-        if (!recording && !busy) configureAndStart()
+        // Camera session creation is asynchronous. Coalesce same-frame UI changes so
+        // rapid menu callbacks cannot tear down/recreate the recorder repeatedly.
+        if (recording || busy || released || !started || reconfigurePosted) return
+        reconfigurePosted = true
+        handler.post {
+            reconfigurePosted = false
+            if (!started || recording || busy || released) return@post
+            try {
+                configureAndStart()
+            } catch (e: Exception) {
+                ui.onMessage("Camera reconfiguration failed: ${e.message}")
+            }
+        }
     }
 
     @SuppressLint("MissingPermission")
