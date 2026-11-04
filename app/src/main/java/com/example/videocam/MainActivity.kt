@@ -1105,7 +1105,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
     private fun imageItems(): List<Pair<String, () -> Unit>> =
         if (cfg.mode == 1) photoImageItems() else videoImageItems()
 
-    /** Dedicated Filters category. Saved stills get the full effect; video mode is preview-only. */
+    /** Shared filter presets; photo effects are rendered on capture and video effects in the recorder GPU path. */
     private fun filterItems(): List<Pair<String, () -> Unit>> {
         val presets = listOf(
             "Natural" to 0,
@@ -1140,8 +1140,8 @@ class MainActivity : Activity(), CameraController.Callbacks {
                     cfg.photoLook = 0
                     cfg.flat = false
                     cfgDirty = true
-                    applyLive()
-                    toast(if (cfg.mode == 0 && id != 0) "${Look.FILTER_NAMES[id]} applied to video preview and recording" else "${Look.FILTER_NAMES[id]} selected")
+                    applyFilterChange()
+                    toast(if (cfg.mode == 0 && id != 0) "${Look.FILTER_NAMES[id]} will be baked into recorded video" else "${Look.FILTER_NAMES[id]} selected")
                 }
             }
         }
@@ -1149,7 +1149,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
             choose("Filter intensity", (0..100 step 10).map { "$it%" }) {
                 cfg.filterIntensity = it * 10
                 cfgDirty = true
-                applyLive()
+                applyFilterChange()
             }
         })
     }
@@ -1482,6 +1482,15 @@ class MainActivity : Activity(), CameraController.Callbacks {
             return false
         }
         return true
+    }
+
+    private fun applyFilterChange() {
+        store.save("last", cfg)
+        // CropRenderer is attached to the recording session when it is created.
+        // Rebuild that session after a filter/intensity change so the recorder
+        // receives the graded GPU surface instead of its unprocessed surface.
+        if (cfg.mode == 0) cam.reconfigure() else cam.updateRepeating()
+        refreshUi()
     }
 
     private fun applyLive() {
