@@ -1153,21 +1153,6 @@ class MainActivity : Activity(), CameraController.Callbacks {
     }
 
     private fun photoImageItems(): List<Pair<String, () -> Unit>> = listOf(
-        "Portrait depth blur: ${if (cfg.portrait) "On" else "Off"}" to {
-            if (idle()) {
-                cfg.portrait = !cfg.portrait
-                cfgDirty = true
-                applyLive()
-                toast(if (cfg.portrait) "Portrait blur enabled for saved photos" else "Portrait blur disabled")
-            }
-        },
-        "Portrait blur strength: ${cfg.portraitBlurStrength}%" to {
-            choose("Portrait background blur strength", (20..100 step 10).map { "$it%" }) {
-                cfg.portraitBlurStrength = it * 10
-                cfgDirty = true
-                applyLive()
-            }
-        },
         "Colour trim for this lens\u2026" to { showTrimDialog() },
         "Match lens colour\u2026" to { matchLensColour() },
         "Reset this lens's colour trim" to {
@@ -1200,7 +1185,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
         val sz = runCatching { cam.captureSize() }.getOrNull()
         val mp = if (sz != null) "%.1fMP".format(sz.width * sz.height / 1e6) else "--"
         val m = when {
-            cfg.photoFormat == 3 && cam.ultraHdrAvailable && cfg.filterId == 0 && !cfg.flat && !cfg.upscale && !cfg.portrait -> "ULTRA HDR"
+            cfg.photoFormat == 3 && cam.ultraHdrAvailable && cfg.filterId == 0 && !cfg.flat && !cfg.upscale -> "ULTRA HDR"
             cfg.scene == 1 -> "NIGHT"
             cfg.scene == 2 -> "ASTRO"
             cfg.scene == 3 -> "HDR"
