@@ -2481,8 +2481,13 @@ class MainActivity : Activity(), CameraController.Callbacks {
             var rotated: Bitmap? = null
             try {
                 val landscape = prevW >= prevH
-                val bw = if (landscape) 1280 else 720
-                val bh = if (landscape) 720 else 1280
+                // Preserve native preview detail up to 1080p; use 720p when the selected
+                // preview stream is smaller so the monitor never invents extra detail.
+                val longEdge = if (landscape) prevW else prevH
+                val targetLong = if (longEdge >= 1920) 1920 else 1280
+                val targetShort = targetLong * 9 / 16
+                val bw = if (landscape) targetLong else targetShort
+                val bh = if (landscape) targetShort else targetLong
                 var b = monitorBmp
                 if (b == null || b.width != bw || b.height != bh || b.isRecycled) {
                     b?.recycle()
@@ -2502,9 +2507,10 @@ class MainActivity : Activity(), CameraController.Callbacks {
                     Bitmap.createBitmap(b, 0, 0, b.width, b.height, mt, false).also { rotated = it }
                 }
                 val bos = ByteArrayOutputStream(100_000)
-                // MJPEG remains compatible with every browser; USB ADB reverse avoids Wi-Fi
-                // transport overhead. H.264/MSE remains a separate encoder/decoder migration.
-                out.compress(Bitmap.CompressFormat.JPEG, 58, bos)
+                // MJPEG remains compatible with every browser. 1080p is used only when the
+                // selected preview itself is at least 1080p; otherwise output remains 720p.
+                // H.264/MSE remains a separate encoder/decoder migration.
+                out.compress(Bitmap.CompressFormat.JPEG, if (targetLong == 1920) 56 else 60, bos)
                 m.pushFrame(bos.toByteArray())
             } catch (_: Throwable) {
             } finally {
