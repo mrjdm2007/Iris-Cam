@@ -26,6 +26,7 @@ class MonitorH264Encoder(
     private val info = MediaCodec.BufferInfo()
     private var configSent = false
     private var closed = false
+    private var lastFrameNs = 0L
 
     init {
         require(width > 0 && height > 0 && width % 2 == 0 && height % 2 == 0) {
@@ -61,6 +62,12 @@ class MonitorH264Encoder(
     @Synchronized
     fun encode(bitmap: Bitmap) {
         if (closed || bitmap.width != width || bitmap.height != height) return
+        val nowNs = System.nanoTime()
+        if (lastFrameNs != 0L && nowNs - lastFrameNs < 50_000_000L) {
+            drain()
+            return
+        }
+        lastFrameNs = nowNs
         val inputIndex = codec.dequeueInputBuffer(0)
         if (inputIndex >= 0) {
             val input = codec.getInputBuffer(inputIndex)
@@ -68,10 +75,10 @@ class MonitorH264Encoder(
                 input.clear()
                 bitmap.getPixels(pixels, 0, width, 0, 0, width, height)
                 writeYuv420(pixels, input)
-                val pts = System.nanoTime() / 1000L
+                val pts = nowNs / 1000L
                 codec.queueInputBuffer(inputIndex, 0, input.position(), pts, 0)
             } else {
-                codec.queueInputBuffer(inputIndex, 0, 0, System.nanoTime() / 1000L, 0)
+                codec.queueInputBuffer(inputIndex, 0, 0, nowNs / 1000L, 0)
             }
         }
         drain()
