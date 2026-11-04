@@ -567,7 +567,7 @@ class CameraController(
         if (released) return
         released = true
         stop()
-        procExec.shutdownNow()
+        procExec.shutdown()
         cbThread.quitSafely()
     }
 
