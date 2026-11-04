@@ -143,8 +143,6 @@ class MainActivity : Activity(), CameraController.Callbacks {
     private lateinit var tRot: TextView
     private lateinit var recEdge: EdgeLineView
     private lateinit var audioMeter: AudioMeterView
-    private lateinit var lensRow: LinearLayout
-    private val lensKeyChips = ArrayList<Pair<TextView, Float>>()
     private var monitor: MonitorServer? = null
     // Preserve the camera flat-profile setting while laptop monitoring is active.
     private var monitorSavedFlat: Boolean? = null
@@ -714,19 +712,6 @@ class MainActivity : Activity(), CameraController.Callbacks {
             refreshUi()
         }
         val zoomStrip = strip(zoomLabel, zA, zB, zoomSlider, zoomGo, zoomTime, zoomLink)
-        lensRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            visibility = View.GONE
-        }
-        for ((name, ratio) in listOf("0.5x" to 0.5f, "1x" to 1f, "2.7x" to 2.7f)) {
-            lateinit var c: TextView
-            c = chip(name) { showLensDropdown(c, ratio) }
-            c.maxLines = 1
-            c.textSize = 12f
-            c.setPadding(dp(8), dp(5), dp(8), dp(5))
-            lensKeyChips.add(Pair(c, ratio))
-            lensRow.addView(c, LinearLayout.LayoutParams(dp(52), WRAP).apply { setMargins(dp(2), 0, dp(2), dp(3)) })
-        }
 
         expSlider = ZoomSlider(this)
         expLabel = label("EXPOSURE")
@@ -748,7 +733,6 @@ class MainActivity : Activity(), CameraController.Callbacks {
         val stack = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             addView(readRow, LinearLayout.LayoutParams(WRAP, WRAP))
-            addView(lensRow, LinearLayout.LayoutParams(WRAP, WRAP).apply { setMargins(dp(80), 0, 0, 0) })
             addView(zoomStrip, LinearLayout.LayoutParams(WRAP, WRAP).apply { setMargins(0, 0, 0, dp(3)) })
             addView(expStrip, LinearLayout.LayoutParams(WRAP, WRAP))
         }
@@ -1313,11 +1297,6 @@ class MainActivity : Activity(), CameraController.Callbacks {
                 applyLive()
             }
         },
-        "Lens shortcuts (0.5x / 1x / 2.7x): ${if (cfg.lensKeys) "On" else "Off"}" to {
-            cfg.lensKeys = !cfg.lensKeys
-            cfgDirty = true
-            refreshUi()
-        },
         "Laptop monitor (Wi-Fi / USB): ${if (monitor != null) "On \u2014 tap for connection" else "Off"}" to { toggleMonitor() },
         "USB monitoring commands (Mac)" to { showUsbCommands() },
         "Dolly Zoom (linked zoom + focus): ${if (zoomLinked) "On" else "Off"}" to {
@@ -1356,7 +1335,6 @@ class MainActivity : Activity(), CameraController.Callbacks {
 
         setActive(t2x, cam.zoom >= 1.9f)
         lensChips.forEach { (id, c) -> setActive(c, cfg.cameraId == id) }
-        lensKeyChips.forEach { (c, r) -> setActive(c, abs(cam.zoom - r) < 0.08f) }
         setActive(tPeak, cfg.peak > 0)
         setActive(tFalse, falseOn)
         setActive(tTorch, if (photo) cfg.flashMode != 0 else cam.torch)
@@ -1365,7 +1343,6 @@ class MainActivity : Activity(), CameraController.Callbacks {
         setActive(tRot, cfg.portrait)
         tRot.visibility = if (cfg.mode == 1) View.GONE else View.VISIBLE
         applySliderWidths()
-        lensRow.visibility = if (cfg.lensKeys) View.VISIBLE else View.GONE
         applyBwLook()
         recEdge.visibility = if (cam.recording) View.VISIBLE else View.GONE
         audioMeter.visibility = if (cfg.mode == 0) View.VISIBLE else View.GONE
@@ -1464,34 +1441,6 @@ class MainActivity : Activity(), CameraController.Callbacks {
             lensChips[id] = c
             toolsCol.addView(c, idx++, LinearLayout.LayoutParams(dp(70), WRAP).apply { setMargins(0, dp(3), 0, dp(3)) })
         }
-    }
-
-    private fun showLensDropdown(anchor: View, shortcutRatio: Float) {
-        if (!idle()) return
-        val suggested = cam.cameraIdForShortcut(shortcutRatio)
-
-        // A shortcut selects the matching physical camera immediately when one is genuinely
-        // advertised. Do not silently map an unavailable auxiliary lens to the main camera.
-        if (suggested != null) {
-            switchLens(suggested)
-            return
-        }
-
-        // On devices without a matching auxiliary lens, retain the normal camera picker.
-        val ids = cam.cameraIds
-        if (ids.isEmpty()) {
-            toast("No compatible camera lens was detected")
-            return
-        }
-        val menu = PopupMenu(this, anchor)
-        ids.forEachIndexed { index, id ->
-            menu.menu.add(0, index, index, cam.cameraLabel(id))
-        }
-        menu.setOnMenuItemClickListener { item ->
-            ids.getOrNull(item.itemId)?.let { switchLens(it) }
-            true
-        }
-        menu.show()
     }
 
     private fun switchLens(id: String) {
