@@ -519,10 +519,10 @@ class CameraController(
 
     /** Zoom shortcut buttons that fit this camera's zoom range. */
     fun zoomPresets(): List<Float> =
-        listOf(0.6f, 1f, 2f, 3f, 5f, 8f).filter { it >= zoomRange.lower - 0.01f && it <= zoomRange.upper + 0.01f }
+        listOf(0.5f, 1f, 2f, 3f, 5f, 7f).filter { it >= zoomRange.lower - 0.01f && it <= zoomRange.upper + 0.01f }
 
     /** Highest zoom offered in the app. */
-    fun zoomHi(): Float = min(zoomRange.upper, 7f)
+    fun zoomHi(): Float = max(zoomRange.lower, min(zoomRange.upper, 7f))
 
     /** Cinematic shape actually being recorded (0 = the camera's own 16:9). Landscape, normal-speed video only. */
     fun effRatio(): Int {
@@ -623,19 +623,35 @@ class CameraController(
                 }
 
                 override fun onDisconnected(cd: CameraDevice) {
+                    val wasActive = device === cd
                     cd.close()
-                    if (device === cd) device = null
-                    if (settled.compareAndSet(false, true) && started) {
+                    if (wasActive) {
+                        device = null
+                        closeSession()
+                        releaseRecorder()
+                        if (started) {
+                            ui.onMessage("Camera disconnected; trying another detected lens")
+                            handler.postDelayed({ openCameraCandidate(candidates, index + 1) }, 250)
+                        }
+                    } else if (settled.compareAndSet(false, true) && started) {
                         openCameraCandidate(candidates, index + 1)
                     }
                 }
 
                 override fun onError(cd: CameraDevice, error: Int) {
+                    val wasActive = device === cd
                     cd.close()
-                    if (device === cd) device = null
-                    if (settled.compareAndSet(false, true) && started) {
+                    if (wasActive) {
+                        device = null
+                        closeSession()
+                        releaseRecorder()
+                        if (started) {
+                            ui.onMessage("Camera error $error; trying another detected lens")
+                            handler.postDelayed({ openCameraCandidate(candidates, index + 1) }, 250)
+                        }
+                    } else if (settled.compareAndSet(false, true) && started) {
                         openCameraCandidate(candidates, index + 1)
-                    } else {
+                    } else if (!settled.get()) {
                         ui.onMessage("Camera error $error")
                     }
                 }
