@@ -170,7 +170,8 @@ object Look {
         "Natural", "Black and White", "Kodak 2383", "Kodak 250D", "Kodak 500T",
         "Fuji Eterna", "Teal & Orange", "Bleach Bypass", "Vintage Fade", "Noir",
         "Leica Colour", "Blue Cinematic", "Golden Hour", "Dream Glow",
-        "Halation", "Soft Diffusion", "Film Grain", "Anamorphic Flare"
+        "Halation", "Soft Diffusion", "Film Grain", "Anamorphic Flare",
+        "ZEISS Natural", "ZEISS Radiance Blue", "Portra Warm", "Classic Chrome"
     )
 
     private fun filterMatrix(id: Int): ColorMatrix {
@@ -218,6 +219,15 @@ object Look {
             15 -> basic(0.98f, 0.94f, 2f, 2f, 2f)
             16 -> basic(1.02f, 1.00f, 0f, 0f, 0f)
             17 -> basic(1.00f, 1.00f, 0f, 0f, 0f)
+            18 -> basic(1.03f, 1.04f, 1f, 1f, 2f) // ZEISS-inspired natural colour and restrained clarity
+            19 -> ColorMatrix(floatArrayOf(
+                1.04f, 0.01f, -0.02f, 0f, 2f,
+                0.00f, 1.00f, 0.00f, 0f, 0f,
+                -0.02f, 0.02f, 1.10f, 0f, 5f,
+                0f, 0f, 0f, 1f, 0f
+            )) // ZEISS T* Radiance-inspired cool blue rendition
+            20 -> basic(1.02f, 0.96f, 7f, 2f, -5f) // Portra-inspired warm skin and gentle contrast
+            21 -> basic(0.80f, 1.06f, 4f, 3f, 2f) // muted documentary palette
             else -> ColorMatrix()
         }
     }
