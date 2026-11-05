@@ -718,7 +718,10 @@ class CameraController(
                 rec.setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
                 findMic()?.let { rec.setPreferredDevice(it) }
             }
-            rec.setOrientationHint(if (cropIt) 0 else orientationHint())
+            // The GL renderer writes physically upright frames, so don't add rotation metadata.
+            // Without the renderer, let MediaRecorder carry the device orientation as metadata.
+            val useGlRenderer = cropIt || cfg.filterId > 0
+            rec.setOrientationHint(if (useGlRenderer) 0 else orientationHint())
             rec.setMaxFileSize(SPLIT_BYTES)
             rec.setOnInfoListener { mr, what, _ -> onRecorderInfo(mr, what) }
             rec.setOnErrorListener { _, what, _ -> ui.onMessage("Recorder error $what") }

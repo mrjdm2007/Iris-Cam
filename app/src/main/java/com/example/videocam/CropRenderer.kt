@@ -163,26 +163,33 @@ class CropRenderer(
         // The camera picture comes in upright as if the phone were held in portrait; turn it to landscape
         // and let the output bounds cut the top and bottom. yh > 1 means the picture is taller than the frame.
         val yh = (outW * srcH.toFloat() / srcW) / outH
-        val q = if (fullFrame) {
+        val q = if (fullFrame && rotation == Surface.ROTATION_0) {
             floatArrayOf(
-                -1f, -1f, 0f, 0f,
-                 1f, -1f, 1f, 0f,
-                -1f,  1f, 0f, 1f,
-                 1f,  1f, 1f, 1f
+                -1f, -yh, 0f, 0f,
+                 1f, -yh, 1f, 0f,
+                -1f,  yh, 0f, 1f,
+                 1f,  yh, 1f, 1f
+            )
+        } else if (fullFrame && rotation == Surface.ROTATION_180) {
+            floatArrayOf(
+                -1f, -yh, 1f, 1f,
+                 1f, -yh, 0f, 1f,
+                -1f,  yh, 1f, 0f,
+                 1f,  yh, 0f, 0f
             )
         } else if (rotation == Surface.ROTATION_270) {
             floatArrayOf(
                 -1f, -yh, 1f, 0f,
-                1f, -yh, 1f, 1f,
-                -1f, yh, 0f, 0f,
-                1f, yh, 0f, 1f
+                 1f, -yh, 1f, 1f,
+                -1f,  yh, 0f, 0f,
+                 1f,  yh, 0f, 1f
             )
         } else {
             floatArrayOf(
                 -1f, -yh, 0f, 1f,
-                1f, -yh, 0f, 0f,
-                -1f, yh, 1f, 1f,
-                1f, yh, 1f, 0f
+                 1f, -yh, 0f, 0f,
+                -1f,  yh, 1f, 1f,
+                 1f,  yh, 1f, 0f
             )
         }
         verts = ByteBuffer.allocateDirect(q.size * 4).order(ByteOrder.nativeOrder()).asFloatBuffer()
