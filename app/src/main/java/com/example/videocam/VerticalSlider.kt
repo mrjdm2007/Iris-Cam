@@ -18,9 +18,9 @@ class VerticalSlider(ctx: Context) : View(ctx) {
     private val density = resources.displayMetrics.density
     private val pad = 40f * density
 
-    private val bg = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x66000000 }
+    private val bg = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xD91C1F25.toInt() }
     private val track = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = 0x99FFFFFF.toInt()
+        color = 0x99D6D2C8.toInt()
         strokeWidth = 4f * density
         strokeCap = Paint.Cap.ROUND
     }
@@ -34,7 +34,7 @@ class VerticalSlider(ctx: Context) : View(ctx) {
         textAlign = Paint.Align.CENTER
     }
     private val markPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = 0xFF00E5FF.toInt()
+        color = 0xFFFFB300.toInt()
         strokeWidth = 2.5f * density
         textSize = 13f * density
         textAlign = Paint.Align.RIGHT
@@ -72,7 +72,11 @@ class VerticalSlider(ctx: Context) : View(ctx) {
         }
 
         thumb.color = if (isEnabled) 0xFFFFB300.toInt() else 0xFF777777.toInt()
-        canvas.drawCircle(cx, yFor(fraction), 16 * density, thumb)
+        canvas.drawCircle(cx, yFor(fraction), 18 * density, thumb)
+        if (isEnabled) {
+            thumb.color = 0xFFFFF1CC.toInt()
+            canvas.drawCircle(cx, yFor(fraction), 6 * density, thumb)
+        }
     }
 
     override fun onTouchEvent(e: MotionEvent): Boolean {

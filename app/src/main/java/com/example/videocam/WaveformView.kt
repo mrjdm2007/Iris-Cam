@@ -14,13 +14,13 @@ class WaveformView(ctx: Context) : View(ctx) {
     private var pts = FloatArray(0)
 
     private val density = resources.displayMetrics.density
-    private val bg = Paint().apply { color = 0x88000000.toInt() }
+    private val bg = Paint().apply { color = 0xD91C1F25.toInt() }
     private val guide = Paint().apply {
         color = 0x55FFFFFF
         strokeWidth = 1f * density
     }
     private val dot = Paint().apply {
-        color = 0xCC00FF66.toInt()
+        color = 0xFFFFB300.toInt()
         strokeWidth = 2f * density
     }
 

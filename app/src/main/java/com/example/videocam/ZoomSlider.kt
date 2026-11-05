@@ -31,9 +31,9 @@ class ZoomSlider(ctx: Context) : View(ctx) {
     private val d = resources.displayMetrics.density
     private val pad = 20f * d
 
-    private val bg = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x66000000 }
+    private val bg = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xD91C1F25.toInt() }
     private val track = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = 0x99FFFFFF.toInt()
+        color = 0x99D6D2C8.toInt()
         strokeWidth = 3f * d
         strokeCap = Paint.Cap.ROUND
     }
@@ -47,7 +47,7 @@ class ZoomSlider(ctx: Context) : View(ctx) {
         textAlign = Paint.Align.CENTER
     }
     private val mark = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = 0xFF00E5FF.toInt()
+        color = 0xFFFFB300.toInt()
         strokeWidth = 2.5f * d
         textSize = 10f * d
         textAlign = Paint.Align.CENTER
@@ -100,7 +100,11 @@ class ZoomSlider(ctx: Context) : View(ctx) {
             c.drawText("B", x, h - 2 * d, mark)
         }
         thumb.color = if (isEnabled) 0xFFFFB300.toInt() else 0xFF777777.toInt()
-        c.drawCircle(xFor(frac(zoom)), cy, 9 * d, thumb)
+        c.drawCircle(xFor(frac(zoom)), cy, 11 * d, thumb)
+        if (isEnabled) {
+            thumb.color = 0xFFFFF1CC.toInt()
+            c.drawCircle(xFor(frac(zoom)), cy, 4 * d, thumb)
+        }
     }
 
     override fun onTouchEvent(e: MotionEvent): Boolean {

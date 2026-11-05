@@ -6,6 +6,7 @@ import android.app.Activity
 import android.app.AlertDialog
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import android.content.ContentUris
+import android.content.res.ColorStateList
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Intent
@@ -20,6 +21,7 @@ import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.RippleDrawable
 import android.net.Uri
 import android.os.BatteryManager
 import android.os.Build
@@ -393,30 +395,45 @@ class MainActivity : Activity(), CameraController.Callbacks {
     private fun lp(w: Int, h: Int, g: Int, l: Int = 0, t: Int = 0, r: Int = 0, b: Int = 0) =
         FrameLayout.LayoutParams(w, h, g).apply { setMargins(l, t, r, b) }
 
-    private fun roundBg(color: Int, radiusDp: Int) = GradientDrawable().apply {
+    private fun roundBg(color: Int, radiusDp: Int, stroke: Int? = null) = GradientDrawable().apply {
         cornerRadius = dp(radiusDp).toFloat()
         setColor(color)
+        stroke?.let { setStroke(dp(1), it) }
     }
 
-    private fun chipBg(active: Boolean) = GradientDrawable().apply {
-        cornerRadius = dp(18).toFloat()
-        setColor(if (active) AMBER else 0xFF252830.toInt())
-        setStroke(dp(1), if (active) AMBER else 0xFF494B52.toInt())
+    /** Material 3 surface with native Android ripple feedback. */
+    private fun materialSurface(color: Int, radiusDp: Int, stroke: Int? = null, ripple: Int = 0x33FFB300): RippleDrawable {
+        val shape = roundBg(color, radiusDp, stroke)
+        return RippleDrawable(ColorStateList.valueOf(ripple), shape, null)
     }
+
+    private fun chipBg(active: Boolean) = materialSurface(
+        if (active) 0xFFFFB300.toInt() else 0xFF292C32.toInt(),
+        18,
+        if (active) 0xFFFFB300.toInt() else 0xFF494D55.toInt(),
+        if (active) 0x33FFFFFF else 0x33FFB300
+    )
 
     private fun setActive(t: TextView, on: Boolean) {
         t.background = chipBg(on)
-        t.setTextColor(if (on) Color.BLACK else Color.WHITE)
+        t.setTextColor(if (on) 0xFF211A08.toInt() else 0xFFF3F0E8.toInt())
+        t.elevation = dp(if (on) 2 else 0).toFloat()
     }
 
     private fun chip(text: String, onLong: (() -> Unit)? = null, onClick: () -> Unit): TextView =
         TextView(this).apply {
             this.text = text
-            setTextColor(Color.WHITE)
+            setTextColor(0xFFF3F0E8.toInt())
             textSize = 12f
+            letterSpacing = 0.015f
+            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
             gravity = Gravity.CENTER
-            setPadding(dp(10), dp(5), dp(10), dp(5))
+            minHeight = dp(36)
+            minWidth = dp(40)
+            setPadding(dp(12), dp(7), dp(12), dp(7))
             background = chipBg(false)
+            isClickable = true
+            isFocusable = true
             setOnClickListener { onClick() }
             if (onLong != null) setOnLongClickListener {
                 onLong()
@@ -440,8 +457,12 @@ class MainActivity : Activity(), CameraController.Callbacks {
         val box = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
-            setPadding(dp(10), dp(3), dp(10), dp(3))
-            background = roundBg(0xFF1B1D22.toInt(), 12)
+            setPadding(dp(10), dp(5), dp(10), dp(5))
+            minHeight = dp(48)
+            background = materialSurface(0xFF202329.toInt(), 14, 0xFF3A3E46.toInt())
+            elevation = dp(1).toFloat()
+            isClickable = true
+            isFocusable = true
             setOnClickListener { onClick() }
             addView(l)
             addView(v)
@@ -467,8 +488,9 @@ class MainActivity : Activity(), CameraController.Callbacks {
         val s = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            background = roundBg(0xEE1B1D22.toInt(), 16)
-            setPadding(dp(6), dp(3), dp(6), dp(3))
+            background = materialSurface(0xE61C1F25.toInt(), 20, 0x553F444D)
+            elevation = dp(3).toFloat()
+            setPadding(dp(8), dp(5), dp(8), dp(5))
         }
         s.addView(label, LinearLayout.LayoutParams(dp(74), WRAP))
         views.forEach { v ->
@@ -484,7 +506,8 @@ class MainActivity : Activity(), CameraController.Callbacks {
         this.text = text
         setTextColor(GREY)
         textSize = 10f
-        setTypeface(Typeface.MONOSPACE, Typeface.BOLD)
+        letterSpacing = 0.06f
+        setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL))
     }
 
     /** Wraps a control in a draggable frame (movable in Edit layout mode) and adds it to the screen. */
@@ -550,9 +573,11 @@ class MainActivity : Activity(), CameraController.Callbacks {
 
         falseLegend = TextView(this).apply {
             text = "FALSE COLOUR   purple <2%   blue shadows   green mid-grey   pink skin   yellow 90%+   red clipped"
-            setTextColor(Color.WHITE)
+            setTextColor(0xFFF3F0E8.toInt())
             textSize = 10f
-            setShadowLayer(4f, 0f, 0f, Color.BLACK)
+            setPadding(dp(12), dp(8), dp(12), dp(8))
+            background = materialSurface(0xE61C1F25.toInt(), 14, 0x66494D55)
+            elevation = dp(3).toFloat()
             visibility = View.GONE
         }
         root.addView(falseLegend, lp(WRAP, WRAP, Gravity.TOP or Gravity.CENTER_HORIZONTAL, 0, dp(48), 0, 0))
@@ -579,8 +604,13 @@ class MainActivity : Activity(), CameraController.Callbacks {
         val top = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(0xCC000000.toInt(), 0x00000000))
-            setPadding(dp(12), dp(4), dp(12), dp(12))
+            background = GradientDrawable().apply {
+                setColor(0xD91B1E24.toInt())
+                cornerRadii = floatArrayOf(0f, 0f, 0f, 0f, dp(22).toFloat(), dp(22).toFloat(), dp(22).toFloat(), dp(22).toFloat())
+                setStroke(dp(1), 0x55494D55)
+            }
+            elevation = dp(4).toFloat()
+            setPadding(dp(12), dp(6), dp(12), dp(10))
         }
         top.addView(timecode, LinearLayout.LayoutParams(dp(112), WRAP))
         top.addView(meter, LinearLayout.LayoutParams(dp(70), dp(8)).apply { setMargins(0, 0, dp(8), 0) })
@@ -2418,9 +2448,11 @@ class MainActivity : Activity(), CameraController.Callbacks {
             setPadding(0, 0, dp(8), 0)
         }
         row.addView(label, LinearLayout.LayoutParams(0, WRAP, 1f))
-        val copy = android.widget.Button(this).apply {
-            text = "COPY"
-            isAllCaps = true
+        val copy = com.google.android.material.button.MaterialButton(this, null, com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
+            text = "Copy"
+            isAllCaps = false
+            textSize = 12f
+            cornerRadius = dp(12)
             setOnClickListener { copyToClipboard(title, value) }
         }
         row.addView(copy, LinearLayout.LayoutParams(WRAP, WRAP))

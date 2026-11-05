@@ -14,8 +14,8 @@ class DragFrame(ctx: Context, val key: String) : FrameLayout(ctx) {
 
     private val d = resources.displayMetrics.density
     private val outline = GradientDrawable().apply {
-        setStroke((2 * d).toInt(), 0xFF00E5FF.toInt())
-        setColor(0x2200E5FF)
+        setStroke((2 * d).toInt(), 0xFFFFB300.toInt())
+        setColor(0x22FFB300)
     }
     private var dx = 0f
     private var dy = 0f
