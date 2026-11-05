@@ -1221,13 +1221,18 @@ class CameraController(
 
     val ultraHdrAvailable: Boolean get() = Build.VERSION.SDK_INT >= 34 && jprSizes.isNotEmpty()
 
+    /** True only when the selected photo settings can be saved without destroying the camera's gain map. */
+    val ultraHdrReady: Boolean
+        get() = ultraHdrAvailable && cfg.photoFormat == 3 && cfg.scene == 0 &&
+            cfg.filterId == 0 && !cfg.flat &&
+            !cfg.bw && !cfg.blue && !cfg.glow && cfg.photoLook == 0 &&
+            store.trim(cfg.cameraId).isNeutral()
+
     private fun captureFormat(): Int = when {
         effMode() == 1 -> ImageFormat.RAW_SENSOR
-        // JPEG_R must be saved byte-for-byte to preserve its gain map. If a pixel filter
-        // is selected, use ordinary JPEG so the requested look is actually rendered.
-        cfg.photoFormat == 3 && ultraHdrAvailable &&
-            cfg.filterId == 0 && !cfg.flat && !cfg.upscale &&
-            store.trim(cfg.cameraId).isNeutral() -> ImageFormat.JPEG_R
+        // JPEG_R is kept byte-for-byte: any bitmap/filter/trim/upscale pass would discard
+        // the embedded gain map, so only the clean native capture path may use it.
+        ultraHdrReady -> ImageFormat.JPEG_R
         else -> ImageFormat.JPEG
     }
 
@@ -1243,7 +1248,13 @@ class CameraController(
         val l = captureSizes()
         if (l.isEmpty()) return Size(4000, 3000)
         l.firstOrNull { it.width == cfg.photoW && it.height == cfg.photoH }?.let { return it }
-        if (effMode() == 1 || captureFormat() == ImageFormat.JPEG_R) return l.first()
+        if (effMode() == 1) return l.first()
+        if (captureFormat() == ImageFormat.JPEG_R) {
+            // Ultra HDR is saved byte-for-byte, so capture near the app's 12.6 MP output
+            // target instead of selecting the sensor's largest (often 50 MP) stream.
+            val target = 12_600_000L
+            return l.minByOrNull { kotlin.math.abs(it.width.toLong() * it.height - target) } ?: l.first()
+        }
         // Default to a fast ~8 MP 4:3 capture; finishLook upscales it to 12.6 MP.
         val target = min(8_000_000L, lensSafeArea)
         val ok = l.filter { it.width.toLong() * it.height <= target }
@@ -1544,8 +1555,13 @@ class CameraController(
         }
         try {
             val fmt = captureFormat()
-            if (cfg.photoFormat == 3 && ultraHdrAvailable && fmt != ImageFormat.JPEG_R) {
-                handler.post { ui.onMessage("Photo filters are active; using standard JPEG so the selected look is applied. Turn filters off for native Ultra HDR.") }
+            if (cfg.photoFormat == 3 && fmt != ImageFormat.JPEG_R) {
+                val reason = if (!ultraHdrAvailable) {
+                    "This camera/lens does not advertise JPEG_R Ultra HDR"
+                } else {
+                    "Disable filters, flat/B&W/blue looks and lens colour trim"
+                }
+                handler.post { ui.onMessage("$reason. Saving standard JPEG for this shot.") }
             }
             val plan = scenePlan()
             if (cfg.scene in 1..2 && plan == null) {

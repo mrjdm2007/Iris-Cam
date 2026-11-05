@@ -255,7 +255,6 @@ class MainActivity : Activity(), CameraController.Callbacks {
         buildUi()
         rebuildSamplers()
         cam = CameraController(this, tv, cfg, store, this)
-        if (cfg.photoFormat == 3 && !cam.ultraHdrAvailable) cfg.photoFormat = 0
         if (cfg.scene == 3) cfg.scene = 0 // retire legacy multi-frame HDR setting
         // Apply the first-run camera default before advancing the schema version.
         // Existing explicit user lens choices are preserved.
@@ -1242,14 +1241,14 @@ class MainActivity : Activity(), CameraController.Callbacks {
         val sz = runCatching { cam.captureSize() }.getOrNull()
         val mp = if (sz != null) "%.1fMP".format(sz.width * sz.height / 1e6) else "--"
         val m = when {
-            cfg.photoFormat == 3 && cam.ultraHdrAvailable && cfg.filterId == 0 && !cfg.flat && !cfg.upscale -> "ULTRA HDR"
+            cam.ultraHdrReady -> "ULTRA HDR"
+            cfg.photoFormat == 3 -> "JPEG*"
             cfg.scene == 1 -> "NIGHT"
             cfg.scene == 2 -> "ASTRO"
-            cfg.scene == 3 -> "HDR"
             cam.effMode() == 1 -> "RAW"
             else -> "JPEG"
         }
-        val up = if (cfg.upscale) "\u2192 12.6MP" else ""
+        val up = if (cfg.upscale && !cam.ultraHdrReady) "\u2192 12.6MP" else ""
         return "$mp$up \u00B7 $m \u00B7 Q${cfg.photoQuality} \u25BE"
     }
 
@@ -1261,7 +1260,9 @@ class MainActivity : Activity(), CameraController.Callbacks {
         val sz = runCatching { cam.captureSize() }.getOrNull()
         val mp = if (sz != null) "%.1f MP".format(sz.width * sz.height / 1e6) else "?"
         val mode = when {
-            cfg.photoFormat == 3 && cam.ultraHdrAvailable && cfg.filterId == 0 && !cfg.flat && !cfg.upscale -> "Ultra HDR (native JPEG_R)"
+            cam.ultraHdrReady -> "Ultra HDR (native JPEG_R gain map)"
+            cfg.photoFormat == 3 && cam.ultraHdrAvailable -> "JPEG (Ultra HDR blocked by active look)"
+            cfg.photoFormat == 3 -> "JPEG (this lens does not expose JPEG_R)"
             cam.effMode() == 1 -> "RAW develop"
             else -> "Phone JPEG"
         }
@@ -1612,7 +1613,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
             buildList {
                 add("Phone JPEG (+ lens colour trim)")
                 add("RAW develop \u2014 true colour (lenses with RAW)")
-                if (cam.ultraHdrAvailable) add("Ultra HDR \u2014 native JPEG_R with HDR gain map")
+                add("Ultra HDR — native JPEG_R + gain map (if supported by this camera)")
             }
         ) {
             cfg.photoFormat = when (it) { 0 -> 0; 1 -> 1; else -> 3 }
