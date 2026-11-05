@@ -1234,6 +1234,11 @@ class MainActivity : Activity(), CameraController.Callbacks {
             cfg.upscale = !cfg.upscale
             applyLive()
         },
+        "Ultrawide distortion correction: ${if (cfg.wideCorrection) "On" else "Off"}" to {
+            cfg.wideCorrection = !cfg.wideCorrection
+            applyLive()
+            toast(if (cfg.wideCorrection) "High-quality lens correction enabled where supported" else "Ultrawide correction disabled")
+        },
         "Anti-flicker: ${ANTIBAND[cfg.antiband.coerceIn(0, 3)]}" to {
             choose("Anti-flicker (Auto exposure only)", ANTIBAND) {
                 cfg.antiband = it
@@ -1602,7 +1607,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
             listOf(
                 "Normal",
                 "HDR \u2014 ${cfg.hdrFrames} frames, highlight and shadow fusion",
-                "Night \u2014 1 s, ISO 1000 (use a tripod)",
+                "Night \u2014 3 aligned frames, multi-frame noise reduction",
                 "Astro \u2014 5 min, ISO 100 (tripod, stars will trail slightly)"
             )
         ) {
@@ -1637,7 +1642,10 @@ class MainActivity : Activity(), CameraController.Callbacks {
             }
         ) {
             cfg.photoFormat = when (it) { 0 -> 0; 1 -> 1; else -> 3 }
-            if (cfg.photoFormat == 3) cfg.scene = 0
+            if (cfg.photoFormat == 3) {
+                cfg.scene = 0
+                cfg.upscale = false // Preserve the JPEG_R gain map; bitmap upscaling would discard it.
+            }
             cfg.photoW = 0
             cfg.photoH = 0
             streamChanged()
