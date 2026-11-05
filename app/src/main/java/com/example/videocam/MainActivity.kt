@@ -256,6 +256,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
         rebuildSamplers()
         cam = CameraController(this, tv, cfg, store, this)
         if (cfg.photoFormat == 3 && !cam.ultraHdrAvailable) cfg.photoFormat = 0
+        if (cfg.scene == 3) cfg.scene = 0 // retire legacy multi-frame HDR setting
         // Apply the first-run camera default before advancing the schema version.
         // Existing explicit user lens choices are preserved.
         if (cfg.ver < 1) {
@@ -1269,8 +1270,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
             "Photo size: $mp" to { pickPhotoRes() },
             "Capture mode: $mode" to { pickCaptureMode() },
             "JPEG quality: ${cfg.photoQuality}" to { pickQuality() },
-            "Scene: ${arrayOf("Normal", "Night (1 s, ISO 1000)", "Astro (5 min, ISO 100)", "HDR (${cfg.hdrFrames} frames)")[cfg.scene.coerceIn(0, 3)]}" to { pickScene() },
-            "HDR merge: ${cfg.hdrFrames} frames" to { pickHdrFrames() },
+            "Scene: ${arrayOf("Normal", "Night (1 s, ISO 1000)", "Astro (5 min, ISO 100)")[cfg.scene.coerceIn(0, 2)]}" to { pickScene() },
             "Lens: $lens" to { pickLens() }
         )
     }
@@ -1596,28 +1596,12 @@ class MainActivity : Activity(), CameraController.Callbacks {
             "Scene",
             listOf(
                 "Normal",
-                "HDR \u2014 ${cfg.hdrFrames} frames, highlight and shadow fusion",
                 "Night \u2014 1 s, ISO 1000 (use a tripod)",
                 "Astro \u2014 5 min, ISO 100 (tripod, stars will trail slightly)"
             )
         ) {
-            cfg.scene = arrayOf(0, 3, 1, 2)[it]
-            if (cfg.scene == 3 && cfg.photoFormat != 0) {
-                // Multi-frame fusion currently outputs a standard JPEG. Native JPEG_R is a
-                // separate single-capture path and must not silently discard bracket frames.
-                cfg.photoFormat = 0
-                toast("Multi-frame HDR uses JPEG fusion; switched capture format to Phone JPEG")
-            }
+            cfg.scene = arrayOf(0, 1, 2)[it]
             streamChanged()
-        }
-    }
-
-    private fun pickHdrFrames() {
-        if (!idle()) return
-        choose("HDR merge frames", listOf("2 frames · faster capture", "3 frames · wider exposure bracket")) {
-            cfg.hdrFrames = if (it == 0) 2 else 3
-            applyLive()
-            toast("HDR will merge ${cfg.hdrFrames} exposures")
         }
     }
 
