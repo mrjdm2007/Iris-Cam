@@ -256,7 +256,8 @@ class MainActivity : Activity(), CameraController.Callbacks {
         rebuildSamplers()
         cam = CameraController(this, tv, cfg, store, this)
         if (cfg.photoFormat == 3 && !cam.ultraHdrAvailable) cfg.photoFormat = 0
-        if (cfg.scene == 3) cfg.scene = 0 // retire legacy multi-frame HDR setting
+        // Multi-frame HDR fusion is a separate standard-JPEG mode, not native JPEG_R.
+        if (cfg.scene == 3 && cfg.photoFormat == 3) cfg.photoFormat = 0
         // Apply the first-run camera default before advancing the schema version.
         // Existing explicit user lens choices are preserved.
         if (cfg.ver < 1) {
@@ -1242,10 +1243,10 @@ class MainActivity : Activity(), CameraController.Callbacks {
         val sz = runCatching { cam.captureSize() }.getOrNull()
         val mp = if (sz != null) "%.1fMP".format(sz.width * sz.height / 1e6) else "--"
         val m = when {
+            cfg.scene == 3 -> "HDR FUSION"
             cfg.photoFormat == 3 && cam.ultraHdrAvailable && cfg.filterId == 0 && !cfg.flat && !cfg.upscale -> "ULTRA HDR"
             cfg.scene == 1 -> "NIGHT"
             cfg.scene == 2 -> "ASTRO"
-            cfg.scene == 3 -> "HDR"
             cam.effMode() == 1 -> "RAW"
             else -> "JPEG"
         }
@@ -1270,7 +1271,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
             "Photo size: $mp" to { pickPhotoRes() },
             "Capture mode: $mode" to { pickCaptureMode() },
             "JPEG quality: ${cfg.photoQuality}" to { pickQuality() },
-            "Scene: ${arrayOf("Normal", "Night (1 s, ISO 1000)", "Astro (5 min, ISO 100)")[cfg.scene.coerceIn(0, 2)]}" to { pickScene() },
+            "Scene: ${arrayOf("Normal", "Night (1 s, ISO 1000)", "Astro (5 min, ISO 100)", "HDR fusion (3 exposures)")[cfg.scene.coerceIn(0, 3)]}" to { pickScene() },
             "Lens: $lens" to { pickLens() }
         )
     }
@@ -1597,10 +1598,12 @@ class MainActivity : Activity(), CameraController.Callbacks {
             listOf(
                 "Normal",
                 "Night \u2014 1 s, ISO 1000 (use a tripod)",
-                "Astro \u2014 5 min, ISO 100 (tripod, stars will trail slightly)"
+                "Astro \u2014 5 min, ISO 100 (tripod, stars will trail slightly)",
+                "HDR fusion \u2014 3 exposures (handheld, moving subjects may ghost)"
             )
         ) {
-            cfg.scene = arrayOf(0, 1, 2)[it]
+            cfg.scene = arrayOf(0, 1, 2, 3)[it]
+            if (cfg.scene == 3) cfg.photoFormat = 0
             streamChanged()
         }
     }
