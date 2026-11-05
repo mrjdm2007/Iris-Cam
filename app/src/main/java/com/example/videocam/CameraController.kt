@@ -1245,7 +1245,11 @@ class CameraController(
         val l = captureSizes()
         if (l.isEmpty()) return Size(4000, 3000)
         l.firstOrNull { it.width == cfg.photoW && it.height == cfg.photoH }?.let { return it }
-        if (effMode() == 1 || captureFormat() == ImageFormat.JPEG_R) return l.first()
+        if (effMode() == 1) return l.first()
+        if (captureFormat() == ImageFormat.JPEG_R) {
+            // Prefer a phone-sized Ultra HDR frame instead of silently jumping to a 50 MP stream.
+            return l.minByOrNull { abs(it.width.toLong() * it.height - 12_600_000L) } ?: l.first()
+        }
         // Default to a fast ~8 MP 4:3 capture; finishLook upscales it to 12.6 MP.
         val target = min(8_000_000L, lensSafeArea)
         val ok = l.filter { it.width.toLong() * it.height <= target }
