@@ -1177,7 +1177,8 @@ class MainActivity : Activity(), CameraController.Callbacks {
             "Effects · Halation" to 14,
             "Effects · Soft Diffusion" to 15,
             "Effects · Film Grain" to 16,
-            "Effects · Anamorphic Flare" to 17
+            "Effects · Anamorphic Flare" to 17,
+            "Colour · Zeiss Colours (inspired)" to 18
         )
         val items = presets.map { (label, id) ->
             val title = (if (cfg.filterId == id) "✓ " else "") + label
