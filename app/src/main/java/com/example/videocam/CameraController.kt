@@ -1224,7 +1224,7 @@ class CameraController(
     /** True only when the selected photo settings can be saved without destroying the camera's gain map. */
     val ultraHdrReady: Boolean
         get() = ultraHdrAvailable && cfg.photoFormat == 3 && cfg.scene == 0 &&
-            cfg.filterId == 0 && !cfg.flat && !cfg.upscale &&
+            cfg.filterId == 0 && !cfg.flat &&
             !cfg.bw && !cfg.blue && !cfg.glow && cfg.photoLook == 0 &&
             store.trim(cfg.cameraId).isNeutral()
 
@@ -1248,7 +1248,13 @@ class CameraController(
         val l = captureSizes()
         if (l.isEmpty()) return Size(4000, 3000)
         l.firstOrNull { it.width == cfg.photoW && it.height == cfg.photoH }?.let { return it }
-        if (effMode() == 1 || captureFormat() == ImageFormat.JPEG_R) return l.first()
+        if (effMode() == 1) return l.first()
+        if (captureFormat() == ImageFormat.JPEG_R) {
+            // Ultra HDR is saved byte-for-byte, so capture near the app's 12.6 MP output
+            // target instead of selecting the sensor's largest (often 50 MP) stream.
+            val target = 12_600_000L
+            return l.minByOrNull { kotlin.math.abs(it.width.toLong() * it.height - target) } ?: l.first()
+        }
         // Default to a fast ~8 MP 4:3 capture; finishLook upscales it to 12.6 MP.
         val target = min(8_000_000L, lensSafeArea)
         val ok = l.filter { it.width.toLong() * it.height <= target }
@@ -1550,7 +1556,7 @@ class CameraController(
         try {
             val fmt = captureFormat()
             if (cfg.photoFormat == 3 && ultraHdrAvailable && fmt != ImageFormat.JPEG_R) {
-                handler.post { ui.onMessage("Ultra HDR needs a neutral photo look: disable filters, flat/B&W/blue looks, lens colour trim and upscaling. Saving standard JPEG for this shot.") }
+                handler.post { ui.onMessage("Ultra HDR needs a neutral photo look: disable filters, flat/B&W/blue looks and lens colour trim. Saving standard JPEG for this shot.") }
             }
             val plan = scenePlan()
             if (cfg.scene in 1..2 && plan == null) {
