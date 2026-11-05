@@ -1378,6 +1378,20 @@ class CameraController(
             chars.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)?.let { ns = ns.coerceIn(it.lower, it.upper) }
             b.set(CaptureRequest.SENSOR_EXPOSURE_TIME, ns)
             b.set(CaptureRequest.SENSOR_SENSITIVITY, cfg.iso.coerceIn(isoRange.lower, isoRange.upper))
+        } else if (capture && cfg.minShutterDenom > 0 && manualSensor) {
+            // Keep metering automatic in the live preview, then use its latest exposure estimate
+            // to capture one JPEG at the requested shutter floor with compensating ISO.
+            val er = chars.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)
+            val targetNs = (1_000_000_000L / cfg.minShutterDenom.coerceAtLeast(1))
+                .let { if (er != null) it.coerceIn(er.lower, er.upper) else it }
+            val measuredExp = liveExpNs.takeIf { it > 0L } ?: targetNs
+            val measuredIso = liveIso.takeIf { it > 0 } ?: cfg.iso
+            val autoIso = (measuredIso.toDouble() * measuredExp.toDouble() / targetNs.toDouble())
+                .roundToInt().coerceIn(isoRange.lower, isoRange.upper)
+            b.set(CaptureRequest.CONTROL_AE_MODE, CameraMetadata.CONTROL_AE_MODE_OFF)
+            b.set(CaptureRequest.SENSOR_EXPOSURE_TIME, targetNs)
+            b.set(CaptureRequest.SENSOR_FRAME_DURATION, targetNs)
+            b.set(CaptureRequest.SENSOR_SENSITIVITY, autoIso)
         } else {
             b.set(
                 CaptureRequest.CONTROL_AE_MODE,
@@ -1460,6 +1474,7 @@ class CameraController(
             cfg.scene == 0 &&
             !cfg.manualExposure &&
             cfg.flashMode == 0 &&
+            cfg.minShutterDenom == 0 &&
             zoom <= 1.01f &&
             chars.availableCaptureRequestKeys.contains(CaptureRequest.CONTROL_ENABLE_ZSL)
 
@@ -1520,7 +1535,7 @@ class CameraController(
         if (reader == null) return
         busy = true
         ui.onBusy(true)
-        val useFlash = flashAvail && cfg.flashMode != 0 && !cfg.manualExposure && cfg.scene == 0
+        val useFlash = flashAvail && cfg.flashMode != 0 && !cfg.manualExposure && cfg.scene == 0 && cfg.minShutterDenom == 0
         if (useFlash) {
             try {
                 val b = buildPhotoPreview() ?: throw IllegalStateException("no preview")
