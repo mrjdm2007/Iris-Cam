@@ -87,6 +87,7 @@ data class Config(
     var photoLook: Int = 0,          // 0 natural, 1 golden hour, 2 dream glow
     var photoNr: Int = 1,            // photo noise reduction: 0 minimal, 1 standard, 2 high
     var wideCorrection: Boolean = true, // calibrated Camera2 distortion correction on ultrawide lenses when supported
+    var minShutterDenom: Int = 0, // 0 = off; otherwise capture at least 1/N second with adaptive ISO
     var lensKeys: Boolean = false,   // show the 0.5x / 1x / 2.7x shortcut buttons
     var haptics: Boolean = true,     // subtle shutter and manual slider feedback
     var steady: Boolean = false,     // super steady: record 4K with gyro log, make a stabilised 1080p copy
@@ -138,6 +139,7 @@ data class Config(
         photoLook = o.photoLook
         photoNr = o.photoNr
         wideCorrection = o.wideCorrection
+        minShutterDenom = o.minShutterDenom
         lensKeys = o.lensKeys
         haptics = o.haptics
         steady = o.steady
@@ -190,6 +192,7 @@ data class Config(
         .put("photoLook", photoLook)
         .put("photoNr", photoNr)
         .put("wideCorrection", wideCorrection)
+        .put("minShutterDenom", minShutterDenom)
         .put("lensKeys", lensKeys)
         .put("haptics", haptics)
         .put("steady", steady)
@@ -255,6 +258,7 @@ data class Config(
                 photoLook = 0,
                 photoNr = o.optInt("photoNr", if (o.optBoolean("photoNrOff", false)) 0 else d.photoNr),
                 wideCorrection = o.optBoolean("wideCorrection", d.wideCorrection),
+                minShutterDenom = o.optInt("minShutterDenom", d.minShutterDenom).let { if (it in listOf(125, 250, 500, 1000, 2000)) it else 0 },
                 lensKeys = o.optBoolean("lensKeys", d.lensKeys),
                 haptics = o.optBoolean("haptics", d.haptics),
                 steady = o.optBoolean("steady", d.steady),
