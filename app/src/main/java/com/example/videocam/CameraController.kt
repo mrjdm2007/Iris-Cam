@@ -1326,7 +1326,11 @@ class CameraController(
         }
     }
 
-    private fun applyPhotoControls(b: CaptureRequest.Builder, capture: Boolean) {
+    private fun applyPhotoControls(
+        b: CaptureRequest.Builder,
+        capture: Boolean,
+        forceAutoExposure: Boolean = false
+    ) {
         if (Build.VERSION.SDK_INT >= 30) b.set(CaptureRequest.CONTROL_ZOOM_RATIO, zoom)
 
         // focus
@@ -1349,8 +1353,9 @@ class CameraController(
         }
 
         // exposure and flash
-        val flash = capture && flashAvail && cfg.flashMode != 0
-        if (cfg.manualExposure) {
+        // Exposure-bracketed HDR requires AE; it also deliberately suppresses flash.
+        val flash = capture && !forceAutoExposure && flashAvail && cfg.flashMode != 0
+        if (cfg.manualExposure && !forceAutoExposure) {
             b.set(CaptureRequest.CONTROL_AE_MODE, CameraMetadata.CONTROL_AE_MODE_OFF)
             var ns = (1e9 / cfg.shutterDenom).toLong()
             chars.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)?.let { ns = ns.coerceIn(it.lower, it.upper) }
@@ -1521,6 +1526,22 @@ class CameraController(
         handler.post { ui.onBusy(false) }
     }
 
+    /**
+     * Returns a dark / normal / bright AE-compensation bracket for multi-frame HDR.
+     * The bracket is centred on the user's current EV and uses up to +/-2 EV,
+     * constrained by the camera's advertised compensation range.
+     */
+    private fun hdrBracketCompensation(): IntArray? {
+        if (evRange.lower >= evRange.upper) return null
+        val step = chars.get(CameraCharacteristics.CONTROL_AE_COMPENSATION_STEP)
+            ?.toFloat()?.takeIf { it > 0f } ?: 1f
+        val delta = (2f / step).toInt().coerceAtLeast(1)
+        val base = cfg.ev.coerceIn(evRange.lower, evRange.upper)
+        val dark = (base - delta).coerceAtLeast(evRange.lower)
+        val bright = (base + delta).coerceAtMost(evRange.upper)
+        return if (dark < base && bright > base) intArrayOf(dark, base, bright) else null
+    }
+
     /** Night = 1 s at ISO 1000. Astro = 5 min at ISO 100 (several shorter frames if the phone's longest exposure is shorter). */
     private fun scenePlan(): ScenePlan? {
         if (cfg.scene !in 1..2 || !manualSensor) return null
@@ -1553,19 +1574,31 @@ class CameraController(
                 finishBusy()
                 return
             }
+            val hdrBracket = if (cfg.scene == 3) hdrBracketCompensation() else null
+            if (cfg.scene == 3 && hdrBracket == null) {
+                handler.post { ui.onMessage("HDR fusion needs a camera with at least three distinct auto-exposure compensation values") }
+                finishBusy()
+                return
+            }
             val reqs = ArrayList<CaptureRequest>()
-            val count = plan?.frames ?: 1
+            val count = plan?.frames ?: (hdrBracket?.size ?: 1)
             for (i in 0 until count) {
-                // The ZSL template can capture from the preview's recent-frame queue,
-                // avoiding the extra still-capture pipeline startup on supported cameras.
-                val template = if (zeroShutterLagEligible()) {
+                // Keep the ZSL queue for single-frame captures; exposure brackets use
+                // explicit still requests so each frame receives its own EV setting.
+                val template = if (hdrBracket == null && zeroShutterLagEligible()) {
                     CameraDevice.TEMPLATE_ZERO_SHUTTER_LAG
                 } else {
                     CameraDevice.TEMPLATE_STILL_CAPTURE
                 }
                 val b = cd.createCaptureRequest(template)
                 b.addTarget(rd.surface)
-                applyPhotoControls(b, true)
+                applyPhotoControls(b, true, hdrBracket != null)
+                if (hdrBracket != null) {
+                    b.set(CaptureRequest.CONTROL_AE_EXPOSURE_COMPENSATION, hdrBracket[i])
+                    b.set(CaptureRequest.FLASH_MODE, CameraMetadata.FLASH_MODE_OFF)
+                    if (aeLockAvail) b.set(CaptureRequest.CONTROL_AE_LOCK, false)
+                    b.set(CaptureRequest.CONTROL_ENABLE_ZSL, false)
+                }
                 if (plan != null) {
                     b.set(CaptureRequest.CONTROL_AE_MODE, CameraMetadata.CONTROL_AE_MODE_OFF)
                     b.set(CaptureRequest.SENSOR_EXPOSURE_TIME, plan.expNs)
@@ -1578,7 +1611,7 @@ class CameraController(
             }
             val sh = Shot(
                 cfg.cameraId, fmt, chars, needRotation(), cfg.photoQuality, reqs.size,
-                cfg.bw, cfg.flat && !cfg.bw, cfg.photoLook, false, cfg.upscale, cfg.glow, cfg.blue,
+                cfg.bw, cfg.flat && !cfg.bw, cfg.photoLook, cfg.scene == 3, cfg.upscale, cfg.glow, cfg.blue,
                 cfg.filterId, cfg.filterIntensity
             )
             synchronized(lock) { shot = sh }
@@ -1723,6 +1756,14 @@ class CameraController(
                 img.close()
                 sh.image = null
                 val out = finishLook(rotateBy(dev, sh.rotDeg), sh, Trim())
+                saved = saveBitmap(out, "$base.jpg", sh.quality)
+                out.recycle()
+            } else if (sh.hdr) {
+                // Three AE-bracketed JPEGs (dark, normal, bright) are exposure-fused,
+                // then passed through the same rotation, look, trim and save pipeline.
+                val merged = HdrFusion.merge(sh.jpegs)
+                    ?: throw IllegalStateException("Couldn't merge the HDR exposures")
+                val out = finishLook(rotateBy(merged, sh.rotDeg), sh, trim)
                 saved = saveBitmap(out, "$base.jpg", sh.quality)
                 out.recycle()
             } else if (sh.jpegs.size > 1) {
