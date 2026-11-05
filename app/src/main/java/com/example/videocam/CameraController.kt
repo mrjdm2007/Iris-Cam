@@ -1328,8 +1328,24 @@ class CameraController(
         }
     }
 
+    private fun isUltraWideLens(): Boolean {
+        if (cfg.cameraId == "2" || zoom < 0.95f) return true
+        val focal = chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.firstOrNull() ?: return false
+        val sensor = chars.get(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE) ?: return false
+        val equivalentMm = focal * 43.27f / hypot(sensor.width, sensor.height)
+        return equivalentMm <= 20f
+    }
+
     private fun applyPhotoControls(b: CaptureRequest.Builder, capture: Boolean) {
         if (Build.VERSION.SDK_INT >= 30) b.set(CaptureRequest.CONTROL_ZOOM_RATIO, zoom)
+
+        // Use the camera HAL's calibrated high-quality lens correction, not a guessed software warp.
+        if (cfg.wideCorrection && isUltraWideLens()) {
+            val modes = chars.get(CameraCharacteristics.DISTORTION_CORRECTION_AVAILABLE_MODES)
+            if (modes?.contains(CameraMetadata.DISTORTION_CORRECTION_MODE_HIGH_QUALITY) == true) {
+                b.set(CaptureRequest.DISTORTION_CORRECTION_MODE, CameraMetadata.DISTORTION_CORRECTION_MODE_HIGH_QUALITY)
+            }
+        }
 
         // focus
         if (manualFocus && minFocusDiopters > 0f) {
@@ -1523,17 +1539,27 @@ class CameraController(
         handler.post { ui.onBusy(false) }
     }
 
-    /** Night = 1 s at ISO 1000. Astro = 5 min at ISO 100 (several shorter frames if the phone's longest exposure is shorter). */
+    /** Night uses three short, exposure-matched frames for alignment and noise reduction. Astro retains its long stack. */
     private fun scenePlan(): ScenePlan? {
         if (cfg.scene !in 1..2 || !manualSensor) return null
         val er = chars.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE) ?: return null
         val maxFrame = chars.get(CameraCharacteristics.SENSOR_INFO_MAX_FRAME_DURATION) ?: er.upper
         val cap = min(er.upper, maxFrame)
-        val wantNs = if (cfg.scene == 1) 1_000_000_000L else 300_000_000_000L
-        val iso = (if (cfg.scene == 1) 1000 else 100).coerceIn(isoRange.lower, isoRange.upper)
+        if (cfg.scene == 1) {
+            val baseExp = if (cfg.manualExposure) (1_000_000_000L / cfg.shutterDenom.coerceAtLeast(1)) else liveExpNs
+            val baseIso = if (cfg.manualExposure) cfg.iso else liveIso
+            val safeBaseExp = baseExp.takeIf { it > 0L } ?: 66_666_667L
+            val safeBaseIso = baseIso.takeIf { it > 0 } ?: 1600
+            // Limit each handheld frame to 1/8 s; compensate ISO to retain the preview exposure.
+            val exp = max(safeBaseExp, 33_333_333L).coerceAtMost(min(cap, 125_000_000L)).coerceAtLeast(er.lower)
+            val iso = (safeBaseIso.toDouble() * safeBaseExp.toDouble() / exp.toDouble())
+                .roundToInt().coerceIn(isoRange.lower, isoRange.upper)
+            return ScenePlan(exp, iso, 3)
+        }
+        val wantNs = 300_000_000_000L
         val per = min(wantNs, cap).coerceAtLeast(er.lower)
         val n = ((wantNs + per - 1) / per).toInt().coerceIn(1, 60)
-        return ScenePlan(per, iso, n)
+        return ScenePlan(per, 100.coerceIn(isoRange.lower, isoRange.upper), n)
     }
 
     /** HDR: three frames, about 4x darker / normal / 4x brighter, from the exposure the preview is using. */
@@ -1625,7 +1651,7 @@ class CameraController(
             }
             val sh = Shot(
                 cfg.cameraId, fmt, chars, needRotation(), cfg.photoQuality, reqs.size,
-                cfg.bw, cfg.flat && !cfg.bw, cfg.photoLook, hplan != null, cfg.upscale, cfg.glow, cfg.blue,
+                cfg.bw, cfg.flat && !cfg.bw, cfg.photoLook, hplan != null || cfg.scene == 1, cfg.upscale, cfg.glow, cfg.blue,
                 cfg.filterId, cfg.filterIntensity
             )
             synchronized(lock) { shot = sh }
