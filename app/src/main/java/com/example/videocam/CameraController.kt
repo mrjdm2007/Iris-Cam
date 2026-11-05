@@ -606,7 +606,7 @@ class CameraController(
         val values = ContentValues().apply {
             put(MediaStore.Video.Media.DISPLAY_NAME, "VID_$stamp.mp4")
             put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
-            put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/Iris Cam")
+            put(MediaStore.Video.Media.RELATIVE_PATH, "DCIM/Camera")
             put(MediaStore.Video.Media.DATE_TAKEN, System.currentTimeMillis())
             put(MediaStore.Video.Media.IS_PENDING, 1)
         }
@@ -640,7 +640,7 @@ class CameraController(
         val values = ContentValues().apply {
             put(MediaStore.Video.Media.DISPLAY_NAME, "VID_${stamp}_STEADY.mp4")
             put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
-            put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/Iris Cam")
+            put(MediaStore.Video.Media.RELATIVE_PATH, "DCIM/Camera")
             put(MediaStore.Video.Media.DATE_TAKEN, System.currentTimeMillis())
             put(MediaStore.Video.Media.IS_PENDING, 1)
         }
@@ -1741,7 +1741,7 @@ class CameraController(
         val v = ContentValues().apply {
             put(MediaStore.Images.Media.DISPLAY_NAME, name)
             put(MediaStore.Images.Media.MIME_TYPE, mime)
-            put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/Iris Cam")
+            put(MediaStore.Images.Media.RELATIVE_PATH, "DCIM/Camera")
             put(MediaStore.Images.Media.DATE_TAKEN, System.currentTimeMillis())
             put(MediaStore.Images.Media.IS_PENDING, 1)
         }
