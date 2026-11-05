@@ -1382,10 +1382,14 @@ class CameraController(
             // Keep metering automatic in the live preview, then use its latest exposure estimate
             // to capture one JPEG at the requested shutter floor with compensating ISO.
             val er = chars.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)
-            val targetNs = (1_000_000_000L / cfg.minShutterDenom.coerceAtLeast(1))
-                .let { if (er != null) it.coerceIn(er.lower, er.upper) else it }
-            val measuredExp = liveExpNs.takeIf { it > 0L } ?: targetNs
+            val measuredExp = liveExpNs.takeIf { it > 0L } ?: (1_000_000_000L / cfg.minShutterDenom)
             val measuredIso = liveIso.takeIf { it > 0 } ?: cfg.iso
+            val limitNs = (1_000_000_000L / cfg.minShutterDenom.coerceAtLeast(1))
+            // Use the requested limit only when AE would otherwise expose for longer.
+            // In brighter scenes retain the camera's naturally faster exposure.
+            val targetNs = min(measuredExp, limitNs).let {
+                if (er != null) it.coerceIn(er.lower, er.upper) else it
+            }
             val autoIso = (measuredIso.toDouble() * measuredExp.toDouble() / targetNs.toDouble())
                 .roundToInt().coerceIn(isoRange.lower, isoRange.upper)
             b.set(CaptureRequest.CONTROL_AE_MODE, CameraMetadata.CONTROL_AE_MODE_OFF)
