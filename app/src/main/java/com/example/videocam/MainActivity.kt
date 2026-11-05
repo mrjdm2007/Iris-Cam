@@ -428,8 +428,8 @@ class MainActivity : Activity(), CameraController.Callbacks {
             letterSpacing = 0.015f
             typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
             gravity = Gravity.CENTER
-            minHeight = dp(36)
-            minWidth = dp(40)
+            setMinimumHeight(dp(36))
+            setMinimumWidth(dp(40))
             setPadding(dp(12), dp(7), dp(12), dp(7))
             background = chipBg(false)
             isClickable = true
