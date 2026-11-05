@@ -1352,6 +1352,8 @@ class MainActivity : Activity(), CameraController.Callbacks {
         var idx = 0
         for ((id, name) in listOf("2" to "0.7x", "0" to "1x", "3" to "2.7x")) {
             if (!cam.cameraIds.contains(id)) continue
+            // At 60 fps, expose only lenses that advertise that frame rate.
+            if (cfg.fps == 60 && !cam.supportsFps(id, 60)) continue
             val c = chip(name) { switchLens(id) }
             c.maxLines = 1
             c.textSize = 12f
@@ -1364,7 +1366,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
     private fun showLensDropdown(anchor: View, shortcutRatio: Float) {
         if (!idle()) return
         val suggested = cam.cameraIdForShortcut(shortcutRatio)
-        val ids = cam.cameraIds.toMutableList()
+        val ids = cam.cameraIds.filter { cfg.fps != 60 || cam.supportsFps(it, 60) }.toMutableList()
         if (suggested != null && suggested in ids) {
             ids.remove(suggested)
             ids.add(0, suggested)
@@ -1690,13 +1692,10 @@ class MainActivity : Activity(), CameraController.Callbacks {
 
     private fun pickLens() {
         if (!idle()) return
-        val ids = cam.cameraIds
+        val ids = cam.cameraIds.filter { cfg.fps != 60 || cam.supportsFps(it, 60) }
         if (ids.isEmpty()) return
         choose("Lens", ids.map { cam.cameraLabel(it) }) {
-            cfg.cameraId = ids[it]
-            store.save("last", cfg)
-            cam.reopen()
-            refreshUi()
+            switchLens(ids[it])
         }
     }
 
@@ -1976,7 +1975,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
         try {
             contentResolver.query(
                 MediaStore.Video.Media.EXTERNAL_CONTENT_URI, proj,
-                "${MediaStore.Video.Media.RELATIVE_PATH} LIKE ? OR ${MediaStore.Video.Media.RELATIVE_PATH} LIKE ?", arrayOf("Movies/VideoCam%", "Movies/Iris Cam%"),
+                "${MediaStore.Video.Media.RELATIVE_PATH} LIKE ?", arrayOf("DCIM/Camera%"),
                 "${MediaStore.Video.Media.DATE_ADDED} DESC"
             )?.use { c ->
                 while (c.moveToNext() && res.size < limit) {
@@ -2000,8 +1999,8 @@ class MainActivity : Activity(), CameraController.Callbacks {
         try {
             contentResolver.query(
                 MediaStore.Images.Media.EXTERNAL_CONTENT_URI, proj,
-                "(${MediaStore.Images.Media.RELATIVE_PATH} LIKE ? OR ${MediaStore.Images.Media.RELATIVE_PATH} LIKE ?) AND ${MediaStore.Images.Media.MIME_TYPE} = ?",
-                arrayOf("Pictures/VideoCam%", "Pictures/Iris Cam%", "image/jpeg"),
+                "${MediaStore.Images.Media.RELATIVE_PATH} LIKE ? AND ${MediaStore.Images.Media.MIME_TYPE} IN (?, ?, ?)",
+                arrayOf("DCIM/Camera%", "image/jpeg", "image/heic", "image/heif"),
                 "${MediaStore.Images.Media.DATE_ADDED} DESC"
             )?.use { c ->
                 while (c.moveToNext() && res.size < limit) {
