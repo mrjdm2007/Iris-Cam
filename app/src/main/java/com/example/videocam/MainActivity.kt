@@ -277,7 +277,6 @@ class MainActivity : Activity(), CameraController.Callbacks {
             cfg.photoW = 0
             cfg.photoH = 0
             cfg.upscale = true
-            cfg.squeeze = 0
             cfg.ver = 3
             store.save("last", cfg)
         }
