@@ -1371,10 +1371,8 @@ class CameraController(
             if (aeLock && aeLockAvail) b.set(CaptureRequest.CONTROL_AE_LOCK, true)
         }
         if (flash && cfg.flashMode == 1) b.set(CaptureRequest.FLASH_MODE, CameraMetadata.FLASH_MODE_SINGLE)
-        // zero-shutter-lag: lets the phone use a frame it already has, so the shot happens the instant you tap
-        if (Build.VERSION.SDK_INT >= 33 && effMode() == 0 && cfg.scene == 0 && !cfg.manualExposure && cfg.flashMode == 0 && zoom <= 1.01f &&
-            chars.availableCaptureRequestKeys.contains(CaptureRequest.CONTROL_ENABLE_ZSL)
-        ) {
+        // Keep the preview's ZSL ring buffer active when this camera supports it.
+        if (zeroShutterLagEligible()) {
             b.set(CaptureRequest.CONTROL_ENABLE_ZSL, true)
         }
         if (awbLock && awbLockAvail) b.set(CaptureRequest.CONTROL_AWB_LOCK, true)
@@ -1431,6 +1429,19 @@ class CameraController(
             }
         }
     }
+
+    /**
+     * ZSL is safe only for ordinary JPEG photos with automatic exposure and no flash.
+     * Use the camera's dedicated ZSL request template as well as CONTROL_ENABLE_ZSL.
+     */
+    private fun zeroShutterLagEligible(): Boolean =
+        Build.VERSION.SDK_INT >= 23 &&
+            effMode() == 0 &&
+            cfg.scene == 0 &&
+            !cfg.manualExposure &&
+            cfg.flashMode == 0 &&
+            zoom <= 1.01f &&
+            chars.availableCaptureRequestKeys.contains(CaptureRequest.CONTROL_ENABLE_ZSL)
 
     private fun buildPhotoPreview(): CaptureRequest.Builder? {
         val cd = device ?: return null
@@ -1586,7 +1597,14 @@ class CameraController(
             val reqs = ArrayList<CaptureRequest>()
             val count = hplan?.exp?.size ?: plan?.frames ?: 1
             for (i in 0 until count) {
-                val b = cd.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE)
+                // The ZSL template can capture from the preview's recent-frame queue,
+                // avoiding the extra still-capture pipeline startup on supported cameras.
+                val template = if (zeroShutterLagEligible()) {
+                    CameraDevice.TEMPLATE_ZERO_SHUTTER_LAG
+                } else {
+                    CameraDevice.TEMPLATE_STILL_CAPTURE
+                }
+                val b = cd.createCaptureRequest(template)
                 b.addTarget(rd.surface)
                 applyPhotoControls(b, true)
                 if (hplan != null) {
