@@ -1174,6 +1174,8 @@ class MainActivity : Activity(), CameraController.Callbacks {
             "ZEISS · Radiance Blue (inspired)" to 19,
             "Film · Portra Warm (inspired)" to 20,
             "Film · Classic Chrome (inspired)" to 21,
+            "B&W · Silver Monochrome" to 22,
+            "Vintage · Faded Film" to 23,
             "Colour · Blue Cinematic" to 11,
             "Colour · Golden Hour" to 12,
             "Dream · Dream Glow" to 13,
