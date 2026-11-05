@@ -1221,13 +1221,18 @@ class CameraController(
 
     val ultraHdrAvailable: Boolean get() = Build.VERSION.SDK_INT >= 34 && jprSizes.isNotEmpty()
 
+    /** True only when the selected photo settings can be saved without destroying the camera's gain map. */
+    val ultraHdrReady: Boolean
+        get() = ultraHdrAvailable && cfg.photoFormat == 3 && cfg.scene == 0 &&
+            cfg.filterId == 0 && !cfg.flat && !cfg.upscale &&
+            !cfg.bw && !cfg.blue && !cfg.glow && cfg.photoLook == 0 &&
+            store.trim(cfg.cameraId).isNeutral()
+
     private fun captureFormat(): Int = when {
         effMode() == 1 -> ImageFormat.RAW_SENSOR
-        // JPEG_R must be saved byte-for-byte to preserve its gain map. If a pixel filter
-        // is selected, use ordinary JPEG so the requested look is actually rendered.
-        cfg.photoFormat == 3 && ultraHdrAvailable &&
-            cfg.filterId == 0 && !cfg.flat && !cfg.upscale &&
-            store.trim(cfg.cameraId).isNeutral() -> ImageFormat.JPEG_R
+        // JPEG_R is kept byte-for-byte: any bitmap/filter/trim/upscale pass would discard
+        // the embedded gain map, so only the clean native capture path may use it.
+        ultraHdrReady -> ImageFormat.JPEG_R
         else -> ImageFormat.JPEG
     }
 
@@ -1545,7 +1550,7 @@ class CameraController(
         try {
             val fmt = captureFormat()
             if (cfg.photoFormat == 3 && ultraHdrAvailable && fmt != ImageFormat.JPEG_R) {
-                handler.post { ui.onMessage("Photo filters are active; using standard JPEG so the selected look is applied. Turn filters off for native Ultra HDR.") }
+                handler.post { ui.onMessage("Ultra HDR needs a neutral photo look: disable filters, flat/B&W/blue looks, lens colour trim and upscaling. Saving standard JPEG for this shot.") }
             }
             val plan = scenePlan()
             if (cfg.scene in 1..2 && plan == null) {
