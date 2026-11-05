@@ -1157,7 +1157,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
     private fun imageItems(): List<Pair<String, () -> Unit>> =
         if (cfg.mode == 1) photoImageItems() else videoImageItems()
 
-    /** Dedicated Filters category. Saved stills get the full effect; video mode is preview-only. */
+    /** Shared Filters category: saved stills and recorded video use the same selected colour grade. */
     private fun filterItems(): List<Pair<String, () -> Unit>> {
         val presets = listOf(
             "Natural" to 0,
@@ -1170,6 +1170,10 @@ class MainActivity : Activity(), CameraController.Callbacks {
             "Cinema · Noir" to 9,
             "Vintage · Vintage Fade" to 8,
             "Leica · Leica Colour (inspired)" to 10,
+            "ZEISS · ZEISS Natural (inspired)" to 18,
+            "ZEISS · Radiance Blue (inspired)" to 19,
+            "Film · Portra Warm (inspired)" to 20,
+            "Film · Classic Chrome (inspired)" to 21,
             "Colour · Blue Cinematic" to 11,
             "Colour · Golden Hour" to 12,
             "Dream · Dream Glow" to 13,
