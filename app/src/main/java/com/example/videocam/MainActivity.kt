@@ -271,6 +271,16 @@ class MainActivity : Activity(), CameraController.Callbacks {
             cfg.ver = 2
             store.save("last", cfg)
         }
+        if (cfg.ver < 3) {
+            // Standard JPEG by default: capture around 8 MP and upscale saved photos to 12.6 MP.
+            cfg.photoFormat = 0
+            cfg.photoW = 0
+            cfg.photoH = 0
+            cfg.upscale = true
+            cfg.squeeze = 0
+            cfg.ver = 3
+            store.save("last", cfg)
+        }
         slider.onChange = { f ->
             cam.cancelRack()
             cam.setFocus(f)
@@ -1128,13 +1138,6 @@ class MainActivity : Activity(), CameraController.Callbacks {
             cfg.steady = false
             cfgDirty = true
             applyLive()
-        },
-        "Anamorphic de-squeeze: ${Squeeze.NAMES[cfg.squeeze.coerceIn(0, Squeeze.NAMES.size - 1)]}" to {
-            choose("Anamorphic de-squeeze (preview and monitor only; the file stays squeezed)", Squeeze.NAMES) {
-                cfg.squeeze = it
-                applyLive()
-                relayoutPreview()
-            }
         },
         "Noise reduction: ${if (cfg.nrOff) "Off" else "On"}" to {
             cfg.nrOff = !cfg.nrOff
@@ -2674,7 +2677,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
             o.put("focusToB", rackToB)
             o.put("zoomToB", zoomToB)
             o.put("expToB", expToB)
-            o.put("squeeze", Squeeze.VALUES[cfg.squeeze.coerceIn(0, Squeeze.VALUES.size - 1)].toDouble())
+            o.put("squeeze", 1.0)
             o.put("battery", batteryPct)
             return o.toString()
         }
@@ -2770,7 +2773,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
         val rh = root.height
         if (rw == 0 || rh == 0 || prevW == 0 || prevH == 0) return
         var ar = if (rh > rw) prevH.toFloat() / prevW else prevW.toFloat() / prevH
-        if (cfg.mode == 0 && rh <= rw) ar *= Squeeze.VALUES[cfg.squeeze.coerceIn(0, Squeeze.VALUES.size - 1)]
+
         var vw = rw
         var vh = (rw / ar).toInt()
         if (vh > rh) {

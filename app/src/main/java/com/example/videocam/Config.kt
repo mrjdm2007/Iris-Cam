@@ -68,7 +68,7 @@ data class Config(
     var peak: Int = 0,               // focus peaking: 0 = off, 1 = low, 2 = medium, 3 = high
     var timer: Int = 0,              // self-timer seconds (0, 3, 5, 10)
     var mode: Int = 0,               // 0 = video, 1 = photo
-    var photoFormat: Int = 1,        // 0 = phone JPEG, 1 = RAW develop, 3 = native Ultra HDR JPEG_R
+    var photoFormat: Int = 0,        // 0 = phone JPEG (default), 1 = RAW develop, 3 = native Ultra HDR JPEG_R
     var saveDng: Boolean = false,
     var photoQuality: Int = 95,
     var photoW: Int = 0,             // 0 = default ~8 MP capture
@@ -86,7 +86,6 @@ data class Config(
     var filterIntensity: Int = 100,  // selected filter strength, 0..100
     var photoLook: Int = 0,          // 0 natural, 1 golden hour, 2 dream glow
     var photoNr: Int = 1,            // photo noise reduction: 0 minimal, 1 standard, 2 high
-    var squeeze: Int = 0,            // anamorphic de-squeeze of the preview: 0 off, 1 1.33x, 2 1.5x, 3 1.8x, 4 2x
     var lensKeys: Boolean = false,   // show the 0.5x / 1x / 2.7x shortcut buttons
     var haptics: Boolean = true,     // subtle shutter and manual slider feedback
     var steady: Boolean = false,     // super steady: record 4K with gyro log, make a stabilised 1080p copy
@@ -137,7 +136,6 @@ data class Config(
         filterIntensity = o.filterIntensity
         photoLook = o.photoLook
         photoNr = o.photoNr
-        squeeze = o.squeeze
         lensKeys = o.lensKeys
         haptics = o.haptics
         steady = o.steady
@@ -189,7 +187,6 @@ data class Config(
         .put("filterIntensity", filterIntensity)
         .put("photoLook", photoLook)
         .put("photoNr", photoNr)
-        .put("squeeze", squeeze)
         .put("lensKeys", lensKeys)
         .put("haptics", haptics)
         .put("steady", steady)
@@ -254,7 +251,6 @@ data class Config(
                 filterIntensity = o.optInt("filterIntensity", 100).coerceIn(0, 100),
                 photoLook = 0,
                 photoNr = o.optInt("photoNr", if (o.optBoolean("photoNrOff", false)) 0 else d.photoNr),
-                squeeze = o.optInt("squeeze", d.squeeze),
                 lensKeys = o.optBoolean("lensKeys", d.lensKeys),
                 haptics = o.optBoolean("haptics", d.haptics),
                 steady = o.optBoolean("steady", d.steady),
