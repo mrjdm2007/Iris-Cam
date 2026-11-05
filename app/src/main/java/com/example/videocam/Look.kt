@@ -224,6 +224,17 @@ object Look {
 
     private fun intensityMatrix(id: Int, intensity: Int): ColorMatrix {
         val target = filterMatrix(id).array
+        // Keep red-heavy looks from pushing reds and skin tones too far. This subtle
+        // red/green chroma cross-mix is shared by preview, stills and the video shader.
+        // Leave monochrome looks untouched.
+        if (id > 0 && id != 1 && id != 9) {
+            for (i in 0..4) {
+                val red = target[i]
+                val green = target[5 + i]
+                target[i] = red * 0.92f + green * 0.08f
+                target[5 + i] = green * 0.98f + red * 0.02f
+            }
+        }
         val identity = ColorMatrix().array
         val amount = intensity.coerceIn(0, 100) / 100f
         return ColorMatrix(FloatArray(20) { i -> identity[i] + (target[i] - identity[i]) * amount })
