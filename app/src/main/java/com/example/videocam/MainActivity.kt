@@ -1243,7 +1243,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
         val mp = if (sz != null) "%.1fMP".format(sz.width * sz.height / 1e6) else "--"
         val m = when {
             cam.ultraHdrReady -> "ULTRA HDR"
-            cfg.photoFormat == 3 && cam.ultraHdrAvailable -> "JPEG*"
+            cfg.photoFormat == 3 -> "JPEG*"
             cfg.scene == 1 -> "NIGHT"
             cfg.scene == 2 -> "ASTRO"
             cam.effMode() == 1 -> "RAW"
@@ -1263,6 +1263,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
         val mode = when {
             cam.ultraHdrReady -> "Ultra HDR (native JPEG_R gain map)"
             cfg.photoFormat == 3 && cam.ultraHdrAvailable -> "JPEG (Ultra HDR blocked by active look)"
+            cfg.photoFormat == 3 -> "JPEG (this lens does not expose JPEG_R)"
             cam.effMode() == 1 -> "RAW develop"
             else -> "Phone JPEG"
         }
