@@ -171,7 +171,8 @@ object Look {
         "Fuji Eterna", "Teal & Orange", "Bleach Bypass", "Vintage Fade", "Noir",
         "Leica Colour", "Blue Cinematic", "Golden Hour", "Dream Glow",
         "Halation", "Soft Diffusion", "Film Grain", "Anamorphic Flare",
-        "ZEISS Natural", "ZEISS Radiance Blue", "Portra Warm", "Classic Chrome"
+        "ZEISS Natural", "ZEISS Radiance Blue", "Portra Warm", "Classic Chrome",
+        "Silver Monochrome", "Faded Film"
     )
 
     private fun filterMatrix(id: Int): ColorMatrix {
@@ -228,6 +229,8 @@ object Look {
             )) // ZEISS T* Radiance-inspired cool blue rendition
             20 -> basic(1.02f, 0.96f, 7f, 2f, -5f) // Portra-inspired warm skin and gentle contrast
             21 -> basic(0.80f, 1.06f, 4f, 3f, 2f) // muted documentary palette
+            22 -> basic(0f, 1.18f, 0f, 0f, 0f) // silver-gelatin monochrome with crisp tonal separation
+            23 -> basic(0.72f, 0.88f, 8f, 5f, -2f) // faded film with lifted, softened blacks
             else -> ColorMatrix()
         }
     }
