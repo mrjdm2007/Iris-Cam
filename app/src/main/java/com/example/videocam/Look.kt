@@ -233,6 +233,10 @@ object Look {
     fun previewFilter(id: Int, intensity: Int): ColorMatrixColorFilter =
         ColorMatrixColorFilter(intensityMatrix(id, intensity))
 
+    /** 4x5 Android ColorMatrix values consumed by the EGL video renderer. */
+    fun videoFilterMatrix(id: Int, intensity: Int): FloatArray =
+        intensityMatrix(id, intensity).array.copyOf()
+
     /** Render a selected look into a saved still. Effects are deliberately photo-only until a GPU video path exists. */
     fun applyPreset(src: Bitmap, id: Int, intensity: Int): Bitmap {
         if (id <= 0 || intensity <= 0) return src

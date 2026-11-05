@@ -32,7 +32,11 @@ class CropRenderer(
     private val outH: Int,
     private val srcW: Int,
     private val srcH: Int,
-    private val rotation: Int
+    private val rotation: Int,
+    private val fullFrame: Boolean = false,
+    private val filterMatrix: FloatArray? = null,
+    private val effectId: Int = 0,
+    private val effectStrength: Float = 1f
 ) {
     private val thread = HandlerThread("crop-gl").apply { start() }
     private val handler = Handler(thread.looper)
@@ -42,6 +46,14 @@ class CropRenderer(
     private var texId = 0
     private var program = 0
     private var uTex = 0
+    private var uR = 0
+    private var uG = 0
+    private var uB = 0
+    private var uA = 0
+    private var uOffset = 0
+    private var uEffect = 0
+    private var uStrength = 0
+    private var uTexel = 0
     private var aPos = 0
     private var aTc = 0
     private var st: SurfaceTexture? = null
@@ -113,17 +125,52 @@ class CropRenderer(
         val vs = "uniform mat4 uTex;attribute vec4 aPos;attribute vec2 aTc;varying vec2 vTc;" +
             "void main(){gl_Position=aPos;vTc=(uTex*vec4(aTc,0.0,1.0)).xy;}"
         val fs = "#extension GL_OES_EGL_image_external : require\n" +
-            "precision mediump float;varying vec2 vTc;uniform samplerExternalOES sTex;" +
-            "void main(){gl_FragColor=texture2D(sTex,vTc);}"
+            "precision highp float;varying vec2 vTc;uniform samplerExternalOES sTex;" +
+            "uniform vec4 uR;uniform vec4 uG;uniform vec4 uB;uniform vec4 uA;uniform vec4 uOffset;" +
+            "uniform int uEffect;uniform float uStrength;uniform vec2 uTexel;" +
+            "void main(){vec4 c=texture2D(sTex,vTc);" +
+            "vec4 g=vec4(dot(uR,c),dot(uG,c),dot(uB,c),dot(uA,c))+uOffset;" +
+            "vec3 rgb=g.rgb;" +
+            "if(uEffect==14){vec3 b=(texture2D(sTex,vTc+vec2(uTexel.x*3.0,0.0)).rgb+" +
+            "texture2D(sTex,vTc-vec2(uTexel.x*3.0,0.0)).rgb+" +
+            "texture2D(sTex,vTc+vec2(0.0,uTexel.y*3.0)).rgb+" +
+            "texture2D(sTex,vTc-vec2(0.0,uTexel.y*3.0)).rgb)*0.25;" +
+            "float lum=dot(b,vec3(0.2126,0.7152,0.0722));float gate=clamp((lum-0.62)*3.0,0.0,1.0);" +
+            "rgb=1.0-(1.0-rgb)*(1.0-b*gate*0.35*uStrength);}" +
+            "else if(uEffect==15){vec3 blur=(texture2D(sTex,vTc+vec2(uTexel.x*2.0,0.0)).rgb+" +
+            "texture2D(sTex,vTc-vec2(uTexel.x*2.0,0.0)).rgb+" +
+            "texture2D(sTex,vTc+vec2(0.0,uTexel.y*2.0)).rgb+" +
+            "texture2D(sTex,vTc-vec2(0.0,uTexel.y*2.0)).rgb)*0.25;" +
+            "rgb=mix(rgb,blur,0.16*uStrength);}" +
+            "else if(uEffect==16){float n=fract(sin(dot(gl_FragCoord.xy,vec2(12.9898,78.233)))*43758.5453)-0.5;" +
+            "rgb+=n*0.045*uStrength;}" +
+            "else if(uEffect==17){float lum=dot(rgb,vec3(0.2126,0.7152,0.0722));" +
+            "float flare=clamp((lum-0.82)*5.0,0.0,1.0)*0.12*uStrength;rgb+=vec3(flare);}" +
+            "gl_FragColor=vec4(clamp(rgb,0.0,1.0),c.a);}"
         program = link(compile(GLES20.GL_VERTEX_SHADER, vs), compile(GLES20.GL_FRAGMENT_SHADER, fs))
         uTex = GLES20.glGetUniformLocation(program, "uTex")
+        uR = GLES20.glGetUniformLocation(program, "uR")
+        uG = GLES20.glGetUniformLocation(program, "uG")
+        uB = GLES20.glGetUniformLocation(program, "uB")
+        uA = GLES20.glGetUniformLocation(program, "uA")
+        uOffset = GLES20.glGetUniformLocation(program, "uOffset")
+        uEffect = GLES20.glGetUniformLocation(program, "uEffect")
+        uStrength = GLES20.glGetUniformLocation(program, "uStrength")
+        uTexel = GLES20.glGetUniformLocation(program, "uTexel")
         aPos = GLES20.glGetAttribLocation(program, "aPos")
         aTc = GLES20.glGetAttribLocation(program, "aTc")
 
         // The camera picture comes in upright as if the phone were held in portrait; turn it to landscape
         // and let the output bounds cut the top and bottom. yh > 1 means the picture is taller than the frame.
         val yh = (outW * srcH.toFloat() / srcW) / outH
-        val q = if (rotation == Surface.ROTATION_270) {
+        val q = if (fullFrame) {
+            floatArrayOf(
+                -1f, -1f, 0f, 0f,
+                 1f, -1f, 1f, 0f,
+                -1f,  1f, 0f, 1f,
+                 1f,  1f, 1f, 1f
+            )
+        } else if (rotation == Surface.ROTATION_270) {
             floatArrayOf(
                 -1f, -yh, 1f, 0f,
                 1f, -yh, 1f, 1f,
@@ -180,6 +227,23 @@ class CropRenderer(
             GLES20.glClearColor(0f, 0f, 0f, 1f)
             GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
             GLES20.glUseProgram(program)
+            val m = filterMatrix
+            if (m != null && m.size >= 20) {
+                GLES20.glUniform4f(uR, m[0], m[1], m[2], m[3])
+                GLES20.glUniform4f(uG, m[5], m[6], m[7], m[8])
+                GLES20.glUniform4f(uB, m[10], m[11], m[12], m[13])
+                GLES20.glUniform4f(uA, m[15], m[16], m[17], m[18])
+                GLES20.glUniform4f(uOffset, m[4] / 255f, m[9] / 255f, m[14] / 255f, m[19] / 255f)
+            } else {
+                GLES20.glUniform4f(uR, 1f, 0f, 0f, 0f)
+                GLES20.glUniform4f(uG, 0f, 1f, 0f, 0f)
+                GLES20.glUniform4f(uB, 0f, 0f, 1f, 0f)
+                GLES20.glUniform4f(uA, 0f, 0f, 0f, 1f)
+                GLES20.glUniform4f(uOffset, 0f, 0f, 0f, 0f)
+            }
+            GLES20.glUniform1i(uEffect, effectId)
+            GLES20.glUniform1f(uStrength, effectStrength.coerceIn(0f, 1f))
+            GLES20.glUniform2f(uTexel, 1f / srcW.coerceAtLeast(1), 1f / srcH.coerceAtLeast(1))
             GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
             GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, texId)
             GLES20.glUniformMatrix4fv(uTex, 1, false, tm, 0)

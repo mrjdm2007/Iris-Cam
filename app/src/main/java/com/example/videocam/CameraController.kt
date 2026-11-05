@@ -724,9 +724,15 @@ class CameraController(
             rec.setOnErrorListener { _, what, _ -> ui.onMessage("Recorder error $what") }
             rec.prepare()
             recorder = rec
-            if (cropIt) {
+            if (cropIt || cfg.filterId > 0) {
                 val rot = tv.display?.rotation ?: Surface.ROTATION_90
-                crop = CropRenderer(rec.surface, os.width, os.height, cfg.width, cfg.height, rot)
+                val matrix = if (cfg.filterId > 0) Look.videoFilterMatrix(cfg.filterId, cfg.filterIntensity) else null
+                crop = CropRenderer(
+                    rec.surface, os.width, os.height, cfg.width, cfg.height, rot,
+                    fullFrame = !cropIt, filterMatrix = matrix,
+                    effectId = if (cfg.filterId > 0) cfg.filterId else 0,
+                    effectStrength = cfg.filterIntensity / 100f
+                )
             }
         } catch (e: Exception) {
             recorder = null
@@ -1237,9 +1243,13 @@ class CameraController(
         if (l.isEmpty()) return Size(4000, 3000)
         l.firstOrNull { it.width == cfg.photoW && it.height == cfg.photoH }?.let { return it }
         if (effMode() == 1 || captureFormat() == ImageFormat.JPEG_R) return l.first()
-        val target = min(12_600_000L, lensSafeArea)
+        // Default to a fast ~8 MP 4:3 capture; finishLook upscales it to 12.6 MP.
+        val target = min(8_000_000L, lensSafeArea)
         val ok = l.filter { it.width.toLong() * it.height <= target }
-        return ok.firstOrNull { it.width * 3 == it.height * 4 } ?: ok.firstOrNull() ?: l.last()
+        return ok.firstOrNull { it.width * 3 == it.height * 4 }
+            ?: ok.firstOrNull()
+            ?: l.minByOrNull { kotlin.math.abs(it.width.toLong() * it.height - 8_000_000L) }
+            ?: l.last()
     }
 
     private fun previewSizeForPhoto(cap: Size): Size {
@@ -1594,7 +1604,7 @@ class CameraController(
             }
             val sh = Shot(
                 cfg.cameraId, fmt, chars, needRotation(), cfg.photoQuality, reqs.size,
-                cfg.bw, cfg.flat && !cfg.bw, cfg.photoLook, hplan != null, cfg.upscale && currentLensNeedsUpscale(), cfg.glow, cfg.blue,
+                cfg.bw, cfg.flat && !cfg.bw, cfg.photoLook, hplan != null, cfg.upscale, cfg.glow, cfg.blue,
                 cfg.filterId, cfg.filterIntensity
             )
             synchronized(lock) { shot = sh }
@@ -1754,7 +1764,7 @@ class CameraController(
                 out.recycle()
             } else {
                 val bytes = sh.jpegs[0]
-                saved = if (sh.bw || sh.blue || sh.flat || sh.upscale || sh.glow || !trim.isNeutral()) {
+                saved = if (sh.filterId > 0 || sh.bw || sh.blue || sh.flat || sh.upscale || sh.glow || !trim.isNeutral()) {
                     val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
                     val out = finishLook(rotateBy(bmp, sh.rotDeg), sh, trim)
                     val u = saveBitmap(out, "$base.jpg", sh.quality)

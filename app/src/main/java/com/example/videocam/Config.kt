@@ -71,14 +71,14 @@ data class Config(
     var photoFormat: Int = 1,        // 0 = phone JPEG, 1 = RAW develop, 3 = native Ultra HDR JPEG_R
     var saveDng: Boolean = false,
     var photoQuality: Int = 95,
-    var photoW: Int = 0,             // 0 = largest available
+    var photoW: Int = 0,             // 0 = default ~8 MP capture
     var photoH: Int = 0,
     var flashMode: Int = 0,          // 0 off, 1 on, 2 auto
     var photoNrOff: Boolean = false,
     var portrait: Boolean = false,
     var scene: Int = 0,              // photo scene: 0 normal, 1 night, 2 astro, 3 multi-frame HDR fusion
     var hdrFrames: Int = 3,          // multi-frame HDR fusion: 2 or 3 exposures
-    var upscale: Boolean = false,    // upscale photos to 12.6 MP
+    var upscale: Boolean = true,     // default: upscale 8 MP photos to 12.6 MP
     var bw: Boolean = false,         // photo black and white, high contrast
     var blue: Boolean = false,        // cool blue cinematic photo filter
     var glow: Boolean = false,       // legacy setting migrated to filterId
@@ -246,7 +246,7 @@ data class Config(
                 portrait = o.optBoolean("portrait", d.portrait),
                 scene = o.optInt("scene", d.scene),
                 hdrFrames = o.optInt("hdrFrames", d.hdrFrames).let { if (it == 2) 2 else 3 },
-                upscale = o.optBoolean("upscale", d.upscale),
+                upscale = if (o.optInt("ver", 0) < 1) true else o.optBoolean("upscale", d.upscale),
                 bw = selectedFilter == 1,
                 blue = false,
                 glow = false,
@@ -258,7 +258,7 @@ data class Config(
                 lensKeys = o.optBoolean("lensKeys", d.lensKeys),
                 haptics = o.optBoolean("haptics", d.haptics),
                 steady = o.optBoolean("steady", d.steady),
-                ver = o.optInt("ver", d.ver)
+                ver = maxOf(1, o.optInt("ver", d.ver))
             )
         }
     }
