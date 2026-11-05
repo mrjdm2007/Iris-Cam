@@ -86,6 +86,7 @@ data class Config(
     var filterIntensity: Int = 100,  // selected filter strength, 0..100
     var photoLook: Int = 0,          // 0 natural, 1 golden hour, 2 dream glow
     var photoNr: Int = 1,            // photo noise reduction: 0 minimal, 1 standard, 2 high
+    var wideCorrection: Boolean = true, // calibrated Camera2 distortion correction on ultrawide lenses when supported
     var lensKeys: Boolean = false,   // show the 0.5x / 1x / 2.7x shortcut buttons
     var haptics: Boolean = true,     // subtle shutter and manual slider feedback
     var steady: Boolean = false,     // super steady: record 4K with gyro log, make a stabilised 1080p copy
@@ -136,6 +137,7 @@ data class Config(
         filterIntensity = o.filterIntensity
         photoLook = o.photoLook
         photoNr = o.photoNr
+        wideCorrection = o.wideCorrection
         lensKeys = o.lensKeys
         haptics = o.haptics
         steady = o.steady
@@ -187,6 +189,7 @@ data class Config(
         .put("filterIntensity", filterIntensity)
         .put("photoLook", photoLook)
         .put("photoNr", photoNr)
+        .put("wideCorrection", wideCorrection)
         .put("lensKeys", lensKeys)
         .put("haptics", haptics)
         .put("steady", steady)
@@ -251,6 +254,7 @@ data class Config(
                 filterIntensity = o.optInt("filterIntensity", 100).coerceIn(0, 100),
                 photoLook = 0,
                 photoNr = o.optInt("photoNr", if (o.optBoolean("photoNrOff", false)) 0 else d.photoNr),
+                wideCorrection = o.optBoolean("wideCorrection", d.wideCorrection),
                 lensKeys = o.optBoolean("lensKeys", d.lensKeys),
                 haptics = o.optBoolean("haptics", d.haptics),
                 steady = o.optBoolean("steady", d.steady),
