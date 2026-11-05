@@ -255,7 +255,6 @@ class MainActivity : Activity(), CameraController.Callbacks {
         buildUi()
         rebuildSamplers()
         cam = CameraController(this, tv, cfg, store, this)
-        if (cfg.photoFormat == 3 && !cam.ultraHdrAvailable) cfg.photoFormat = 0
         if (cfg.scene == 3) cfg.scene = 0 // retire legacy multi-frame HDR setting
         // Apply the first-run camera default before advancing the schema version.
         // Existing explicit user lens choices are preserved.
@@ -1614,7 +1613,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
             buildList {
                 add("Phone JPEG (+ lens colour trim)")
                 add("RAW develop \u2014 true colour (lenses with RAW)")
-                if (cam.ultraHdrAvailable) add("Ultra HDR — native JPEG_R + gain map (neutral photo look required)")
+                add("Ultra HDR — native JPEG_R + gain map (if supported by this camera)")
             }
         ) {
             cfg.photoFormat = when (it) { 0 -> 0; 1 -> 1; else -> 3 }
