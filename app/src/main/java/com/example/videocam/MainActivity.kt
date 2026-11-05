@@ -2053,7 +2053,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
         try {
             contentResolver.query(
                 MediaStore.Video.Media.EXTERNAL_CONTENT_URI, proj,
-                "${MediaStore.Video.Media.RELATIVE_PATH} LIKE ? OR ${MediaStore.Video.Media.RELATIVE_PATH} LIKE ?", arrayOf("Movies/VideoCam%", "Movies/Iris Cam%"),
+                "${MediaStore.Video.Media.RELATIVE_PATH} LIKE ?", arrayOf("DCIM/Iris Cam/%"),
                 "${MediaStore.Video.Media.DATE_ADDED} DESC"
             )?.use { c ->
                 while (c.moveToNext() && res.size < limit) {
@@ -2077,8 +2077,8 @@ class MainActivity : Activity(), CameraController.Callbacks {
         try {
             contentResolver.query(
                 MediaStore.Images.Media.EXTERNAL_CONTENT_URI, proj,
-                "(${MediaStore.Images.Media.RELATIVE_PATH} LIKE ? OR ${MediaStore.Images.Media.RELATIVE_PATH} LIKE ?) AND ${MediaStore.Images.Media.MIME_TYPE} = ?",
-                arrayOf("Pictures/VideoCam%", "Pictures/Iris Cam%", "image/jpeg"),
+                "${MediaStore.Images.Media.RELATIVE_PATH} LIKE ? AND ${MediaStore.Images.Media.MIME_TYPE} LIKE ?",
+                arrayOf("DCIM/Iris Cam/%", "image/%"),
                 "${MediaStore.Images.Media.DATE_ADDED} DESC"
             )?.use { c ->
                 while (c.moveToNext() && res.size < limit) {
@@ -2111,14 +2111,28 @@ class MainActivity : Activity(), CameraController.Callbacks {
 
     private fun openClip(uri: Uri) {
         val mime = contentResolver.getType(uri) ?: if (cfg.mode == 1) "image/jpeg" else "video/mp4"
-        val viewIntent = Intent(Intent.ACTION_VIEW)
+        val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION
+        val photosIntent = Intent(Intent.ACTION_VIEW)
             .setDataAndType(uri, mime)
-            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            .setPackage("com.google.android.apps.photos")
+            .addFlags(flags)
+        val fallbackIntent = Intent(Intent.ACTION_VIEW)
+            .setDataAndType(uri, mime)
+            .addFlags(flags)
         try {
-            // Let Android open media in the user's default gallery / media app.
-            startActivity(viewIntent)
+            // Prefer Google Photos explicitly; fall back to Android's normal media handler
+            // when Google Photos is not installed or cannot handle this particular item.
+            if (photosIntent.resolveActivity(packageManager) != null) {
+                startActivity(photosIntent)
+            } else {
+                startActivity(fallbackIntent)
+            }
         } catch (_: Exception) {
-            toast("No gallery or media app found")
+            try {
+                startActivity(fallbackIntent)
+            } catch (_: Exception) {
+                toast("No gallery or media app found")
+            }
         }
     }
 
