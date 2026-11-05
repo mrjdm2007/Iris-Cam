@@ -1249,7 +1249,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
             cam.effMode() == 1 -> "RAW"
             else -> "JPEG"
         }
-        val up = if (cfg.upscale) "\u2192 12.6MP" else ""
+        val up = if (cfg.upscale && !cam.ultraHdrReady) "\u2192 12.6MP" else ""
         return "$mp$up \u00B7 $m \u00B7 Q${cfg.photoQuality} \u25BE"
     }
 
