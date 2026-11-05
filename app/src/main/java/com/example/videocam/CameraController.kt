@@ -534,6 +534,7 @@ class CameraController(
 
     fun stop() {
         started = false
+        handler.removeCallbacks(reconfRunnable)
         rackAnim?.cancel()
         if (recording) stopRecording()
         closeSession()
@@ -560,8 +561,20 @@ class CameraController(
         handler.postDelayed({ if (started && device == null && tv.isAvailable) openCamera() }, 350)
     }
 
+    private val reconfRunnable = Runnable {
+        if (started && !recording && !busy) {
+            try {
+                configureAndStart()
+            } catch (e: Throwable) {
+                ui.onMessage("Camera restart failed: ${e.message}")
+            }
+        }
+    }
+
+    /** Coalesce rapid mode/stream changes into one camera reconfiguration. */
     fun reconfigure() {
-        if (!recording && !busy) configureAndStart()
+        handler.removeCallbacks(reconfRunnable)
+        handler.postDelayed(reconfRunnable, 140)
     }
 
     @SuppressLint("MissingPermission")
