@@ -1279,6 +1279,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
             "Photo size: $mp" to { pickPhotoRes() },
             "Capture mode: $mode" to { pickCaptureMode() },
             "JPEG quality: ${cfg.photoQuality}" to { pickQuality() },
+            "Minimum shutter: ${if (cfg.minShutterDenom > 0) "1/${cfg.minShutterDenom}s" else "Off"}" to { pickMinimumShutter() },
             "Scene: ${arrayOf("Normal", "Night (3 aligned frames)", "Astro (5 min, ISO 100)", "HDR (${cfg.hdrFrames} frames)")[cfg.scene.coerceIn(0, 3)]}" to { pickScene() },
             "HDR merge: ${cfg.hdrFrames} frames" to { pickHdrFrames() },
             "Lens: $lens" to { pickLens() }
@@ -1628,6 +1629,31 @@ class MainActivity : Activity(), CameraController.Callbacks {
             cfg.hdrFrames = if (it == 0) 2 else 3
             applyLive()
             toast("HDR will merge ${cfg.hdrFrames} exposures")
+        }
+    }
+
+    private fun pickMinimumShutter() {
+        if (!idle()) return
+        if (!cam.manualSensor) {
+            toast("Minimum shutter speed isn't supported by this lens")
+            return
+        }
+        val options = listOf("Off", "1/125 s", "1/250 s", "1/500 s", "1/1000 s", "1/2000 s")
+        val values = listOf(0, 125, 250, 500, 1000, 2000)
+        choose("Minimum shutter speed", options) {
+            cfg.minShutterDenom = values[it]
+            if (cfg.minShutterDenom > 0) {
+                // Fast-action mode is a single JPEG capture: no multi-frame HDR or RAW pipeline.
+                cfg.photoFormat = 0
+                cfg.scene = 0
+                cfg.manualExposure = false
+                cfg.flashMode = 0
+                cfg.photoW = 0
+                cfg.photoH = 0
+                cam.clearAeLock()
+                toast("Fast-action capture: JPEG, HDR and flash off, adaptive ISO")
+            }
+            applyLive()
         }
     }
 
