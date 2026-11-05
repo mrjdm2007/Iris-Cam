@@ -1555,8 +1555,13 @@ class CameraController(
         }
         try {
             val fmt = captureFormat()
-            if (cfg.photoFormat == 3 && ultraHdrAvailable && fmt != ImageFormat.JPEG_R) {
-                handler.post { ui.onMessage("Ultra HDR needs a neutral photo look: disable filters, flat/B&W/blue looks and lens colour trim. Saving standard JPEG for this shot.") }
+            if (cfg.photoFormat == 3 && fmt != ImageFormat.JPEG_R) {
+                val reason = if (!ultraHdrAvailable) {
+                    "This camera/lens does not advertise JPEG_R Ultra HDR"
+                } else {
+                    "Disable filters, flat/B&W/blue looks and lens colour trim"
+                }
+                handler.post { ui.onMessage("$reason. Saving standard JPEG for this shot.") }
             }
             val plan = scenePlan()
             if (cfg.scene in 1..2 && plan == null) {
