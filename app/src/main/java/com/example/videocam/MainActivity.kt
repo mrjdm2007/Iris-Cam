@@ -458,7 +458,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
             setPadding(dp(10), dp(5), dp(10), dp(5))
-            minHeight = dp(48)
+            setMinimumHeight(dp(48))
             background = materialSurface(0xFF202329.toInt(), 14, 0xFF3A3E46.toInt())
             elevation = dp(1).toFloat()
             isClickable = true
