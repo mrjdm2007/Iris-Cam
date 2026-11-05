@@ -1250,7 +1250,10 @@ class MainActivity : Activity(), CameraController.Callbacks {
         setRecLook(cam.recording)
 
         setActive(t2x, cam.zoom >= 1.9f)
-        lensChips.forEach { (id, c) -> setActive(c, cfg.cameraId == id) }
+        lensChips.forEach { (id, c) ->
+            c.visibility = if (cfg.fps == 60 && !cam.supportsFps(id, 60)) View.GONE else View.VISIBLE
+            setActive(c, cfg.cameraId == id)
+        }
         lensKeyChips.forEach { (c, r) -> setActive(c, abs(cam.zoom - r) < 0.08f) }
         setActive(tPeak, cfg.peak > 0)
         setActive(tFalse, falseOn)
