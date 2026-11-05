@@ -92,7 +92,11 @@ class CameraController(
         val flat: Boolean,
         val photoLook: Int,
         val hdr: Boolean,
-        val upscale: Boolean
+        val upscale: Boolean,
+        val glow: Boolean,
+        val blue: Boolean,
+        val filterId: Int,
+        val filterIntensity: Int
     ) {
         var image: Image? = null // RAW only
         var result: TotalCaptureResult? = null
@@ -113,25 +117,10 @@ class CameraController(
     private val cbThread = HandlerThread("cam-results").apply { start() }
     private val cbHandler = Handler(cbThread.looper)
 
-    private fun isMotoEdge50NeoProfile(): Boolean {
-        val maker = Build.MANUFACTURER.lowercase(Locale.US)
-        val model = Build.MODEL.lowercase(Locale.US)
-        // The explicit auxiliary-ID profile is restricted to Motorola's Edge 50 Neo family.
-        // Every ID is still checked against CameraManager before it is exposed.
-        return maker.contains("motorola") && (model.contains("edge 50 neo") || model.contains("xt2409"))
-    }
-
-    private val motoProfileIds = listOf("5", "2", "0", "3", "1")
-
     val cameraIds: List<String> = try {
-        val advertised = manager.cameraIdList.toList()
-        val detected = advertised.filter { usable(it) }
-        if (isMotoEdge50NeoProfile()) {
-            val profile = motoProfileIds.filter { it in advertised && usable(it) }
-            (profile + detected.filterNot { it in profile }).distinct()
-        } else {
-            detected.sortedWith(compareBy({ lensRank(it) }, { it }))
-        }
+        (manager.cameraIdList.toList() + listOf("0", "1", "2", "3", "5")).distinct()
+            .filter { usable(it) }
+            .sortedWith(compareBy({ lensRank(it) }, { it }))
     } catch (e: Exception) {
         emptyList()
     }
@@ -147,6 +136,12 @@ class CameraController(
     private var out: Output? = null
     private var nextOut: Output? = null
     private var started = false
+    private var reconfigurePosted = false
+    // Keep exactly one asynchronous Camera2 session configuration in flight.
+    private var configurationInFlight = false
+    private var configurationPending = false
+    @Volatile
+    private var released = false
     private var gen = 0
     private var rackAnim: ValueAnimator? = null
     private var lastPreview = Size(1920, 1080)
@@ -230,11 +225,6 @@ class CameraController(
     var lastClipUri: Uri? = null
     var lastPhotoUri: Uri? = null
 
-    /** Flagged as a good take while the current recording is running. */
-    @Volatile
-    var goodPending = false
-        private set
-
     @Volatile
     private var steadyLog: SteadyLog? = null
     private val steadyRec = SteadyRecorder(ctx)
@@ -264,27 +254,20 @@ class CameraController(
         val c = manager.getCameraCharacteristics(id)
         val caps = c.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES) ?: intArrayOf()
         val m = c.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
-        val videoSizes = m?.getOutputSizes(MediaRecorder::class.java)
-        val previewSizes = m?.getOutputSizes(SurfaceTexture::class.java)
-        val hasPreviewOutput = !videoSizes.isNullOrEmpty() || !previewSizes.isNullOrEmpty()
-        val backwardCompatible = caps.contains(CameraMetadata.REQUEST_AVAILABLE_CAPABILITIES_BACKWARD_COMPATIBLE)
-        // Some OEM auxiliary IDs omit the backward-compatible flag despite advertising
-        // preview/record output surfaces. Accept these only on the narrowly matched profile.
-        (backwardCompatible || (isMotoEdge50NeoProfile() && id in motoProfileIds)) && hasPreviewOutput
+        val sz = m?.getOutputSizes(MediaRecorder::class.java) ?: m?.getOutputSizes(SurfaceTexture::class.java)
+        caps.contains(CameraMetadata.REQUEST_AVAILABLE_CAPABILITIES_BACKWARD_COMPATIBLE) &&
+            sz != null && sz.isNotEmpty()
     } catch (e: Exception) {
         false
     }
 
-    private fun lensRank(id: String): Int = runCatching {
-        val c = manager.getCameraCharacteristics(id)
-        val caps = c.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES) ?: intArrayOf()
-        if (caps.contains(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_LOGICAL_MULTI_CAMERA)) return@runCatching 0
-        if (c.get(CameraCharacteristics.LENS_FACING) == CameraMetadata.LENS_FACING_FRONT) return@runCatching 10_000
-        val f = c.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.firstOrNull() ?: return@runCatching 500
-        val size = c.get(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE) ?: return@runCatching 500
-        val eq = f * 43.27f / hypot(size.width, size.height)
-        1 + (abs(eq - 24f) * 10f).roundToInt() // main-camera-equivalent focal length first
-    }.getOrDefault(9_999)
+    private fun lensRank(id: String): Int = when (id) {
+        "0" -> 0
+        "2" -> 1
+        "3" -> 2
+        "5" -> 3
+        else -> if (isFront(id)) 9 else 4
+    }
 
     private fun isFront(id: String): Boolean =
         manager.getCameraCharacteristics(id).get(CameraCharacteristics.LENS_FACING) ==
@@ -320,45 +303,22 @@ class CameraController(
         }
     }.getOrDefault(false)
 
-    /** Resolve a lens shortcut to a real advertised camera ID, never a digital zoom substitute. */
-    fun cameraIdForShortcut(ratio: Float): String? {
-        if (isMotoEdge50NeoProfile()) {
-            val exact = when {
-                ratio < 0.75f -> "2" // supplied ultrawide ID (0.7x)
-                ratio < 1.8f -> "0" // supplied main ID (1x)
-                else -> "3"          // supplied telephoto ID (2.7x)
-            }
-            if (exact in cameraIds && !isFront(exact)) return exact
-        }
-        val back = cameraIds.filterNot { isFront(it) }
-        if (back.isEmpty()) return null
-        fun equivalent(id: String): Float? = runCatching {
-            val c = manager.getCameraCharacteristics(id)
-            val f = c.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.firstOrNull() ?: return@runCatching null
-            val size = c.get(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE) ?: return@runCatching null
-            f * 43.27f / hypot(size.width, size.height)
-        }.getOrNull()
-        val baseline = back.mapNotNull { id -> equivalent(id)?.let { id to it } }
-            .minByOrNull { abs(it.second - 24f) }?.second ?: return back.firstOrNull()
-        val target = baseline * ratio
-        return back.mapNotNull { id -> equivalent(id)?.let { id to it } }
-            .minByOrNull { abs(it.second - target) }?.first
-    }
-
     fun cameraLabel(id: String): String {
+        when (id) {
+            "0" -> return "Main 1x (ID 0)"
+            "2" -> return "Wide 0.7x (ID 2)"
+            "3" -> return "Tele 2.7x (ID 3)"
+            "5" -> return "All lenses, auto switch (ID 5)"
+        }
         val c = manager.getCameraCharacteristics(id)
         val side = if (isFront(id)) "Front" else "Back"
-        val caps = c.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES) ?: intArrayOf()
-        if (caps.contains(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_LOGICAL_MULTI_CAMERA)) {
-            return "$side · multi-camera auto switch (ID $id)"
-        }
         val f = c.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.firstOrNull()
         val sz = c.get(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE)
         if (f != null && sz != null) {
             val eq = (f * 43.27f / hypot(sz.width, sz.height)).roundToInt()
-            return "$side · ${eq}mm equivalent (ID $id)"
+            return "$side ${eq}mm (ID $id)"
         }
-        return "$side camera (ID $id)"
+        return "$side (ID $id)"
     }
 
     fun mics(): List<AudioDeviceInfo> =
@@ -505,10 +465,10 @@ class CameraController(
 
     /** Zoom shortcut buttons that fit this camera's zoom range. */
     fun zoomPresets(): List<Float> =
-        listOf(0.6f, 1f, 2f, 3f, 5f, 8f).filter { it >= zoomRange.lower - 0.01f && it <= zoomRange.upper + 0.01f }
+        listOf(0.5f, 1f, 2f, 3f, 5f, 7f).filter { it >= zoomRange.lower - 0.01f && it <= zoomRange.upper + 0.01f }
 
     /** Highest zoom offered in the app. */
-    fun zoomHi(): Float = min(zoomRange.upper, 7f)
+    fun zoomHi(): Float = max(zoomRange.lower, min(zoomRange.upper, 7f))
 
     /** Cinematic shape actually being recorded (0 = the camera's own 16:9). Landscape, normal-speed video only. */
     fun effRatio(): Int {
@@ -528,6 +488,7 @@ class CameraController(
     // ---------- lifecycle ----------
 
     fun start() {
+        if (released) return
         started = true
         if (device == null && tv.isAvailable) openCamera()
     }
@@ -535,6 +496,7 @@ class CameraController(
     fun stop() {
         started = false
         rackAnim?.cancel()
+        cancelZoomPull()
         if (recording) stopRecording()
         closeSession()
         releaseRecorder()
@@ -542,6 +504,18 @@ class CameraController(
         device = null
         previewSurface?.release()
         previewSurface = null
+    }
+
+    /**
+     * Final Activity teardown. stop() is intentionally reusable across onPause/onResume;
+     * release() is terminal and closes the controller-owned worker resources as well.
+     */
+    fun release() {
+        if (released) return
+        released = true
+        stop()
+        procExec.shutdown()
+        cbThread.quitSafely()
     }
 
     fun reopen() {
@@ -561,16 +535,27 @@ class CameraController(
     }
 
     fun reconfigure() {
-        if (!recording && !busy) configureAndStart()
+        // Serialize asynchronous session changes. If Camera2 is still configuring, remember
+        // only the latest requested settings and apply them after the current callback settles.
+        if (recording || busy || released || !started || reconfigurePosted) return
+        reconfigurePosted = true
+        handler.post {
+            reconfigurePosted = false
+            if (!started || recording || busy || released) return@post
+            try {
+                configureAndStart()
+            } catch (e: Exception) {
+                ui.onMessage("Camera reconfiguration failed: ${e.message}")
+            }
+        }
     }
 
-    @SuppressLint("MissingPermission")
     private fun openCamera() {
         if (cameraIds.isEmpty()) {
             ui.onMessage("No usable camera found")
             return
         }
-        if (cfg.cameraId !in cameraIds) cfg.cameraId = cameraIds.first()
+        if (cfg.cameraId !in cameraIds) cfg.cameraId = cameraIds.firstOrNull { it == "0" } ?: cameraIds.first()
         try {
             loadChars(cfg.cameraId)
             manager.openCamera(cfg.cameraId, object : CameraDevice.StateCallback() {
@@ -606,7 +591,7 @@ class CameraController(
         val values = ContentValues().apply {
             put(MediaStore.Video.Media.DISPLAY_NAME, "VID_$stamp.mp4")
             put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
-            put(MediaStore.Video.Media.RELATIVE_PATH, "DCIM/Camera")
+            put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/Iris Cam")
             put(MediaStore.Video.Media.DATE_TAKEN, System.currentTimeMillis())
             put(MediaStore.Video.Media.IS_PENDING, 1)
         }
@@ -628,10 +613,6 @@ class CameraController(
             ctx.contentResolver.update(o.uri, v, null, null)
         } catch (_: Exception) {
         }
-        if (goodPending) {
-            goodPending = false
-            markGood(o.uri)
-        }
     }
 
     /** A new, empty video file for a stabilised copy. */
@@ -640,7 +621,7 @@ class CameraController(
         val values = ContentValues().apply {
             put(MediaStore.Video.Media.DISPLAY_NAME, "VID_${stamp}_STEADY.mp4")
             put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
-            put(MediaStore.Video.Media.RELATIVE_PATH, "DCIM/Camera")
+            put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/Iris Cam")
             put(MediaStore.Video.Media.DATE_TAKEN, System.currentTimeMillis())
             put(MediaStore.Video.Media.IS_PENDING, 1)
         }
@@ -683,38 +664,6 @@ class CameraController(
         }
     }
 
-    // ---------- good take flag ----------
-
-    /** Marks the clip being recorded (or the last clip / photo) as a good take. Returns false if there is nothing to flag. */
-    fun flagGood(): Boolean {
-        if (recording) {
-            goodPending = true
-            return true
-        }
-        val u = (if (cfg.mode == 1) lastPhotoUri else lastClipUri) ?: return false
-        procExec.execute { markGood(u) }
-        return true
-    }
-
-    private fun markGood(uri: Uri) {
-        try {
-            val cr = ctx.contentResolver
-            var name: String? = null
-            cr.query(uri, arrayOf(MediaStore.MediaColumns.DISPLAY_NAME), null, null, null)?.use {
-                if (it.moveToFirst()) name = it.getString(0)
-            }
-            val v = ContentValues()
-            val n = name
-            if (n != null && !n.contains("_GOOD")) {
-                val dot = n.lastIndexOf('.')
-                v.put(MediaStore.MediaColumns.DISPLAY_NAME, if (dot > 0) n.substring(0, dot) + "_GOOD" + n.substring(dot) else n + "_GOOD")
-            }
-            if (Build.VERSION.SDK_INT >= 30) v.put(MediaStore.MediaColumns.IS_FAVORITE, 1)
-            if (v.size() > 0) cr.update(uri, v, null, null)
-        } catch (_: Exception) {
-        }
-    }
-
     // ---------- recorder ----------
 
     private fun displayDegrees(): Int = when (tv.display?.rotation ?: Surface.ROTATION_90) {
@@ -744,6 +693,7 @@ class CameraController(
         else -> MediaRecorder.AudioSource.CAMCORDER
     }
 
+    @Suppress("DEPRECATION") // Required for API 29–30; API 31+ uses the Context constructor.
     private fun prepareRecorder() {
         val rec = if (Build.VERSION.SDK_INT >= 31) MediaRecorder(ctx) else MediaRecorder()
         try {
@@ -835,19 +785,39 @@ class CameraController(
     }
 
     private fun closeSession() {
+        // Invalidate callbacks before tearing down the old mode's outputs.
         gen++
+        val oldSession = session
+        session = null
         try {
-            session?.close()
+            oldSession?.stopRepeating()
         } catch (_: Exception) {
         }
-        session = null
+        try {
+            oldSession?.abortCaptures()
+        } catch (_: Exception) {
+        }
+        try {
+            oldSession?.close()
+        } catch (_: Exception) {
+        }
+
+        // Release outputs only after asking Camera2 to stop using the old session.
+        try {
+            previewSurface?.release()
+        } catch (_: Exception) {
+        }
+        previewSurface = null
         try {
             reader?.close()
         } catch (_: Exception) {
         }
         reader = null
         synchronized(lock) {
-            shot?.image?.close()
+            try {
+                shot?.image?.close()
+            } catch (_: Exception) {
+            }
             shot = null
         }
     }
@@ -855,8 +825,38 @@ class CameraController(
     // ---------- session ----------
 
     private fun configureAndStart() {
-        if (!started) return
-        val cd = device ?: return
+        if (configurationInFlight) {
+            configurationPending = true
+            return
+        }
+        configurationInFlight = true
+        try {
+            configureAndStartInternal()
+        } catch (e: Exception) {
+            finishConfiguration()
+            throw e
+        }
+    }
+
+    private fun finishConfiguration() {
+        configurationInFlight = false
+        if (configurationPending && started && !released) {
+            configurationPending = false
+            handler.post { configureAndStart() }
+        } else if (!started || released) {
+            configurationPending = false
+        }
+    }
+
+    private fun configureAndStartInternal() {
+        if (!started) {
+            finishConfiguration()
+            return
+        }
+        val cd = device ?: run {
+            finishConfiguration()
+            return
+        }
         closeSession()
         releaseRecorder()
         aeLock = false
@@ -872,9 +872,13 @@ class CameraController(
             validateConfig()
         } catch (e: Exception) {
             ui.onMessage("Config error: ${e.message}")
+            finishConfiguration()
             return
         }
-        val st = tv.surfaceTexture ?: return
+        val st = tv.surfaceTexture ?: run {
+            finishConfiguration()
+            return
+        }
 
         try {
             prepareRecorder()
@@ -892,6 +896,7 @@ class CameraController(
             if (!ok) {
                 val hint = if (cfg.fps > 30 && cfg.height >= 2160) " (try 4K30, this phone's encoder may not do 4K60)" else ""
                 ui.onMessage("Recorder setup failed: ${e.message}$hint")
+                finishConfiguration()
                 return
             }
         }
@@ -899,10 +904,12 @@ class CameraController(
         val ps = previewSize()
         lastPreview = ps
         st.setDefaultBufferSize(ps.width, ps.height)
-        previewSurface?.release()
         val preview = Surface(st)
         previewSurface = preview
-        val rs = (crop?.input ?: recorder?.surface) ?: return
+        val rs = (crop?.input ?: recorder?.surface) ?: run {
+            finishConfiguration()
+            return
+        }
         recSurface = rs
         ui.onPreviewSize(ps.width, ps.height)
 
@@ -916,16 +923,25 @@ class CameraController(
             override fun onConfigured(s: CameraCaptureSession) {
                 if (my != gen || device !== cd) {
                     s.close()
+                    finishConfiguration()
                     return
                 }
                 session = s
-                refreshTransform()
-                updateRepeating()
-                ui.onReady()
+                try {
+                    refreshTransform()
+                    updateRepeating()
+                    ui.onReady()
+                } catch (e: Exception) {
+                    ui.onMessage("Preview setup failed: ${e.message}")
+                } finally {
+                    finishConfiguration()
+                }
             }
 
             override fun onConfigureFailed(s: CameraCaptureSession) {
+                s.close()
                 ui.onMessage("Camera rejected this resolution / fps / lens combo")
+                finishConfiguration()
             }
         }
         try {
@@ -936,6 +952,7 @@ class CameraController(
             }
         } catch (e: Exception) {
             ui.onMessage("Session error: ${e.message}")
+            finishConfiguration()
         }
     }
 
@@ -1199,7 +1216,11 @@ class CameraController(
 
     private fun captureFormat(): Int = when {
         effMode() == 1 -> ImageFormat.RAW_SENSOR
-        cfg.photoFormat == 3 && ultraHdrAvailable -> ImageFormat.JPEG_R
+        // JPEG_R must be saved byte-for-byte to preserve its gain map. If a pixel filter
+        // is selected, use ordinary JPEG so the requested look is actually rendered.
+        cfg.photoFormat == 3 && ultraHdrAvailable &&
+            cfg.filterId == 0 && !cfg.flat && !cfg.upscale &&
+            store.trim(cfg.cameraId).isNeutral() -> ImageFormat.JPEG_R
         else -> ImageFormat.JPEG
     }
 
@@ -1243,12 +1264,14 @@ class CameraController(
             warnedLens = cfg.cameraId
             ui.onMessage("This lens has no RAW: using phone JPEG with this lens's colour trim")
         }
-        val st = tv.surfaceTexture ?: return
+        val st = tv.surfaceTexture ?: run {
+            finishConfiguration()
+            return
+        }
         val cap = captureSize()
         val ps = previewSizeForPhoto(cap)
         lastPreview = ps
         st.setDefaultBufferSize(ps.width, ps.height)
-        previewSurface?.release()
         val preview = Surface(st)
         previewSurface = preview
 
@@ -1262,16 +1285,25 @@ class CameraController(
             override fun onConfigured(s: CameraCaptureSession) {
                 if (my != gen || device !== cd) {
                     s.close()
+                    finishConfiguration()
                     return
                 }
                 session = s
-                refreshTransform()
-                updateRepeating()
-                ui.onReady()
+                try {
+                    refreshTransform()
+                    updateRepeating()
+                    ui.onReady()
+                } catch (e: Exception) {
+                    ui.onMessage("Photo preview setup failed: ${e.message}")
+                } finally {
+                    finishConfiguration()
+                }
             }
 
             override fun onConfigureFailed(s: CameraCaptureSession) {
+                s.close()
                 ui.onMessage("Camera rejected this lens / photo format combination")
+                finishConfiguration()
             }
         }
         try {
@@ -1279,6 +1311,7 @@ class CameraController(
             cd.createCaptureSession(listOf(preview, rd.surface), cb, handler)
         } catch (e: Exception) {
             ui.onMessage("Session error: ${e.message}")
+            finishConfiguration()
         }
     }
 
@@ -1524,6 +1557,9 @@ class CameraController(
         }
         try {
             val fmt = captureFormat()
+            if (cfg.photoFormat == 3 && ultraHdrAvailable && fmt != ImageFormat.JPEG_R) {
+                handler.post { ui.onMessage("Photo filters are active; using standard JPEG so the selected look is applied. Turn filters off for native Ultra HDR.") }
+            }
             val plan = scenePlan()
             if (cfg.scene in 1..2 && plan == null) {
                 handler.post { ui.onMessage("This lens has no manual exposure, so night / astro can't be used on it") }
@@ -1558,7 +1594,8 @@ class CameraController(
             }
             val sh = Shot(
                 cfg.cameraId, fmt, chars, needRotation(), cfg.photoQuality, reqs.size,
-                cfg.bw, cfg.flat && !cfg.bw, cfg.photoLook, hplan != null, cfg.upscale && currentLensNeedsUpscale()
+                cfg.bw, cfg.flat && !cfg.bw, cfg.photoLook, hplan != null, cfg.upscale && currentLensNeedsUpscale(), cfg.glow, cfg.blue,
+                cfg.filterId, cfg.filterIntensity
             )
             synchronized(lock) { shot = sh }
             if (plan != null && plan.expNs * reqs.size >= 1_500_000_000L) {
@@ -1647,10 +1684,28 @@ class CameraController(
     /** Applies look, lens colour trim and optional upscaling to an upright bitmap, recycling what it replaces. */
     private fun finishLook(bmp: Bitmap, sh: Shot, trim: Trim): Bitmap {
         var out = bmp
-        val styled = Look.apply(out, sh.bw, sh.flat, sh.photoLook)
+        val styled = Look.apply(
+            out,
+            sh.filterId == 0 && sh.bw,
+            sh.filterId == 0 && sh.flat,
+            if (sh.filterId == 0) sh.photoLook else 0,
+            sh.filterId == 0 && sh.blue
+        )
         if (styled !== out) {
             out.recycle()
             out = styled
+        }
+        if (sh.filterId > 1) {
+            val filtered = Look.applyPreset(out, sh.filterId, sh.filterIntensity)
+            if (filtered !== out) {
+                out.recycle()
+                out = filtered
+            }
+        }
+        if (sh.glow) {
+            val bloomed = Look.glow(out)
+            out.recycle()
+            out = bloomed
         }
         if (!trim.isNeutral()) {
             val t = ColorTrim.apply(out, trim, 0)
@@ -1699,7 +1754,7 @@ class CameraController(
                 out.recycle()
             } else {
                 val bytes = sh.jpegs[0]
-                saved = if (sh.bw || sh.flat || sh.upscale || !trim.isNeutral()) {
+                saved = if (sh.bw || sh.blue || sh.flat || sh.upscale || sh.glow || !trim.isNeutral()) {
                     val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
                     val out = finishLook(rotateBy(bmp, sh.rotDeg), sh, trim)
                     val u = saveBitmap(out, "$base.jpg", sh.quality)
@@ -1741,7 +1796,7 @@ class CameraController(
         val v = ContentValues().apply {
             put(MediaStore.Images.Media.DISPLAY_NAME, name)
             put(MediaStore.Images.Media.MIME_TYPE, mime)
-            put(MediaStore.Images.Media.RELATIVE_PATH, "DCIM/Camera")
+            put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/Iris Cam")
             put(MediaStore.Images.Media.DATE_TAKEN, System.currentTimeMillis())
             put(MediaStore.Images.Media.IS_PENDING, 1)
         }
@@ -2087,7 +2142,6 @@ class CameraController(
             recorder?.start()
             crop?.active = true
             recording = true
-            goodPending = false
             if (cfg.steady && steadyPossible() == null) {
                 val l = SteadyLog()
                 val f = chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.firstOrNull()

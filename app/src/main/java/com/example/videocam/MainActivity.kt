@@ -92,6 +92,11 @@ class MainActivity : Activity(), CameraController.Callbacks {
     private lateinit var cam: CameraController
 
     private lateinit var root: FrameLayout
+    private lateinit var transitionCover: View
+    private var transitionStartedAt = 0L
+    private val finishCameraTransition = Runnable {
+        if (::transitionCover.isInitialized) transitionCover.visibility = View.GONE
+    }
     private lateinit var tv: TextureView
     private lateinit var falseView: ImageView
     private lateinit var peakView: ImageView
@@ -118,10 +123,10 @@ class MainActivity : Activity(), CameraController.Callbacks {
     private lateinit var eB: TextView
     private lateinit var aChip: TextView
     private lateinit var bChip: TextView
-    private val lensChips = LinkedHashMap<String, TextView>()
 
     private lateinit var formatChip: TextView
     private lateinit var imageChip: TextView
+    private lateinit var filtersChip: TextView
     private lateinit var gridChip: TextView
     private lateinit var toolsChip: TextView
     private lateinit var afChip: TextView
@@ -135,8 +140,6 @@ class MainActivity : Activity(), CameraController.Callbacks {
     private lateinit var tRot: TextView
     private lateinit var recEdge: EdgeLineView
     private lateinit var audioMeter: AudioMeterView
-    private lateinit var lensRow: LinearLayout
-    private val lensKeyChips = ArrayList<Pair<TextView, Float>>()
     private var monitor: MonitorServer? = null
     // Preserve the camera flat-profile setting while laptop monitoring is active.
     private var monitorSavedFlat: Boolean? = null
@@ -149,7 +152,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
     private var longLeft = -1
     @Volatile
     private var lastMeterAt = 0L
-    private var bwOn = false
+    private var thermalListener: PowerManager.OnThermalStatusChangedListener? = null
     private val steadyExec = Executors.newSingleThreadExecutor()
     private lateinit var chipRow: HorizontalScrollView
     private lateinit var topBar: LinearLayout
@@ -251,18 +254,19 @@ class MainActivity : Activity(), CameraController.Callbacks {
         rebuildSamplers()
         cam = CameraController(this, tv, cfg, store, this)
         if (cfg.photoFormat == 3 && !cam.ultraHdrAvailable) cfg.photoFormat = 0
+        // Apply the first-run camera default before advancing the schema version.
+        // Existing explicit user lens choices are preserved.
+        if (cfg.ver < 1) {
+            if (cfg.cameraId.isBlank() && cam.cameraIds.contains("5")) cfg.cameraId = "5"
+            cfg.ver = 1
+            store.save("last", cfg)
+        }
         if (cfg.ver < 2) {
             cfg.bitrateMbps = 50
             cfg.stab = 2
             cfg.saveDng = false
             cfg.scene = 0
             cfg.ver = 2
-            store.save("last", cfg)
-        }
-        if (cfg.ver < 1) {
-            // first run of this version: use the all-lenses camera so the zoom slider switches lenses by itself
-            if (cam.cameraIds.contains("5")) cfg.cameraId = "5"
-            cfg.ver = 1
             store.save("last", cfg)
         }
         slider.onChange = { f ->
@@ -316,11 +320,35 @@ class MainActivity : Activity(), CameraController.Callbacks {
         cancelCountdown()
         cancelExpPull()
         oriListener.disable()
-        tap?.stop()
         stopMonitor() // release the Wi-Fi/ADB monitor server when the app leaves the foreground
+        tap?.stop() // stop again after stopMonitor updates audio state; never leave mic capture running in background
         if (cfgDirty) store.save("last", cfg)
         cam.stop()
         super.onPause()
+    }
+
+    override fun onDestroy() {
+        ui.removeCallbacks(finishCameraTransition)
+        // Stop all producers before shutting down their worker threads. onPause handles
+        // normal backgrounding; this is the final release when the Activity is destroyed.
+        ui.removeCallbacks(ticker)
+        ui.removeCallbacks(monitorTick)
+        cancelCountdown()
+        cancelExpPull()
+        oriListener.disable()
+        stopMonitor()
+        tap?.stop()
+        tap = null
+        if (Build.VERSION.SDK_INT >= 29) {
+            thermalListener?.let { listener ->
+                (getSystemService(POWER_SERVICE) as PowerManager).removeThermalStatusListener(listener)
+            }
+        }
+        thermalListener = null
+        if (::cam.isInitialized) cam.release()
+        procExec.shutdownNow()
+        steadyExec.shutdown()
+        super.onDestroy()
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
@@ -539,6 +567,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
         meter = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply { max = 100 }
         formatChip = chip("") { popup(formatChip, if (cfg.mode == 1) photoItems() else videoItems()) }
         imageChip = chip("IMAGE \u25BE") { popup(imageChip, imageItems()) }
+        filtersChip = chip("FILTERS ▾") { popup(filtersChip, filterItems()) }
         gridChip = chip("GRID \u25BE") { popup(gridChip, gridItems()) }
         toolsChip = chip("TOOLS \u25BE") { popup(toolsChip, toolsItems()) }
         statusText = TextView(this).apply {
@@ -555,7 +584,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
         }
         top.addView(timecode, LinearLayout.LayoutParams(dp(112), WRAP))
         top.addView(meter, LinearLayout.LayoutParams(dp(70), dp(8)).apply { setMargins(0, 0, dp(8), 0) })
-        chipRow = row(formatChip, imageChip, gridChip, toolsChip)
+        chipRow = row(formatChip, imageChip, filtersChip, gridChip, toolsChip)
         top.addView(chipRow, LinearLayout.LayoutParams(0, WRAP, 1f))
         top.addView(statusText, LinearLayout.LayoutParams(WRAP, WRAP).apply { setMargins(dp(8), 0, 0, 0) })
         topBar = top
@@ -680,19 +709,6 @@ class MainActivity : Activity(), CameraController.Callbacks {
             refreshUi()
         }
         val zoomStrip = strip(zoomLabel, zA, zB, zoomSlider, zoomGo, zoomTime, zoomLink)
-        lensRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            visibility = View.GONE
-        }
-        for ((name, ratio) in listOf("0.5x" to 0.5f, "1x" to 1f, "2.7x" to 2.7f)) {
-            lateinit var c: TextView
-            c = chip(name) { showLensDropdown(c, ratio) }
-            c.maxLines = 1
-            c.textSize = 12f
-            c.setPadding(dp(8), dp(5), dp(8), dp(5))
-            lensKeyChips.add(Pair(c, ratio))
-            lensRow.addView(c, LinearLayout.LayoutParams(dp(52), WRAP).apply { setMargins(dp(2), 0, dp(2), dp(3)) })
-        }
 
         expSlider = ZoomSlider(this)
         expLabel = label("EXPOSURE")
@@ -714,7 +730,6 @@ class MainActivity : Activity(), CameraController.Callbacks {
         val stack = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             addView(readRow, LinearLayout.LayoutParams(WRAP, WRAP))
-            addView(lensRow, LinearLayout.LayoutParams(WRAP, WRAP).apply { setMargins(dp(80), 0, 0, 0) })
             addView(zoomStrip, LinearLayout.LayoutParams(WRAP, WRAP).apply { setMargins(0, 0, 0, dp(3)) })
             addView(expStrip, LinearLayout.LayoutParams(WRAP, WRAP))
         }
@@ -784,7 +799,40 @@ class MainActivity : Activity(), CameraController.Callbacks {
         root.addView(recEdge, lp(MATCH, MATCH, Gravity.TOP))
         meter.visibility = View.GONE
 
+        transitionCover = FrameLayout(this).apply {
+            setBackgroundColor(Color.BLACK)
+            visibility = View.GONE
+            isClickable = true
+            isFocusable = true
+            addView(TextView(this@MainActivity).apply {
+                text = "LOADING"
+                setTextColor(Color.WHITE)
+                textSize = 14f
+                typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+                letterSpacing = 0.22f
+                gravity = Gravity.CENTER
+                setShadowLayer(8f, 0f, 0f, Color.BLACK)
+            }, FrameLayout.LayoutParams(WRAP, WRAP, Gravity.CENTER))
+        }
+        root.addView(transitionCover, lp(MATCH, MATCH, Gravity.CENTER))
         setContentView(root)
+    }
+
+    private fun beginCameraTransition() {
+        if (!::transitionCover.isInitialized) return
+        ui.removeCallbacks(finishCameraTransition)
+        transitionStartedAt = SystemClock.elapsedRealtime()
+        transitionCover.visibility = View.VISIBLE
+        // Never leave the cover up indefinitely if a camera callback is lost.
+        ui.postDelayed(finishCameraTransition, 260L)
+    }
+
+    private fun completeCameraTransition() {
+        if (!::transitionCover.isInitialized || transitionCover.visibility != View.VISIBLE) return
+        ui.removeCallbacks(finishCameraTransition)
+        val elapsed = SystemClock.elapsedRealtime() - transitionStartedAt
+        // A very short minimum masks the surface teardown; readiness ends the transition.
+        ui.postDelayed(finishCameraTransition, (100L - elapsed).coerceAtLeast(0L))
     }
 
     private fun setRecLook(on: Boolean) {
@@ -1077,6 +1125,53 @@ class MainActivity : Activity(), CameraController.Callbacks {
     private fun imageItems(): List<Pair<String, () -> Unit>> =
         if (cfg.mode == 1) photoImageItems() else videoImageItems()
 
+    /** Dedicated Filters category. Saved stills get the full effect; video mode is preview-only. */
+    private fun filterItems(): List<Pair<String, () -> Unit>> {
+        val presets = listOf(
+            "Natural" to 0,
+            "Film Stocks · Kodak 2383" to 2,
+            "Film Stocks · Kodak 250D" to 3,
+            "Film Stocks · Kodak 500T" to 4,
+            "Film Stocks · Fuji Eterna" to 5,
+            "Cinema · Teal & Orange" to 6,
+            "Cinema · Bleach Bypass" to 7,
+            "Cinema · Noir" to 9,
+            "Vintage · Vintage Fade" to 8,
+            "Leica · Leica Colour (inspired)" to 10,
+            "Colour · Blue Cinematic" to 11,
+            "Colour · Golden Hour" to 12,
+            "Dream · Dream Glow" to 13,
+            "Effects · Black and White" to 1,
+            "Effects · Halation" to 14,
+            "Effects · Soft Diffusion" to 15,
+            "Effects · Film Grain" to 16,
+            "Effects · Anamorphic Flare" to 17
+        )
+        val items = presets.map { (label, id) ->
+            val title = (if (cfg.filterId == id) "✓ " else "") + label
+            title to {
+                if (idle()) {
+                    cfg.filterId = id
+                    cfg.bw = id == 1
+                    cfg.blue = false
+                    cfg.glow = false
+                    cfg.photoLook = 0
+                    cfg.flat = false
+                    cfgDirty = true
+                    applyLive()
+                    toast(if (cfg.mode == 0 && id != 0) "Preview only in video mode; recorded video is unchanged" else "${Look.FILTER_NAMES[id]} selected")
+                }
+            }
+        }
+        return items + ("Intensity: ${cfg.filterIntensity}%" to {
+            choose("Filter intensity", (0..100 step 10).map { "$it%" }) {
+                cfg.filterIntensity = it * 10
+                cfgDirty = true
+                applyLive()
+            }
+        })
+    }
+
     private fun photoImageItems(): List<Pair<String, () -> Unit>> = listOf(
         "Colour trim for this lens\u2026" to { showTrimDialog() },
         "Match lens colour\u2026" to { matchLensColour() },
@@ -1092,10 +1187,6 @@ class MainActivity : Activity(), CameraController.Callbacks {
         },
         "Flat profile: ${if (cfg.flat) "On" else "Off"}" to {
             cfg.flat = !cfg.flat
-            applyLive()
-        },
-        "Black and White: ${if (cfg.bw) "On" else "Off"}" to {
-            cfg.bw = !cfg.bw
             applyLive()
         },
         "Aux-lens upscale to 12.6 MP: ${if (cfg.upscale) "On" else "Off"}" to {
@@ -1114,7 +1205,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
         val sz = runCatching { cam.captureSize() }.getOrNull()
         val mp = if (sz != null) "%.1fMP".format(sz.width * sz.height / 1e6) else "--"
         val m = when {
-            cfg.photoFormat == 3 && cam.ultraHdrAvailable -> "ULTRA HDR"
+            cfg.photoFormat == 3 && cam.ultraHdrAvailable && cfg.filterId == 0 && !cfg.flat && !cfg.upscale -> "ULTRA HDR"
             cfg.scene == 1 -> "NIGHT"
             cfg.scene == 2 -> "ASTRO"
             cfg.scene == 3 -> "HDR"
@@ -1133,7 +1224,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
         val sz = runCatching { cam.captureSize() }.getOrNull()
         val mp = if (sz != null) "%.1f MP".format(sz.width * sz.height / 1e6) else "?"
         val mode = when {
-            cfg.photoFormat == 3 && cam.ultraHdrAvailable -> "Ultra HDR (native JPEG_R)"
+            cfg.photoFormat == 3 && cam.ultraHdrAvailable && cfg.filterId == 0 && !cfg.flat && !cfg.upscale -> "Ultra HDR (native JPEG_R)"
             cam.effMode() == 1 -> "RAW develop"
             else -> "Phone JPEG"
         }
@@ -1141,12 +1232,6 @@ class MainActivity : Activity(), CameraController.Callbacks {
         return listOf(
             "Photo size: $mp" to { pickPhotoRes() },
             "Capture mode: $mode" to { pickCaptureMode() },
-            "Photo look: ${listOf("Natural", "Golden Hour", "Dream Glow")[cfg.photoLook.coerceIn(0, 2)]}" to {
-                choose("Photo look (Black and White remains unchanged)", listOf("Natural", "Golden Hour", "Dream Glow")) {
-                    cfg.photoLook = it
-                    applyLive()
-                }
-            },
             "JPEG quality: ${cfg.photoQuality}" to { pickQuality() },
             "Scene: ${arrayOf("Normal", "Night (1 s, ISO 1000)", "Astro (5 min, ISO 100)", "HDR (${cfg.hdrFrames} frames)")[cfg.scene.coerceIn(0, 3)]}" to { pickScene() },
             "HDR merge: ${cfg.hdrFrames} frames" to { pickHdrFrames() },
@@ -1209,11 +1294,6 @@ class MainActivity : Activity(), CameraController.Callbacks {
                 applyLive()
             }
         },
-        "Lens shortcuts (0.5x / 1x / 2.7x): ${if (cfg.lensKeys) "On" else "Off"}" to {
-            cfg.lensKeys = !cfg.lensKeys
-            cfgDirty = true
-            refreshUi()
-        },
         "Laptop monitor (Wi-Fi / USB): ${if (monitor != null) "On \u2014 tap for connection" else "Off"}" to { toggleMonitor() },
         "USB monitoring commands (Mac)" to { showUsbCommands() },
         "Dolly Zoom (linked zoom + focus): ${if (zoomLinked) "On" else "Off"}" to {
@@ -1238,6 +1318,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
         formatChip.text = if (photo) photoFormatText() else videoFormatText()
         setActive(formatChip, false)
         setActive(imageChip, false)
+        setActive(filtersChip, cfg.filterId != 0)
         setActive(gridChip, cfg.grid != 0)
         setActive(toolsChip, false)
         modeChip.text = if (photo) "PHOTO \u21C4 VIDEO" else "VIDEO \u21C4 PHOTO"
@@ -1250,11 +1331,6 @@ class MainActivity : Activity(), CameraController.Callbacks {
         setRecLook(cam.recording)
 
         setActive(t2x, cam.zoom >= 1.9f)
-        lensChips.forEach { (id, c) ->
-            c.visibility = if (cfg.fps == 60 && !cam.supportsFps(id, 60)) View.GONE else View.VISIBLE
-            setActive(c, cfg.cameraId == id)
-        }
-        lensKeyChips.forEach { (c, r) -> setActive(c, abs(cam.zoom - r) < 0.08f) }
         setActive(tPeak, cfg.peak > 0)
         setActive(tFalse, falseOn)
         setActive(tTorch, if (photo) cfg.flashMode != 0 else cam.torch)
@@ -1263,7 +1339,6 @@ class MainActivity : Activity(), CameraController.Callbacks {
         setActive(tRot, cfg.portrait)
         tRot.visibility = if (cfg.mode == 1) View.GONE else View.VISIBLE
         applySliderWidths()
-        lensRow.visibility = if (cfg.lensKeys) View.VISIBLE else View.GONE
         applyBwLook()
         recEdge.visibility = if (cam.recording) View.VISIBLE else View.GONE
         audioMeter.visibility = if (cfg.mode == 0) View.VISIBLE else View.GONE
@@ -1346,66 +1421,24 @@ class MainActivity : Activity(), CameraController.Callbacks {
 
     private fun refreshZoomSlider() {
         zoomSlider.configure(
-            cam.zoomRange.lower, cam.zoomHi(), true, listOf(0.6f, 1f, 2f, 3f, 5f, 7f)
+            cam.zoomRange.lower, cam.zoomHi(), true, listOf(0.5f, 1f, 2f, 3f, 5f, 7f)
         ) { fmtZoom(it) }
         zoomSlider.setZoomSilently(cam.zoom)
     }
 
-    private fun addLensChips() {
-        var idx = 0
-        for ((id, name) in listOf("2" to "0.7x", "0" to "1x", "3" to "2.7x")) {
-            if (!cam.cameraIds.contains(id)) continue
-            // At 60 fps, expose only lenses that advertise that frame rate.
-            if (cfg.fps == 60 && !cam.supportsFps(id, 60)) continue
-            val c = chip(name) { switchLens(id) }
-            c.maxLines = 1
-            c.textSize = 12f
-            c.setPadding(dp(4), dp(6), dp(4), dp(6))
-            lensChips[id] = c
-            toolsCol.addView(c, idx++, LinearLayout.LayoutParams(dp(70), WRAP).apply { setMargins(0, dp(3), 0, dp(3)) })
-        }
-    }
-
-    private fun showLensDropdown(anchor: View, shortcutRatio: Float) {
-        if (!idle()) return
-        val suggested = cam.cameraIdForShortcut(shortcutRatio)
-        val ids = cam.cameraIds.filter { cfg.fps != 60 || cam.supportsFps(it, 60) }.toMutableList()
-        if (suggested != null && suggested in ids) {
-            ids.remove(suggested)
-            ids.add(0, suggested)
-        }
-        val menu = PopupMenu(this, anchor)
-        ids.forEachIndexed { index, id ->
-            val label = cam.cameraLabel(id) + if (id == suggested) " · shortcut target" else ""
-            menu.menu.add(0, index, index, label)
-        }
-        menu.setOnMenuItemClickListener { item ->
-            ids.getOrNull(item.itemId)?.let { switchLens(it) }
-            true
-        }
-        menu.show()
-    }
-
     private fun switchLens(id: String) {
         if (!idle()) return
-        var target = id
-        if (cfg.fps == 60 && !cam.supportsFps(id, 60)) {
-            val fallback = cam.cameraIds.firstOrNull { !cam.isFrontCamera(it) && cam.supportsFps(it, 60) }
-            if (fallback != null) {
-                target = fallback
-                toast("Selected lens does not support 60 fps; switched to the compatible main camera")
-            } else {
-                cfg.fps = 30
-                toast("Selected lens does not support 60 fps; recording rate changed to 30 fps")
-            }
-        }
-        cfg.cameraId = target
+        cfg.cameraId = id
         store.save("last", cfg)
         cam.reopen()
         refreshUi()
     }
 
     private fun idle(): Boolean {
+        if (::transitionCover.isInitialized && transitionCover.visibility == View.VISIBLE) {
+            toast("Camera is switching. Please wait.")
+            return false
+        }
         if (cam.recording || cam.busy || cam.jobs > 0) {
             toast(if (cam.busy || cam.jobs > 0) "Wait for the photo to finish" else "Stop recording first")
             return false
@@ -1421,6 +1454,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
 
     private fun streamChanged() {
         store.save("last", cfg)
+        beginCameraTransition()
         cam.reconfigure()
         refreshUi()
     }
@@ -1482,6 +1516,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
         updateOrientationMode()
         updateAudioTap()
         rebuildSamplers()
+        beginCameraTransition()
         cam.reconfigure()
         loadLatestClip()
         refreshUi()
@@ -1695,10 +1730,14 @@ class MainActivity : Activity(), CameraController.Callbacks {
 
     private fun pickLens() {
         if (!idle()) return
-        val ids = cam.cameraIds.filter { cfg.fps != 60 || cam.supportsFps(it, 60) }
+        val ids = cam.cameraIds
         if (ids.isEmpty()) return
         choose("Lens", ids.map { cam.cameraLabel(it) }) {
-            switchLens(ids[it])
+            cfg.cameraId = ids[it]
+            store.save("last", cfg)
+            beginCameraTransition()
+            cam.reopen()
+            refreshUi()
         }
     }
 
@@ -1774,6 +1813,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
         }
         cfg.copyFrom(p)
         store.save("last", cfg)
+        beginCameraTransition()
         cam.reopen()
         refreshUi()
         toast("Loaded P$i")
@@ -1978,7 +2018,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
         try {
             contentResolver.query(
                 MediaStore.Video.Media.EXTERNAL_CONTENT_URI, proj,
-                "${MediaStore.Video.Media.RELATIVE_PATH} LIKE ?", arrayOf("DCIM/Camera%"),
+                "${MediaStore.Video.Media.RELATIVE_PATH} LIKE ? OR ${MediaStore.Video.Media.RELATIVE_PATH} LIKE ?", arrayOf("Movies/VideoCam%", "Movies/Iris Cam%"),
                 "${MediaStore.Video.Media.DATE_ADDED} DESC"
             )?.use { c ->
                 while (c.moveToNext() && res.size < limit) {
@@ -2002,8 +2042,8 @@ class MainActivity : Activity(), CameraController.Callbacks {
         try {
             contentResolver.query(
                 MediaStore.Images.Media.EXTERNAL_CONTENT_URI, proj,
-                "${MediaStore.Images.Media.RELATIVE_PATH} LIKE ? AND ${MediaStore.Images.Media.MIME_TYPE} IN (?, ?, ?)",
-                arrayOf("DCIM/Camera%", "image/jpeg", "image/heic", "image/heif"),
+                "(${MediaStore.Images.Media.RELATIVE_PATH} LIKE ? OR ${MediaStore.Images.Media.RELATIVE_PATH} LIKE ?) AND ${MediaStore.Images.Media.MIME_TYPE} = ?",
+                arrayOf("Pictures/VideoCam%", "Pictures/Iris Cam%", "image/jpeg"),
                 "${MediaStore.Images.Media.DATE_ADDED} DESC"
             )?.use { c ->
                 while (c.moveToNext() && res.size < limit) {
@@ -2036,16 +2076,14 @@ class MainActivity : Activity(), CameraController.Callbacks {
 
     private fun openClip(uri: Uri) {
         val mime = contentResolver.getType(uri) ?: if (cfg.mode == 1) "image/jpeg" else "video/mp4"
-        val base = Intent(Intent.ACTION_VIEW).setDataAndType(uri, mime).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        val viewIntent = Intent(Intent.ACTION_VIEW)
+            .setDataAndType(uri, mime)
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         try {
-            // straight into Google Photos, so Android has nothing to ask about
-            startActivity(Intent(base).setPackage("com.google.android.apps.photos"))
+            // Let Android open media in the user's default gallery / media app.
+            startActivity(viewIntent)
         } catch (_: Exception) {
-            try {
-                startActivity(base)
-            } catch (e: Exception) {
-                toast("No viewer app found")
-            }
+            toast("No gallery or media app found")
         }
     }
 
@@ -2186,9 +2224,11 @@ class MainActivity : Activity(), CameraController.Callbacks {
     }
 
     private fun registerThermal() {
-        if (Build.VERSION.SDK_INT >= 29) {
+        if (Build.VERSION.SDK_INT >= 29 && thermalListener == null) {
             val pm = getSystemService(POWER_SERVICE) as PowerManager
-            pm.addThermalStatusListener(mainExecutor) { thermal = it }
+            val listener = PowerManager.OnThermalStatusChangedListener { thermal = it }
+            thermalListener = listener
+            pm.addThermalStatusListener(mainExecutor, listener)
         }
     }
 
@@ -2258,15 +2298,32 @@ class MainActivity : Activity(), CameraController.Callbacks {
 
     // ---------- black & white preview ----------
 
-    private val bwPaint by lazy {
-        Paint().apply { colorFilter = Look.bwFilter() }
-    }
+    private var appliedPreviewFilterId = Int.MIN_VALUE
+    private var appliedPreviewFilterIntensity = Int.MIN_VALUE
+    private var previewFilterWarningShown = false
 
     private fun applyBwLook() {
-        val want = cfg.mode == 1 && cfg.bw
-        if (want == bwOn) return
-        bwOn = want
-        tv.setLayerPaint(if (want) bwPaint else null)
+        // Avoid rebuilding ColorMatrix/Paint on every UI refresh; only update when the
+        // selected look changes. A preview-layer failure must never take down the camera.
+        if (!::tv.isInitialized) return
+        if (appliedPreviewFilterId == cfg.filterId &&
+            appliedPreviewFilterIntensity == cfg.filterIntensity) return
+        try {
+            val paint = if (cfg.filterId > 0) Paint().apply {
+                colorFilter = Look.previewFilter(cfg.filterId, cfg.filterIntensity)
+            } else null
+            tv.setLayerPaint(paint)
+            appliedPreviewFilterId = cfg.filterId
+            appliedPreviewFilterIntensity = cfg.filterIntensity
+        } catch (e: RuntimeException) {
+            runCatching { tv.setLayerPaint(null) }
+            appliedPreviewFilterId = cfg.filterId
+            appliedPreviewFilterIntensity = cfg.filterIntensity
+            if (!previewFilterWarningShown) {
+                previewFilterWarningShown = true
+                toast("Preview filter unavailable on this device; camera preview is continuing")
+            }
+        }
     }
 
     private fun toggleSteady() {
@@ -2347,55 +2404,86 @@ class MainActivity : Activity(), CameraController.Callbacks {
         toast("Copied $label")
     }
 
+    private fun addCopyRow(parent: LinearLayout, title: String, value: String) {
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(8), dp(5), dp(4), dp(5))
+        }
+        val label = TextView(this).apply {
+            text = "$title\n$value"
+            setTextColor(Color.WHITE)
+            textSize = 12f
+            maxLines = 3
+            setPadding(0, 0, dp(8), 0)
+        }
+        row.addView(label, LinearLayout.LayoutParams(0, WRAP, 1f))
+        val copy = android.widget.Button(this).apply {
+            text = "COPY"
+            isAllCaps = true
+            setOnClickListener { copyToClipboard(title, value) }
+        }
+        row.addView(copy, LinearLayout.LayoutParams(WRAP, WRAP))
+        parent.addView(row, LinearLayout.LayoutParams(MATCH, WRAP))
+    }
+
     private fun showUsbCommands() {
         val m = monitor
         val port = m?.port ?: 8080
-        val url = if (m != null) "http://localhost:$port/?pin=${m.pin}" else "http://localhost:$port"
-        val options = arrayOf(
-            "Copy adb devices",
-            "Copy ADB reverse command",
-            "Copy laptop monitor URL",
-            "Copy disconnect command"
-        )
+        val usbLocalPort = 18080
+        val url = if (m != null) "http://localhost:$usbLocalPort/?pin=${m.pin}" else "http://localhost:$usbLocalPort"
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(8), dp(20), dp(4))
+        }
+        TextView(this).apply {
+            text = "Connect your phone to the Mac with USB debugging enabled. Start Laptop Monitor first to get its live PIN."
+            setTextColor(Color.WHITE)
+            textSize = 13f
+        }.also { content.addView(it) }
+        addCopyRow(content, "ADB devices command", "adb devices")
+        addCopyRow(content, "ADB reverse command", "adb reverse tcp:$usbLocalPort tcp:$port")
+        addCopyRow(content, "Laptop monitor URL", url)
+        addCopyRow(content, "Disconnect command", "adb reverse --remove tcp:$usbLocalPort")
         MaterialAlertDialogBuilder(this)
             .setTitle("USB monitoring on Mac")
-            .setMessage("Enable Developer options and USB debugging on your phone, connect a data-capable USB cable to your Mac, then authorize the Mac. Start Laptop Monitor first to get the live PIN and full URL.")
-            .setItems(options) { _, which ->
-                when (which) {
-                    0 -> copyToClipboard("adb devices", "adb devices")
-                    1 -> copyToClipboard("ADB reverse command", "adb reverse tcp:$port tcp:$port")
-                    2 -> copyToClipboard("monitor URL", url)
-                    3 -> copyToClipboard("disconnect command", "adb reverse --remove tcp:$port")
-                }
-            }
+            .setView(content)
             .setNegativeButton(if (m != null) "Turn off monitor" else "Close") { _, _ -> if (m != null) stopMonitor() }
+            .setPositiveButton("Done", null)
             .show()
     }
 
     private fun showMonitorInfo() {
         val m = monitor ?: return
         val ip = localIp()
-        val wifi = if (ip == null) "Wi-Fi: unavailable (connect both devices to the same network)" else
-            "WI-FI\nOpen on your laptop: http://$ip:${m.port}/?pin=${m.pin}"
-        val usb = "USB-C (ADB)\n1. Enable Developer options and USB debugging.\n2. Connect phone to Mac with a data cable and authorize.\n3. Run: adb reverse tcp:${m.port} tcp:${m.port}\n4. Open: http://localhost:${m.port}/?pin=${m.pin}"
-        val options = arrayOf(
-            "Copy adb devices",
-            "Copy ADB reverse command",
-            "Copy complete laptop URL (with PIN)",
-            "Copy disconnect command"
-        )
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(8), dp(20), dp(4))
+        }
+        TextView(this).apply {
+            text = "Laptop camera monitor · PIN ${m.pin}\n\nThe feed is served locally on your network or through USB ADB."
+            setTextColor(Color.WHITE)
+            textSize = 13f
+        }.also { content.addView(it) }
+        if (ip != null) {
+            addCopyRow(content, "Wi-Fi monitor URL", "http://$ip:${m.port}/?pin=${m.pin}")
+        } else {
+            TextView(this).apply {
+                text = "Wi-Fi address unavailable. Connect both devices to the same network."
+                setTextColor(Color.LTGRAY)
+                textSize = 12f
+            }.also { content.addView(it) }
+        }
+        addCopyRow(content, "ADB devices command", "adb devices")
+        val usbLocalPort = 18080
+        addCopyRow(content, "ADB reverse command", "adb reverse tcp:$usbLocalPort tcp:${m.port}")
+        addCopyRow(content, "USB monitor URL", "http://localhost:$usbLocalPort/?pin=${m.pin}")
+        addCopyRow(content, "Disconnect command", "adb reverse --remove tcp:$usbLocalPort")
         MaterialAlertDialogBuilder(this)
-            .setTitle("Laptop camera monitor · PIN ${m.pin}")
-            .setMessage("$wifi\n\n$usb\n\nSelect a row below to copy it. The feed is served locally; no cloud upload is used by this monitor server.")
-            .setItems(options) { _, which ->
-                when (which) {
-                    0 -> copyToClipboard("adb devices", "adb devices")
-                    1 -> copyToClipboard("ADB reverse command", "adb reverse tcp:${m.port} tcp:${m.port}")
-                    2 -> copyToClipboard("monitor URL", "http://localhost:${m.port}/?pin=${m.pin}")
-                    3 -> copyToClipboard("disconnect command", "adb reverse --remove tcp:${m.port}")
-                }
-            }
+            .setTitle("Laptop camera monitor")
+            .setView(content)
             .setNegativeButton("Turn off") { _, _ -> stopMonitor() }
+            .setPositiveButton("Done", null)
             .show()
     }
 
@@ -2464,7 +2552,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
     }
 
     /**
-     * Produce a flat 720p monitoring image. LUT processing intentionally remains on the laptop;
+     * Produce a flat 720p/1080p monitoring image. LUT processing intentionally remains on the laptop;
      * the phone only scales/encodes its current preview. Work is moved off the UI thread and a
      * single reusable bitmap avoids the previous per-frame bitmap copy/allocation.
      */
@@ -2474,8 +2562,13 @@ class MainActivity : Activity(), CameraController.Callbacks {
             var rotated: Bitmap? = null
             try {
                 val landscape = prevW >= prevH
-                val bw = if (landscape) 1280 else 720
-                val bh = if (landscape) 720 else 1280
+                // Preserve native preview detail up to 1080p; use 720p when the selected
+                // preview stream is smaller so the monitor never invents extra detail.
+                val longEdge = if (landscape) prevW else prevH
+                val targetLong = if (longEdge >= 1920) 1920 else 1280
+                val targetShort = targetLong * 9 / 16
+                val bw = if (landscape) targetLong else targetShort
+                val bh = if (landscape) targetShort else targetLong
                 var b = monitorBmp
                 if (b == null || b.width != bw || b.height != bh || b.isRecycled) {
                     b?.recycle()
@@ -2483,7 +2576,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
                     monitorBmp = b
                 }
                 if (!tv.isAvailable) return@execute
-                tv.getBitmap(b) ?: return@execute
+                tv.getBitmap(b)
                 val deg = when (tv.display?.rotation ?: Surface.ROTATION_90) {
                     Surface.ROTATION_90 -> 270
                     Surface.ROTATION_270 -> 90
@@ -2495,9 +2588,10 @@ class MainActivity : Activity(), CameraController.Callbacks {
                     Bitmap.createBitmap(b, 0, 0, b.width, b.height, mt, false).also { rotated = it }
                 }
                 val bos = ByteArrayOutputStream(100_000)
-                // MJPEG remains compatible with every browser; USB ADB reverse avoids Wi-Fi
-                // transport overhead. H.264/MSE remains a separate encoder/decoder migration.
-                out.compress(Bitmap.CompressFormat.JPEG, 58, bos)
+                // MJPEG remains compatible with every browser. 1080p is used only when the
+                // selected preview itself is at least 1080p; otherwise output remains 720p.
+                // H.264/MSE remains a separate encoder/decoder migration.
+                out.compress(Bitmap.CompressFormat.JPEG, if (targetLong == 1920) 56 else 60, bos)
                 m.pushFrame(bos.toByteArray())
             } catch (_: Throwable) {
             } finally {
@@ -2625,6 +2719,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
     }
 
     override fun onReady() {
+        completeCameraTransition()
         store.save("last", cfg)
         refreshZoomSlider()
         expSliderManual = null
@@ -2714,6 +2809,5 @@ class MainActivity : Activity(), CameraController.Callbacks {
         zoomLabel.text = "ZOOM " + fmtZoom(z)
         zoomSlider.setZoomSilently(z)
         setActive(t2x, z >= 1.9f)
-        lensKeyChips.forEach { (c, r) -> setActive(c, abs(z - r) < 0.08f) }
     }
 }
