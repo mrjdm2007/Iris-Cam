@@ -1191,8 +1191,11 @@ class MainActivity : Activity(), CameraController.Callbacks {
                     cfg.photoLook = 0
                     cfg.flat = false
                     cfgDirty = true
-                    applyLive()
-                    toast(if (cfg.mode == 0 && id != 0) "Preview only in video mode; recorded video is unchanged" else "${Look.FILTER_NAMES[id]} selected")
+                    // The recording EGL pipeline is created when Camera2 is configured.
+                    // Rebuild it whenever the selected video look changes so the encoder
+                    // receives the filtered renderer surface, not the raw recorder surface.
+                    if (cfg.mode == 0) streamChanged() else applyLive()
+                    toast("${Look.FILTER_NAMES[id]} selected")
                 }
             }
         }
@@ -1200,7 +1203,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
             choose("Filter intensity", (0..100 step 10).map { "$it%" }) {
                 cfg.filterIntensity = it * 10
                 cfgDirty = true
-                applyLive()
+                if (cfg.mode == 0) streamChanged() else applyLive()
             }
         })
     }
