@@ -1099,7 +1099,16 @@ class MainActivity : Activity(), CameraController.Callbacks {
         root.addView(editPanel, lp(WRAP, WRAP, Gravity.TOP or Gravity.CENTER_HORIZONTAL, 0, dp(70), 0, 0))
 
         audioMeter = AudioMeterView(this)
-        root.addView(audioMeter, lp(dp(6), dp(120), Gravity.START or Gravity.CENTER_VERTICAL, dp(1), 0, 0, 0))\n        // Landscape audio meter uses the supplied left-edge 15x300 reference position.\n        root.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->\n            if (!isPortrait() && audioMeter.parent === root) audioMeter.layoutParams = lp(canvasW(10), canvasH(300), Gravity.TOP or Gravity.START, canvasX(15), canvasY(300), 0, 0)\n        }
+        root.addView(audioMeter, lp(dp(6), dp(120), Gravity.START or Gravity.CENTER_VERTICAL, dp(1), 0, 0, 0))
+        // Landscape audio meter uses the supplied left-edge 15x300 reference position.
+        root.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+            if (!isPortrait() && audioMeter.parent === root) {
+                audioMeter.layoutParams = lp(
+                    canvasW(10), canvasH(300), Gravity.TOP or Gravity.START,
+                    canvasX(15), canvasY(300), 0, 0
+                )
+            }
+        }
         recEdge = EdgeLineView(this).apply {
             visibility = View.GONE
             isClickable = false
