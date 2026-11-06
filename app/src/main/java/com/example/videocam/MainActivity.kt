@@ -841,13 +841,13 @@ class MainActivity : Activity(), CameraController.Callbacks {
         }
         tRot = chip("") { toggleOrientation() }
         toolsCol = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        listOf(t2x, tPeak, tFalse, tTorch, tTimer, tRot).forEach {
-            it.maxLines = 1
-            if (it !== tTorch) it.textSize = 11f
-            it.setPadding(dp(4), dp(6), dp(4), dp(6))
-            toolsCol.addView(it, LinearLayout.LayoutParams(dp(70), WRAP).apply { setMargins(0, dp(3), 0, dp(3)) })
+        listOf(t2x, tPeak, tFalse, tTorch, tTimer, tRot).forEachIndexed { index, item ->
+            item.maxLines = 1
+            if (item !== tTorch) item.textSize = 11f
+            item.setPadding(dp(4), dp(6), dp(4), dp(6))
+            val key = listOf("tool2x", "toolPeak", "toolFalse", "toolTorch", "toolTimer", "toolRotate")[index]
+            drag(key, item, dp(70), WRAP, Gravity.START or Gravity.CENTER_VERTICAL, dp(8), dp(20 + index * 58), 0, 0)
         }
-        drag("tools", toolsCol, WRAP, WRAP, Gravity.START or Gravity.CENTER_VERTICAL, dp(8), dp(20), 0, 0)
 
         // ----- focus slider + focus tools (right) -----
         slider = VerticalSlider(this)
@@ -1219,7 +1219,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
     private fun applyOrientationLayout() {
         val p = isPortrait()
         if (p) {
-            setFrameLp("tools", WRAP, WRAP, Gravity.START or Gravity.CENTER_VERTICAL, dp(6), dp(20), 0, 0)
+            listOf("tool2x", "toolPeak", "toolFalse", "toolTorch", "toolTimer", "toolRotate").forEachIndexed { i, key -> setFrameLp(key, dp(70), WRAP, Gravity.START or Gravity.CENTER_VERTICAL, dp(6), dp(20 + i * 58), 0, 0) }
             setFrameLp("focusSlider", dp(56), MATCH, Gravity.END, 0, dp(110), dp(6), dp(260))
             setFrameLp("focusTools", WRAP, WRAP, Gravity.END or Gravity.TOP, 0, dp(110), dp(66), 0)
             setFrameLp("bottomStack", MATCH, WRAP, Gravity.START or Gravity.BOTTOM, 0, 0, 0, dp(100))
@@ -1227,7 +1227,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
             setFrameLp("thumb", dp(52), dp(52), Gravity.START or Gravity.BOTTOM, dp(20), 0, 0, dp(24))
             setFrameLp("mode", WRAP, WRAP, Gravity.END or Gravity.BOTTOM, 0, 0, dp(14), dp(32))
         } else {
-            setFrameLp("tools", WRAP, WRAP, Gravity.START or Gravity.CENTER_VERTICAL, dp(8), dp(20), 0, 0)
+            listOf("tool2x", "toolPeak", "toolFalse", "toolTorch", "toolTimer", "toolRotate").forEachIndexed { i, key -> setFrameLp(key, dp(70), WRAP, Gravity.START or Gravity.CENTER_VERTICAL, dp(8), dp(20 + i * 58), 0, 0) }
             setFrameLp("focusSlider", dp(56), MATCH, Gravity.END, 0, dp(56), dp(10), dp(14))
             setFrameLp("focusTools", WRAP, WRAP, Gravity.END or Gravity.TOP, 0, dp(56), dp(76), 0)
             setFrameLp("bottomStack", WRAP, WRAP, Gravity.START or Gravity.BOTTOM, dp(76), 0, 0, dp(8))
