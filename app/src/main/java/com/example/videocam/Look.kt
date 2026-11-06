@@ -169,8 +169,12 @@ object Look {
     val FILTER_NAMES = listOf(
         "Natural", "Black and White", "Kodak 2383", "Kodak 250D", "Kodak 500T",
         "Fuji Eterna", "Teal & Orange", "Bleach Bypass", "Vintage Fade", "Noir",
-        "Leica Colour", "Blue Cinematic", "Golden Hour", "Dream Glow",
-        "Halation", "Soft Diffusion", "Film Grain", "Anamorphic Flare", "Zeiss Colours"
+        "Leica Colour (inspired)", "Blue Cinematic", "Golden Hour", "Dream Glow",
+        "Halation", "Soft Diffusion", "Film Grain", "Anamorphic Flare", "Zeiss Colours (inspired)",
+        "Hasselblad Natural Colour (inspired)", "Hasselblad Portrait (inspired)", "Hasselblad Vivid (inspired)",
+        "Fujifilm Classic Chrome (inspired)", "Fujifilm Velvia (inspired)", "Fujifilm Astia (inspired)",
+        "Fujifilm Pro Neg (inspired)", "Fujifilm Nostalgic Neg (inspired)", "Sony S-Cinetone (inspired)",
+        "Panasonic Lumix Cinelike D (inspired)"
     )
 
     private fun filterMatrix(id: Int): ColorMatrix {
@@ -224,6 +228,16 @@ object Look {
                 -0.025f, 0.035f, 1.07f, 0f, 3f,
                 0f, 0f, 0f, 1f, 0f
             )) // Zeiss-inspired colour: restrained saturation, clean blues, natural reds
+            19 -> basic(1.02f, 1.01f, 2f, 1f, 2f) // Hasselblad Natural Colour
+            20 -> basic(0.92f, 0.98f, 5f, 2f, -3f) // Hasselblad Portrait
+            21 -> basic(1.18f, 1.06f, 3f, 2f, 5f) // Hasselblad Vivid
+            22 -> basic(0.75f, 1.04f, 5f, 3f, -2f) // Fujifilm Classic Chrome
+            23 -> basic(1.28f, 1.10f, 1f, 2f, 3f) // Fujifilm Velvia
+            24 -> basic(1.08f, 0.98f, 5f, 3f, -2f) // Fujifilm Astia
+            25 -> basic(0.82f, 0.95f, 2f, 3f, 4f) // Fujifilm Pro Neg
+            26 -> basic(1.03f, 0.97f, 8f, 4f, -6f) // Fujifilm Nostalgic Neg
+            27 -> basic(0.92f, 0.97f, 3f, 2f, 4f) // Sony S-Cinetone
+            28 -> basic(0.88f, 0.90f, 2f, 2f, 3f) // Panasonic Lumix Cinelike D
             else -> ColorMatrix()
         }
     }

@@ -30,8 +30,8 @@ object Squeeze {
 }
 
 object Ratios {
-    val NAMES = listOf("16:9", "2.39:1", "2.35:1", "21:9", "1.85:1", "2:1")
-    val VALUES = listOf(0f, 2.39f, 2.35f, 21f / 9f, 1.85f, 2f)
+    val NAMES = listOf("16:9", "2.39:1", "2.35:1", "21:9", "1.85:1", "2:1", "16:10")
+    val VALUES = listOf(0f, 2.39f, 2.35f, 21f / 9f, 1.85f, 2f, 16f / 10f)
 
     /** Height for a recording of this width in this shape, rounded to a multiple of 8 for the encoder. */
     fun heightFor(width: Int, idx: Int): Int {
@@ -49,7 +49,7 @@ data class Config(
     var bitrateMbps: Int = 50,
     var hevc: Boolean = false,       // false = H.264, true = H.265
     var nrOff: Boolean = true,
-    var stab: Int = 2,               // 0 = off, 1 = EIS, 2 = EIS + OIS
+    var stab: Int = 2,               // 0 = off, 2 = OIS + EIS where supported
     var flat: Boolean = false,
     var manualExposure: Boolean = false,
     var shutterDenom: Int = 50,      // shutter = 1/shutterDenom seconds
@@ -82,13 +82,13 @@ data class Config(
     var bw: Boolean = false,         // photo black and white, high contrast
     var blue: Boolean = false,        // cool blue cinematic photo filter
     var glow: Boolean = false,       // legacy setting migrated to filterId
-    var filterId: Int = 0,           // selected cinematic photo filter; 0 = Natural
-    var filterIntensity: Int = 100,  // selected filter strength, 0..100
+    var filterId: Int = 18,          // default Zeiss-inspired colour profile; 0 = Natural
+    var filterIntensity: Int = 30,   // selected filter strength, 0..100
     var photoLook: Int = 0,          // 0 natural, 1 golden hour, 2 dream glow
     var photoNr: Int = 1,            // photo noise reduction: 0 minimal, 1 standard, 2 high
     var lensKeys: Boolean = false,   // show the 0.5x / 1x / 2.7x shortcut buttons
     var haptics: Boolean = true,     // subtle shutter and manual slider feedback
-    var ver: Int = 0
+    var ver: Int = 2
 ) {
     fun copyFrom(o: Config) {
         cameraId = o.cameraId
@@ -202,7 +202,12 @@ data class Config(
                 o.optInt("photoLook", d.photoLook) == 2 -> 13
                 else -> 0
             }
-            val selectedFilter = o.optInt("filterId", legacyFilter).coerceIn(0, 17)
+            val storedFilter = o.optInt("filterId", legacyFilter)
+            val oldVersion = o.optInt("ver", 0)
+            // Upgrade only the old untouched Natural/100% default; preserve explicitly selected looks.
+            val migrateDefaultLook = oldVersion < 2 && storedFilter == 0 && o.optInt("filterIntensity", 100) == 100
+            val selectedFilter = if (migrateDefaultLook) 18 else storedFilter.coerceIn(0, 28)
+            val selectedIntensity = if (migrateDefaultLook) 30 else o.optInt("filterIntensity", d.filterIntensity).coerceIn(0, 100)
             return Config(
                 cameraId = o.optString("cameraId", d.cameraId),
                 width = o.optInt("width", d.width),
@@ -245,12 +250,12 @@ data class Config(
                 blue = false,
                 glow = false,
                 filterId = selectedFilter,
-                filterIntensity = o.optInt("filterIntensity", 100).coerceIn(0, 100),
+                filterIntensity = selectedIntensity,
                 photoLook = 0,
                 photoNr = o.optInt("photoNr", if (o.optBoolean("photoNrOff", false)) 0 else d.photoNr),
                 lensKeys = o.optBoolean("lensKeys", d.lensKeys),
                 haptics = o.optBoolean("haptics", d.haptics),
-                ver = maxOf(1, o.optInt("ver", d.ver))
+                ver = maxOf(2, o.optInt("ver", d.ver))
             )
         }
     }
