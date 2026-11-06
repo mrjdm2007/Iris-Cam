@@ -604,21 +604,16 @@ class MainActivity : Activity(), CameraController.Callbacks {
         }
         MaterialAlertDialogBuilder(this)
             .setTitle(if (photo) "PHOTO SETTINGS" else "VIDEO FORMAT")
-            .setView(box)
+            .setView(ScrollView(this).apply { addView(box) })
             .setNegativeButton("Close", null)
             .show()
     }
 
     private fun showLooksDialog() {
-        val groups = linkedMapOf(
+        val groups = listOf(
             "Natural" to listOf(0),
-            "Film Stocks" to listOf(2, 3, 4, 5),
-            "Cinema" to listOf(6, 7, 9),
-            "Vintage" to listOf(8),
-            "Leica & Colour" to listOf(10, 11, 12, 18),
-            "Dream" to listOf(13),
-            "Black & White" to listOf(1),
-            "Effects" to listOf(14, 15, 16, 17)
+            "Inspired" to listOf(18, 10, 12, 3, 4, 11),
+            "Cinematic" to listOf(2, 3, 4, 5, 6, 7, 8, 9, 13, 14, 15, 16, 17, 1)
         )
         val names = listOf(
             "Natural", "Black and White", "Kodak 2383", "Kodak 250D", "Kodak 500T",
@@ -626,25 +621,34 @@ class MainActivity : Activity(), CameraController.Callbacks {
             "Leica Colour (inspired)", "Blue Cinematic", "Golden Hour", "Dream Glow",
             "Halation", "Soft Diffusion", "Film Grain", "Anamorphic Flare", "Zeiss Colours (inspired)"
         )
-        MaterialAlertDialogBuilder(this)
-            .setTitle("LOOKS · CHOOSE A CATEGORY")
-            .setItems((groups.keys.toList() + "Intensity · ${cfg.filterIntensity}%").toTypedArray()) { _, which ->
-                if (which == groups.size) {
-                    choose("Look intensity", (0..100 step 10).map { "$it%" }) {
-                        cfg.filterIntensity = it * 10
+        val intensity = if (cfg.mode == 1) cfg.photoFilterIntensity else cfg.filterIntensity
+        val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(18), dp(8), dp(18), dp(8)) }
+        groups.forEach { (title, ids) ->
+            val current = ids.firstOrNull { it == cfg.filterId }?.let { names[it] } ?: "Choose a look"
+            box.addView(panelAction(title, current) {
+                choose(title, ids.map { (if (cfg.filterId == it) "✓ " else "") + names[it] }) { index -> applyLook(ids[index]) }
+            }, LinearLayout.LayoutParams(MATCH, WRAP).apply { setMargins(0, 0, 0, dp(8)) })
+        }
+        val label = TextView(this).apply { text = "INTENSITY · ${intensity}%"; setTextColor(0xFFF3F0E8.toInt()); textSize = 12f }
+        box.addView(label)
+        box.addView(SeekBar(this).apply {
+            max = 100
+            progress = intensity
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(seekBar: SeekBar?, value: Int, fromUser: Boolean) {
+                    label.text = "INTENSITY · ${value}%"
+                    if (fromUser) {
+                        if (cfg.mode == 1) cfg.photoFilterIntensity = value else cfg.filterIntensity = value
                         cfgDirty = true
                         if (cfg.mode == 0) streamChanged() else applyLive()
                     }
-                } else {
-                    val ids = groups.values.elementAt(which)
-                    choose(groups.keys.elementAt(which), ids.map { (if (cfg.filterId == it) "✓ " else "") + names[it] }) { selected ->
-                        applyLook(ids[selected])
-                    }
                 }
-            }
-            .show()
+                override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+                override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+            })
+        }, LinearLayout.LayoutParams(MATCH, WRAP))
+        MaterialAlertDialogBuilder(this).setTitle("LOOKS").setView(box).setNegativeButton("Done", null).show()
     }
-
     private fun applyLook(id: Int) {
         if (!idle()) return
         cfg.filterId = id
@@ -924,7 +928,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
             refreshUi()
         }
         zoomControlsChip = chip("ZOOM ▸") { toggleZoomControls() }
-        val presetValues = listOf(0.6f, 1f, 2f, 3f, 5f, 7f)
+        val presetValues = listOf(0.6f, 1f, 2f, 3f)
         zoomPresetChips = presetValues.map { value ->
             value to chip(fmtZoom(value)) {
                 cam.setZoom(value.coerceIn(cam.zoomRange.lower, cam.zoomHi()))
