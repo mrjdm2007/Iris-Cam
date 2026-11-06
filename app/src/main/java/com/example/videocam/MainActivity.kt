@@ -1367,7 +1367,9 @@ class MainActivity : Activity(), CameraController.Callbacks {
         frames.forEach {
             it.translationX = 0f
             it.translationY = 0f
+            it.setPanelSizePercent(50)
         }
+        selectedFrame?.let { selectFrameForResize(it) }
         applyOrientationLayout()
     }
 
@@ -1862,6 +1864,12 @@ class MainActivity : Activity(), CameraController.Callbacks {
 
     private fun pickPhotoRes() {
         if (!idle()) return
+        if (cfg.photoW > 0 && cfg.photoH > 0 &&
+            cfg.photoW.toLong() * cfg.photoH < 6_000_000L) {
+            cfg.photoW = 0
+            cfg.photoH = 0
+            streamChanged()
+        }
         val allSizes = cam.captureSizes()
         // Photo mode only offers capture sizes of at least 6 megapixels.
         val s = allSizes.filter { it.width.toLong() * it.height >= 6_000_000L }
