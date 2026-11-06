@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Iris Cam UI Test</string>
+    <string name="app_name">Iris Cam</string>
 
     <!-- App-wide Material 3 dark foundation. The camera view remains intentionally edge-to-edge. -->
     <style name="AppTheme" parent="Theme.Material3.Dark.NoActionBar">
