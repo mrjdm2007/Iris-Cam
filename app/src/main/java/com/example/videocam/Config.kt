@@ -133,6 +133,7 @@ data class Config(
         glow = o.glow
         filterId = o.filterId
         filterIntensity = o.filterIntensity
+        photoFilterIntensity = o.photoFilterIntensity
         photoLook = o.photoLook
         photoNr = o.photoNr
         lensKeys = o.lensKeys
@@ -183,6 +184,7 @@ data class Config(
         .put("glow", glow)
         .put("filterId", filterId)
         .put("filterIntensity", filterIntensity)
+        .put("photoFilterIntensity", photoFilterIntensity)
         .put("photoLook", photoLook)
         .put("photoNr", photoNr)
         .put("lensKeys", lensKeys)
@@ -207,7 +209,8 @@ data class Config(
             // Upgrade only the old untouched Natural/100% default; preserve explicitly selected looks.
             val migrateDefaultLook = oldVersion < 2 && storedFilter == 0 && o.optInt("filterIntensity", 100) == 100
             val selectedFilter = if (migrateDefaultLook) 18 else storedFilter.coerceIn(0, 28)
-            val selectedIntensity = if (migrateDefaultLook) 30 else o.optInt("filterIntensity", d.filterIntensity).coerceIn(0, 100)
+            val selectedIntensity = if (migrateDefaultLook) 25 else o.optInt("filterIntensity", d.filterIntensity).coerceIn(0, 100)
+            val selectedPhotoIntensity = o.optInt("photoFilterIntensity", d.photoFilterIntensity).coerceIn(0, 100)
             return Config(
                 cameraId = o.optString("cameraId", d.cameraId),
                 width = o.optInt("width", d.width),
@@ -251,6 +254,7 @@ data class Config(
                 glow = false,
                 filterId = selectedFilter,
                 filterIntensity = selectedIntensity,
+                photoFilterIntensity = selectedPhotoIntensity,
                 photoLook = 0,
                 photoNr = o.optInt("photoNr", if (o.optBoolean("photoNrOff", false)) 0 else d.photoNr),
                 lensKeys = o.optBoolean("lensKeys", d.lensKeys),
