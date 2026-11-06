@@ -602,7 +602,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
         meter = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply { max = 100 }
         formatChip = chip("") { popup(formatChip, if (cfg.mode == 1) photoItems() else videoItems()) }
         imageChip = chip("IMAGE \u25BE") { popup(imageChip, imageItems()) }
-        filtersChip = chip("FILTERS ▾") { popup(filtersChip, filterItems()) }
+        filtersChip = chip("LOOKS ▾") { popup(filtersChip, looksCategoryItems()) }
         gridChip = chip("GRID \u25BE") { popup(gridChip, gridItems()) }
         toolsChip = chip("TOOLS \u25BE") { popup(toolsChip, toolsItems()) }
         statusText = TextView(this).apply {
@@ -1123,6 +1123,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
         val mic = cam.mics().firstOrNull { it.id == cfg.micId }?.let { cam.micLabel(it) } ?: "Auto"
         return listOf(
             "Resolution: ${resLabel()}" to { pickRes() },
+            "Aspect ratio: ${Ratios.NAMES[cfg.ratio.coerceIn(0, Ratios.NAMES.lastIndex)]}" to { pickAspectRatio() },
             "Frame rate: ${cfg.fps} fps" to { pickFps() },
             "Bitrate: ${cfg.bitrateMbps} Mbps" to { pickBitrate() },
             "Codec: ${codecLabel()}" to { pickCodec() },
@@ -1158,51 +1159,69 @@ class MainActivity : Activity(), CameraController.Callbacks {
     private fun imageItems(): List<Pair<String, () -> Unit>> =
         if (cfg.mode == 1) photoImageItems() else videoImageItems()
 
-    /** Dedicated Filters category. Saved stills get the full effect; video mode is preview-only. */
-    private fun filterItems(): List<Pair<String, () -> Unit>> {
+    /** Looks menu keeps inspired color profiles separate from the existing cinematic/effect presets. */
+    private fun looksCategoryItems(): List<Pair<String, () -> Unit>> = listOf(
+        "Inspired  ›" to { popup(filtersChip, inspiredItems()) },
+        "Cinematic  ›" to { popup(filtersChip, filterItems()) }
+    )
+
+    private fun inspiredItems(): List<Pair<String, () -> Unit>> {
         val presets = listOf(
-            "Natural" to 0,
-            "Film Stocks · Kodak 2383" to 2,
-            "Film Stocks · Kodak 250D" to 3,
-            "Film Stocks · Kodak 500T" to 4,
-            "Film Stocks · Fuji Eterna" to 5,
-            "Cinema · Teal & Orange" to 6,
-            "Cinema · Bleach Bypass" to 7,
-            "Cinema · Noir" to 9,
-            "Vintage · Vintage Fade" to 8,
-            "Leica · Leica Colour (inspired)" to 10,
-            "Colour · Blue Cinematic" to 11,
-            "Colour · Golden Hour" to 12,
-            "Dream · Dream Glow" to 13,
-            "Effects · Black and White" to 1,
-            "Effects · Halation" to 14,
-            "Effects · Soft Diffusion" to 15,
-            "Effects · Film Grain" to 16,
-            "Effects · Anamorphic Flare" to 17,
-            "Colour · Zeiss Colours (inspired)" to 18
+            "Hasselblad · Natural Colour" to 19,
+            "Hasselblad · Portrait" to 20,
+            "Hasselblad · Vivid" to 21,
+            "Leica · Colour (inspired)" to 10,
+            "Fujifilm · Classic Chrome" to 22,
+            "Fujifilm · Velvia" to 23,
+            "Fujifilm · Astia" to 24,
+            "Fujifilm · Pro Neg" to 25,
+            "Fujifilm · Nostalgic Neg" to 26,
+            "Sony · S-Cinetone (inspired)" to 27,
+            "Panasonic Lumix · Cinelike D (inspired)" to 28,
+            "Zeiss · Colour (inspired)" to 18
         )
+        return presetItems(presets)
+    }
+
+    /** Existing cinematic looks and effects remain available under the Cinematic category. */
+    private fun filterItems(): List<Pair<String, () -> Unit>> = presetItems(listOf(
+        "Natural (Normal)" to 0,
+        "Film Stocks · Kodak 2383" to 2,
+        "Film Stocks · Kodak 250D" to 3,
+        "Film Stocks · Kodak 500T" to 4,
+        "Film Stocks · Fuji Eterna" to 5,
+        "Cinema · Bleach Bypass" to 7,
+        "Vintage · Vintage Fade" to 8,
+        "Cinema · Noir" to 9,
+        "Colour · Golden Hour" to 12,
+        "Dream · Dream Glow" to 13,
+        "Effects · Black and White" to 1,
+        "Effects · Film Grain" to 16
+    ))
+
+    private fun presetItems(presets: List<Pair<String, Int>>): List<Pair<String, () -> Unit>> {
         val items = presets.map { (label, id) ->
             val title = (if (cfg.filterId == id) "✓ " else "") + label
             title to {
                 if (idle()) {
                     cfg.filterId = id
+                    cfg.lookManuallySelected = true
                     cfg.bw = id == 1
                     cfg.blue = false
                     cfg.glow = false
                     cfg.photoLook = 0
                     cfg.flat = false
                     cfgDirty = true
-                    // The recording EGL pipeline is created when Camera2 is configured.
-                    // Rebuild it whenever the selected video look changes so the encoder
-                    // receives the filtered renderer surface, not the raw recorder surface.
+                    // Recreate the EGL recording pipeline so the encoder receives the graded surface.
                     if (cfg.mode == 0) streamChanged() else applyLive()
                     toast("${Look.FILTER_NAMES[id]} selected")
                 }
             }
         }
         return items + ("Intensity: ${cfg.filterIntensity}%" to {
-            choose("Filter intensity", (0..100 step 10).map { "$it%" }) {
+            choose("Look intensity", (0..100 step 10).map { "$it%" }) {
                 cfg.filterIntensity = it * 10
+                cfg.lookManuallySelected = true
                 cfgDirty = true
                 if (cfg.mode == 0) streamChanged() else applyLive()
             }
@@ -1499,29 +1518,36 @@ class MainActivity : Activity(), CameraController.Callbacks {
 
     private fun pickRes() {
         if (!idle()) return
-        val s = cam.sizes
-        if (s.isEmpty()) return
-        val items = ArrayList<Triple<Size, Int, String>>()
-        for (sz in s) {
-            val base = if (sz.height == 2160) "4K" else "${sz.height}p"
-            items.add(Triple(sz, 0, "$base 16:9  (${sz.width}\u00D7${sz.height})"))
-            if (sz.height >= 1080) {
-                for (r in 1 until Ratios.NAMES.size) {
-                    val h = minOf(Ratios.heightFor(sz.width, r), sz.height)
-                    items.add(Triple(sz, r, "$base ${Ratios.NAMES[r]}  (${sz.width}\u00D7$h)"))
+        val available = cam.sizes
+        if (available.isEmpty()) return
+        // Keep this menu focused on the familiar recording resolutions. Only show
+        // sizes actually advertised by the active camera.
+        val preferred = listOf(2160, 1440, 1080)
+        val choices = preferred.mapNotNull { h ->
+            available.firstOrNull { it.height == h }?.let { size ->
+                val label = when (h) {
+                    2160 -> "4K"
+                    else -> "${h}p"
                 }
+                size to "$label  (${size.width}\u00D7${size.height})"
             }
         }
-        choose("Resolution", items.map { it.third }) {
-            val (sz, r, _) = items[it]
-            cfg.width = sz.width
-            cfg.height = sz.height
-            cfg.ratio = r
-            if (r > 0 && cfg.fps > 60) {
+        if (choices.isEmpty()) return
+        choose("Resolution", choices.map { it.second }) {
+            val size = choices[it].first
+            cfg.width = size.width
+            cfg.height = size.height
+            streamChanged()
+        }
+    }
+
+    private fun pickAspectRatio() {
+        if (!idle()) return
+        choose("Aspect ratio", Ratios.NAMES) {
+            cfg.ratio = it
+            if (it > 0 && cfg.fps > 60) {
                 cfg.fps = 30
-                toast("Cinematic shapes record up to 60 fps, switched to 30 fps")
-            } else if (r > 0 && isPortrait()) {
-                toast("Cinematic shapes are used in landscape")
+                toast("Cinematic aspect ratios record up to 60 fps; switched to 30 fps")
             }
             streamChanged()
         }
@@ -1548,6 +1574,17 @@ class MainActivity : Activity(), CameraController.Callbacks {
         if (!idle()) return
         cancelCountdown()
         cfg.mode = 1 - cfg.mode
+        // Apply the photo-mode default until the user explicitly chooses a look.
+        // Normal/0 remains a valid user choice and is preserved across mode changes.
+        if (!cfg.lookManuallySelected) {
+            cfg.filterId = if (cfg.mode == 1) 19 else 0
+            cfg.filterIntensity = 40
+            cfg.bw = false
+            cfg.blue = false
+            cfg.glow = false
+            cfg.photoLook = 0
+            cfg.flat = false
+        }
         store.save("last", cfg)
         updateOrientationMode()
         updateAudioTap()

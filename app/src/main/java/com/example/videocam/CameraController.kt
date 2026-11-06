@@ -396,7 +396,12 @@ class CameraController(
         val ranges = chars.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES)
             ?: emptyArray()
         val l = mutableListOf<Int>()
-        for (f in listOf(24, 25, 30, 60)) if (ranges.any { it.upper == f }) l.add(f)
+        // Offer 60 fps only on the primary rear camera (ID 0) and the selfie camera.
+        // Auxiliary wide/tele lenses and the all-lenses logical switch stay at 30 fps max.
+        val allow60 = cfg.cameraId == "0" || isFrontCamera(cfg.cameraId)
+        for (f in listOf(24, 25, 30, 60)) {
+            if ((f != 60 || allow60) && ranges.any { it.upper == f }) l.add(f)
+        }
         val hs = m.highSpeedVideoSizes
         if (hs != null && hs.contains(size)) {
             for (r in m.getHighSpeedVideoFpsRangesFor(size)) {

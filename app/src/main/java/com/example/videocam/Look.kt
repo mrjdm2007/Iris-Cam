@@ -170,7 +170,12 @@ object Look {
         "Natural", "Black and White", "Kodak 2383", "Kodak 250D", "Kodak 500T",
         "Fuji Eterna", "Teal & Orange", "Bleach Bypass", "Vintage Fade", "Noir",
         "Leica Colour", "Blue Cinematic", "Golden Hour", "Dream Glow",
-        "Halation", "Soft Diffusion", "Film Grain", "Anamorphic Flare", "Zeiss Colours"
+        "Halation", "Soft Diffusion", "Film Grain", "Anamorphic Flare", "Zeiss Colours",
+        "Hasselblad Natural Colour (inspired)", "Hasselblad Portrait (inspired)",
+        "Hasselblad Vivid (inspired)", "Fujifilm Classic Chrome (inspired)",
+        "Fujifilm Velvia (inspired)", "Fujifilm Astia (inspired)",
+        "Fujifilm Pro Neg (inspired)", "Fujifilm Nostalgic Neg (inspired)",
+        "Sony S-Cinetone (inspired)", "Panasonic Lumix Cinelike D (inspired)"
     )
 
     private fun filterMatrix(id: Int): ColorMatrix {
@@ -224,6 +229,16 @@ object Look {
                 -0.025f, 0.035f, 1.07f, 0f, 3f,
                 0f, 0f, 0f, 1f, 0f
             )) // Zeiss-inspired colour: restrained saturation, clean blues, natural reds
+            19 -> basic(1.02f, 1.00f, 2f, 1f, 0f) // Hasselblad-inspired natural, restrained colour
+            20 -> basic(0.96f, 0.98f, 4f, 2f, 1f) // soft portrait tonality
+            21 -> basic(1.16f, 1.06f, 3f, 1f, -2f) // controlled vivid colour
+            22 -> basic(0.78f, 0.92f, 4f, 3f, 5f) // muted Classic Chrome-like palette
+            23 -> basic(1.28f, 1.12f, 2f, 0f, -3f) // Velvia-inspired saturation
+            24 -> basic(1.02f, 0.96f, 5f, 3f, 2f) // gentle Astia-like softness
+            25 -> basic(0.90f, 0.94f, 2f, 2f, 3f) // subdued Pro Neg-like colour
+            26 -> basic(1.04f, 0.98f, 10f, 6f, -1f) // warm nostalgic negative-inspired grade
+            27 -> basic(0.94f, 0.98f, 4f, 2f, 1f) // S-Cinetone-inspired gentle contrast and natural color
+            28 -> basic(0.82f, 0.90f, 1f, 3f, 4f) // Cinelike D-inspired flatter, muted palette
             else -> ColorMatrix()
         }
     }

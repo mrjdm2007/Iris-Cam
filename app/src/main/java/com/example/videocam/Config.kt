@@ -82,8 +82,9 @@ data class Config(
     var bw: Boolean = false,         // photo black and white, high contrast
     var blue: Boolean = false,        // cool blue cinematic photo filter
     var glow: Boolean = false,       // legacy setting migrated to filterId
-    var filterId: Int = 0,           // selected cinematic photo filter; 0 = Natural
-    var filterIntensity: Int = 100,  // selected filter strength, 0..100
+    var filterId: Int = 0,           // selected look; 0 = Natural/Normal
+    var filterIntensity: Int = 40,   // default look strength, 0..100
+    var lookManuallySelected: Boolean = false, // preserve user's chosen look instead of photo-mode default
     var photoLook: Int = 0,          // 0 natural, 1 golden hour, 2 dream glow
     var photoNr: Int = 1,            // photo noise reduction: 0 minimal, 1 standard, 2 high
     var lensKeys: Boolean = false,   // show the 0.5x / 1x / 2.7x shortcut buttons
@@ -134,6 +135,7 @@ data class Config(
         glow = o.glow
         filterId = o.filterId
         filterIntensity = o.filterIntensity
+        lookManuallySelected = o.lookManuallySelected
         photoLook = o.photoLook
         photoNr = o.photoNr
         lensKeys = o.lensKeys
@@ -185,6 +187,7 @@ data class Config(
         .put("glow", glow)
         .put("filterId", filterId)
         .put("filterIntensity", filterIntensity)
+        .put("lookManuallySelected", lookManuallySelected)
         .put("photoLook", photoLook)
         .put("photoNr", photoNr)
         .put("lensKeys", lensKeys)
@@ -205,7 +208,7 @@ data class Config(
                 o.optInt("photoLook", d.photoLook) == 2 -> 13
                 else -> 0
             }
-            val selectedFilter = o.optInt("filterId", legacyFilter).coerceIn(0, 17)
+            val selectedFilter = o.optInt("filterId", legacyFilter).coerceIn(0, 28)
             return Config(
                 cameraId = o.optString("cameraId", d.cameraId),
                 width = o.optInt("width", d.width),
@@ -248,7 +251,8 @@ data class Config(
                 blue = false,
                 glow = false,
                 filterId = selectedFilter,
-                filterIntensity = o.optInt("filterIntensity", 100).coerceIn(0, 100),
+                filterIntensity = o.optInt("filterIntensity", 40).coerceIn(0, 100),
+                lookManuallySelected = o.optBoolean("lookManuallySelected", false),
                 photoLook = 0,
                 photoNr = o.optInt("photoNr", if (o.optBoolean("photoNrOff", false)) 0 else d.photoNr),
                 lensKeys = o.optBoolean("lensKeys", d.lensKeys),
