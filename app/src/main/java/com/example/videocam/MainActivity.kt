@@ -77,7 +77,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
     private companion object {
         const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
         const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
-        val AMBER = 0xFFFFB300.toInt()
+        val AMBER = 0xFFD0BCFF.toInt()
         val GREY = 0xFF9E9E9E.toInt()
         val RED = 0xFFFF5252.toInt()
         val BITRATES = listOf(20, 35, 50, 80, 100, 150, 200)
@@ -428,21 +428,21 @@ class MainActivity : Activity(), CameraController.Callbacks {
     }
 
     /** Material 3 surface with native Android ripple feedback. */
-    private fun materialSurface(color: Int, radiusDp: Int, stroke: Int? = null, ripple: Int = 0x33FFB300): RippleDrawable {
+    private fun materialSurface(color: Int, radiusDp: Int, stroke: Int? = null, ripple: Int = 0x33D0BCFF): RippleDrawable {
         val shape = roundBg(color, radiusDp, stroke)
         return RippleDrawable(ColorStateList.valueOf(ripple), shape, null)
     }
 
     private fun chipBg(active: Boolean) = materialSurface(
-        if (active) 0xFFFFB300.toInt() else 0xFF292C32.toInt(),
+        if (active) 0xFFD0BCFF.toInt() else 0xFF2A2830.toInt(),
         18,
-        if (active) 0xFFFFB300.toInt() else 0xFF494D55.toInt(),
-        if (active) 0x33FFFFFF else 0x33FFB300
+        if (active) 0xFFD0BCFF.toInt() else 0xFF49454F.toInt(),
+        if (active) 0x33FFFFFF else 0x33D0BCFF
     )
 
     private fun setActive(t: TextView, on: Boolean) {
         t.background = chipBg(on)
-        t.setTextColor(if (on) 0xFF211A08.toInt() else 0xFFF3F0E8.toInt())
+        t.setTextColor(if (on) 0xFF381E72.toInt() else 0xFFF3F0E8.toInt())
         t.elevation = dp(if (on) 2 else 0).toFloat()
     }
 
@@ -485,7 +485,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
             gravity = Gravity.CENTER
             setPadding(dp(10), dp(5), dp(10), dp(5))
             setMinimumHeight(dp(48))
-            background = materialSurface(0xFF202329.toInt(), 14, 0xFF3A3E46.toInt())
+            background = materialSurface(0xFF211F26.toInt(), 14, 0xFF49454F.toInt())
             elevation = dp(1).toFloat()
             isClickable = true
             isFocusable = true
@@ -514,7 +514,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
         val s = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            background = materialSurface(0xE61C1F25.toInt(), 20, 0x553F444D)
+            background = materialSurface(0xE6211F26.toInt(), 20, 0x5549454F)
             elevation = dp(3).toFloat()
             setPadding(dp(8), dp(5), dp(8), dp(5))
         }
@@ -579,7 +579,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
             textSize = 13f
             setTextColor(0xFFF3F0E8.toInt())
             setPadding(dp(14), dp(11), dp(14), dp(11))
-            background = materialSurface(0xFF242830.toInt(), 14, 0x55494D55)
+            background = materialSurface(0xFF29262F.toInt(), 14, 0x5549454F)
             isClickable = true
             isFocusable = true
             setOnClickListener { onClick() }
@@ -769,7 +769,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
             setTextColor(0xFFF3F0E8.toInt())
             textSize = 10f
             setPadding(dp(12), dp(8), dp(12), dp(8))
-            background = materialSurface(0xE61C1F25.toInt(), 14, 0x66494D55)
+            background = materialSurface(0xE6211F26.toInt(), 14, 0x66494D55)
             elevation = dp(3).toFloat()
             visibility = View.GONE
         }
@@ -798,9 +798,9 @@ class MainActivity : Activity(), CameraController.Callbacks {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             background = GradientDrawable().apply {
-                setColor(0xD91B1E24.toInt())
+                setColor(0xD91D1B20.toInt())
                 cornerRadii = floatArrayOf(0f, 0f, 0f, 0f, dp(22).toFloat(), dp(22).toFloat(), dp(22).toFloat(), dp(22).toFloat())
-                setStroke(dp(1), 0x55494D55)
+                setStroke(dp(1), 0x5549454F)
             }
             elevation = dp(4).toFloat()
             setPadding(dp(12), dp(6), dp(12), dp(10))
@@ -980,7 +980,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
             textSize = 11f
             typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
             setPadding(dp(12), dp(7), dp(12), dp(7))
-            background = materialSurface(0xE61C1F25.toInt(), 14, 0x55494D55)
+            background = materialSurface(0xE6211F26.toInt(), 14, 0x5549454F)
             gravity = Gravity.CENTER_VERTICAL
         }
         val readouts = LinearLayout(this).apply {
@@ -1006,7 +1006,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
             addView(sharedRackTime, LinearLayout.LayoutParams(dp(38), dp(34)).apply { setMargins(dp(2), dp(2), dp(2), dp(2)) })
         }
         rackPanel = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER
-            background = materialSurface(0xE61C1F25.toInt(), 12, 0x55494D55); elevation = dp(3).toFloat()
+            background = materialSurface(0xE6211F26.toInt(), 12, 0x5549454F); elevation = dp(3).toFloat()
             addView(rackTargetLabel, LinearLayout.LayoutParams(MATCH, dp(22))); addView(rackRow1); addView(rackRow2)
         }
         drag("rackPanel", rackPanel, dp(92), dp(104), Gravity.END or Gravity.BOTTOM, 0, 0, dp(240), dp(8))
@@ -1150,7 +1150,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
                 shape = GradientDrawable.OVAL
                 val saving = ::cam.isInitialized && (cam.busy || cam.jobs > 0 || longLeft >= 0)
                 setColor(if (saving) 0xFF9E9E9E.toInt() else Color.WHITE)
-                setStroke(dp(4), if (saving) 0xFFFFB300.toInt() else 0xFF424242.toInt())
+                setStroke(dp(4), if (saving) 0xFFD0BCFF.toInt() else 0xFF424242.toInt())
             }
             return
         }
@@ -1290,10 +1290,12 @@ class MainActivity : Activity(), CameraController.Callbacks {
             listOf("tool2x", "toolPeak", "toolFalse", "toolTorch", "toolTimer", "toolRotate").forEachIndexed { i, key -> setFrameLp(key, dp(70), WRAP, Gravity.START or Gravity.CENTER_VERTICAL, dp(6), dp(20 + i * 58), 0, 0) }
             setFrameLp("focusSlider", dp(56), MATCH, Gravity.END, 0, dp(110), dp(6), dp(260))
             setFrameLp("focusTools", WRAP, WRAP, Gravity.END or Gravity.TOP, 0, dp(110), dp(66), 0)
-            setFrameLp("readouts", WRAP, WRAP, Gravity.START or Gravity.BOTTOM, dp(70), 0, 0, dp(164))
-setFrameLp("zoomPanel", WRAP, WRAP, Gravity.START or Gravity.BOTTOM, dp(70), 0, 0, dp(106))
-setFrameLp("exposurePanel", WRAP, WRAP, Gravity.START or Gravity.BOTTOM, dp(70), 0, 0, dp(48))
-setFrameLp("rackPanel", dp(92), dp(104), Gravity.END or Gravity.BOTTOM, 0, 0, dp(74), dp(112))
+            // A deliberate bottom dock: each control gets its own lane with enough
+            // vertical breathing room for its actual measured height.
+            setFrameLp("readouts", WRAP, WRAP, Gravity.START or Gravity.BOTTOM, dp(70), 0, 0, dp(235))
+            setFrameLp("zoomPanel", WRAP, WRAP, Gravity.START or Gravity.BOTTOM, dp(70), 0, 0, dp(160))
+            setFrameLp("exposurePanel", WRAP, WRAP, Gravity.START or Gravity.BOTTOM, dp(70), 0, 0, dp(85))
+            setFrameLp("rackPanel", dp(92), dp(104), Gravity.END or Gravity.BOTTOM, 0, 0, dp(74), dp(150))
             setFrameLp("rec", dp(64), dp(64), Gravity.CENTER_HORIZONTAL or Gravity.BOTTOM, 0, 0, 0, dp(18))
             setFrameLp("thumb", dp(52), dp(52), Gravity.START or Gravity.BOTTOM, dp(20), 0, 0, dp(24))
             setFrameLp("mode", WRAP, WRAP, Gravity.END or Gravity.BOTTOM, 0, 0, dp(14), dp(32))
@@ -1301,10 +1303,11 @@ setFrameLp("rackPanel", dp(92), dp(104), Gravity.END or Gravity.BOTTOM, 0, 0, dp
             listOf("tool2x", "toolPeak", "toolFalse", "toolTorch", "toolTimer", "toolRotate").forEachIndexed { i, key -> setFrameLp(key, dp(70), WRAP, Gravity.START or Gravity.CENTER_VERTICAL, dp(8), dp(20 + i * 58), 0, 0) }
             setFrameLp("focusSlider", dp(56), MATCH, Gravity.END, 0, dp(56), dp(10), dp(14))
             setFrameLp("focusTools", WRAP, WRAP, Gravity.END or Gravity.TOP, 0, dp(56), dp(76), 0)
-            setFrameLp("readouts", WRAP, WRAP, Gravity.START or Gravity.BOTTOM, dp(76), 0, 0, dp(132))
-setFrameLp("zoomPanel", WRAP, WRAP, Gravity.START or Gravity.BOTTOM, dp(76), 0, 0, dp(78))
-setFrameLp("exposurePanel", WRAP, WRAP, Gravity.START or Gravity.BOTTOM, dp(76), 0, 0, dp(8))
-setFrameLp("rackPanel", dp(92), dp(104), Gravity.END or Gravity.BOTTOM, 0, 0, dp(240), dp(8))
+            // Keep the three bottom control groups in separate, non-overlapping lanes.
+            setFrameLp("readouts", WRAP, WRAP, Gravity.START or Gravity.BOTTOM, dp(76), 0, 0, dp(190))
+            setFrameLp("zoomPanel", WRAP, WRAP, Gravity.START or Gravity.BOTTOM, dp(76), 0, 0, dp(125))
+            setFrameLp("exposurePanel", WRAP, WRAP, Gravity.START or Gravity.BOTTOM, dp(76), 0, 0, dp(60))
+            setFrameLp("rackPanel", dp(92), dp(104), Gravity.END or Gravity.BOTTOM, 0, 0, dp(240), dp(60))
             setFrameLp("rec", dp(64), dp(64), Gravity.END or Gravity.BOTTOM, 0, 0, dp(88), dp(16))
             setFrameLp("thumb", dp(52), dp(52), Gravity.END or Gravity.BOTTOM, 0, 0, dp(166), dp(22))
             setFrameLp("mode", WRAP, WRAP, Gravity.END or Gravity.BOTTOM, 0, 0, dp(70), dp(88))
@@ -1385,9 +1388,15 @@ setFrameLp("rackPanel", dp(92), dp(104), Gravity.END or Gravity.BOTTOM, 0, 0, dp
     }
 
     private fun applyPositions() {
+        // The previous layout schema stored overlapping panel coordinates. Rebase those
+        // coordinates once so the new Material control dock starts from a clean layout.
+        val prefs = layoutPrefs()
+        if (prefs.getInt("layout_schema", 0) < 2) {
+            prefs.edit().clear().putInt("layout_schema", 2).apply()
+        }
         frames.forEach { f ->
-            f.setPanelSizePercent(layoutPrefs().getInt("size_${f.key}", 50))
-            val p = layoutPrefs().getString(f.key, null)?.split(",") ?: return@forEach
+            f.setPanelSizePercent(prefs.getInt("size_${f.key}", 50))
+            val p = prefs.getString(f.key, null)?.split(",") ?: return@forEach
             if (p.size == 2) {
                 val fx = p[0].toFloatOrNull()
                 val fy = p[1].toFloatOrNull()
