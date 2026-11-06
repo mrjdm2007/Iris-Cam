@@ -1538,7 +1538,7 @@ class CameraController(
             val sh = Shot(
                 cfg.cameraId, fmt, chars, needRotation(), cfg.photoQuality, reqs.size,
                 cfg.bw, cfg.flat && !cfg.bw, cfg.photoLook, false, cfg.upscale, cfg.glow, cfg.blue,
-                cfg.filterId, cfg.filterIntensity
+                cfg.filterId, cfg.photoFilterIntensity
             )
             synchronized(lock) { shot = sh }
             if (plan != null && plan.expNs * reqs.size >= 1_500_000_000L) {
@@ -2075,14 +2075,28 @@ class CameraController(
     // ---------- recording ----------
 
     fun startRecording() {
-        if (recording || session == null) return
+        if (recording) return
+        if (session == null) {
+            ui.onMessage("Camera is still preparing the video session. Try again in a moment.")
+            return
+        }
+        val activeRecorder = recorder
+        if (activeRecorder == null) {
+            ui.onMessage("Video recorder isn't ready. Rebuilding the recording session.")
+            configureAndStart()
+            return
+        }
         try {
-            recorder?.start()
+            activeRecorder.start()
             crop?.active = true
             recording = true
             ui.onRecording(true)
         } catch (e: Exception) {
+            recording = false
+            crop?.active = false
+            ui.onRecording(false)
             ui.onMessage("Couldn't start recording: ${e.message}")
+            releaseRecorder()
             configureAndStart()
         }
     }
