@@ -118,6 +118,9 @@ class MainActivity : Activity(), CameraController.Callbacks {
     private lateinit var thumb: ImageView
     private lateinit var focusMark: View
     private lateinit var editPanel: LinearLayout
+    private lateinit var panelSizeLabel: TextView
+    private lateinit var panelSizeSlider: SeekBar
+    private var selectedFrame: DragFrame? = null
     private lateinit var toolsCol: LinearLayout
     private lateinit var modeChip: TextView
     private lateinit var zA: TextView
@@ -530,6 +533,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
         l: Int = 0, t: Int = 0, r: Int = 0, b: Int = 0
     ): DragFrame {
         val f = DragFrame(this, key)
+        f.onSelected = { selectFrameForResize(f) }
         f.addView(
             child,
             FrameLayout.LayoutParams(if (w == WRAP) WRAP else MATCH, if (h == WRAP) WRAP else MATCH)
@@ -1017,12 +1021,44 @@ class MainActivity : Activity(), CameraController.Callbacks {
         val done = chip("Done") { setEditing(false) }
         val mirror = chip("Mirror left/right") { mirrorLayout() }
         val reset = chip("Reset") { resetLayout() }
-        editPanel = LinearLayout(this).apply {
+        val editActions = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            visibility = View.GONE
             listOf(done, mirror, reset).forEach {
                 addView(it, LinearLayout.LayoutParams(WRAP, WRAP).apply { setMargins(dp(4), 0, dp(4), 0) })
             }
+        }
+        panelSizeLabel = TextView(this).apply {
+            text = "PANEL SIZE · 50%"
+            setTextColor(0xFFF3F0E8.toInt())
+            textSize = 11f
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(8), 0, dp(8), 0)
+        }
+        panelSizeSlider = SeekBar(this).apply {
+            max = 75
+            progress = 25 // 25..100 maps to 0.5x..2.0x; 50% is the original size.
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                    val percent = progress + 25
+                    panelSizeLabel.text = "PANEL SIZE · ${percent}%"
+                    if (fromUser) selectedFrame?.setPanelSizePercent(percent)
+                }
+                override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+                override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+            })
+        }
+        val sizeRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(panelSizeLabel, LinearLayout.LayoutParams(WRAP, WRAP))
+            addView(panelSizeSlider, LinearLayout.LayoutParams(dp(150), WRAP))
+        }
+        editPanel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            visibility = View.GONE
+            addView(editActions, LinearLayout.LayoutParams(WRAP, WRAP))
+            addView(sizeRow, LinearLayout.LayoutParams(WRAP, WRAP))
         }
         root.addView(editPanel, lp(WRAP, WRAP, Gravity.TOP or Gravity.CENTER_HORIZONTAL, 0, dp(70), 0, 0))
 
@@ -1278,19 +1314,37 @@ class MainActivity : Activity(), CameraController.Callbacks {
 
     private fun setEditing(on: Boolean) {
         editing = on
+        if (!on) {
+            selectedFrame?.isSelectedForResize = false
+            selectedFrame = null
+            savePositions()
+        }
         frames.forEach { it.editing = on }
         editPanel.visibility = if (on) View.VISIBLE else View.GONE
-        if (on) toast("Drag any control. Tap Done when finished.") else savePositions()
+        if (on) toast("Drag a panel to move it, tap it to select, then adjust its size.") 
+    }
+
+    private fun selectFrameForResize(frame: DragFrame) {
+        selectedFrame?.isSelectedForResize = false
+        selectedFrame = frame
+        frame.isSelectedForResize = true
+        val percent = layoutPrefs().getInt("size_${frame.key}", 50).coerceIn(25, 100)
+        panelSizeSlider.progress = percent - 25
+        panelSizeLabel.text = "PANEL SIZE · ${percent}%"
     }
 
     private fun savePositions() {
         val ed = layoutPrefs().edit()
-        frames.forEach { ed.putString(it.key, "${it.x / root.width},${it.y / root.height}") }
+        frames.forEach {
+            ed.putString(it.key, "${it.x / root.width},${it.y / root.height}")
+            ed.putInt("size_${it.key}", it.panelSizePercent)
+        }
         ed.apply()
     }
 
     private fun applyPositions() {
         frames.forEach { f ->
+            f.setPanelSizePercent(layoutPrefs().getInt("size_${f.key}", 50))
             val p = layoutPrefs().getString(f.key, null)?.split(",") ?: return@forEach
             if (p.size == 2) {
                 val fx = p[0].toFloatOrNull()
@@ -1808,13 +1862,22 @@ class MainActivity : Activity(), CameraController.Callbacks {
 
     private fun pickPhotoRes() {
         if (!idle()) return
-        val s = cam.captureSizes()
-        if (s.size < 2) {
-            toast(if (cam.effMode() == 1) "RAW uses one fixed size" else "Only one size on this lens")
+        val allSizes = cam.captureSizes()
+        // Photo mode only offers capture sizes of at least 6 megapixels.
+        val s = allSizes.filter { it.width.toLong() * it.height >= 6_000_000L }
+        if (s.isEmpty()) {
+            toast("This lens does not report a photo size of 6 MP or higher")
+            return
+        }
+        if (s.size == 1) {
+            cfg.photoW = s[0].width
+            cfg.photoH = s[0].height
+            streamChanged()
+            toast("Only one photo size of 6 MP or higher is available")
             return
         }
         choose(
-            "Photo size",
+            "Photo size · 6 MP minimum",
             s.map {
                 val big = it.width.toLong() * it.height > cam.lensSafeArea
                 "%.1f MP  (%d\u00D7%d)%s".format(it.width * it.height / 1e6, it.width, it.height, if (big) "  \u00B7 main lens only" else "")
