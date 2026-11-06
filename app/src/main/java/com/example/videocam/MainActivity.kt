@@ -811,12 +811,12 @@ class MainActivity : Activity(), CameraController.Callbacks {
         top.addView(chipRow, LinearLayout.LayoutParams(0, WRAP, 1f))
         top.addView(statusText, LinearLayout.LayoutParams(WRAP, WRAP).apply { setMargins(dp(8), 0, 0, 0) })
         topBar = top
-        root.addView(top, lp(MATCH, canvasH(90), Gravity.TOP))
+        root.addView(top, lp(MATCH, WRAP, Gravity.TOP))
         topRow2 = FrameLayout(this).apply {
             visibility = View.GONE
             setPadding(dp(8), 0, dp(8), 0)
         }
-        root.addView(topRow2, lp(MATCH, WRAP, Gravity.TOP, 0, canvasY(90), 0, 0))
+        root.addView(topRow2, lp(MATCH, WRAP, Gravity.TOP, 0, dp(44), 0, 0))
 
         warn = TextView(this).apply {
             setTextColor(RED)
@@ -857,11 +857,11 @@ class MainActivity : Activity(), CameraController.Callbacks {
         }
         tRot = chip("") { toggleOrientation() }
         toolsCol = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        listOf(tTimer, tRot, t2x, tPeak, tFalse, tTorch).forEachIndexed { index, item ->
+        listOf(t2x, tPeak, tFalse, tTorch, tTimer, tRot).forEachIndexed { index, item ->
             item.maxLines = 1
             if (item !== tTorch) item.textSize = 11f
             item.setPadding(dp(4), dp(6), dp(4), dp(6))
-            val key = listOf("toolTimer", "toolRotate", "tool2x", "toolPeak", "toolFalse", "toolTorch")[index]
+            val key = listOf("tool2x", "toolPeak", "toolFalse", "toolTorch", "toolTimer", "toolRotate")[index]
             drag(key, item, dp(70), WRAP, Gravity.START or Gravity.CENTER_VERTICAL, dp(8), dp(20 + index * 58), 0, 0)
         }
 
@@ -1100,15 +1100,6 @@ class MainActivity : Activity(), CameraController.Callbacks {
 
         audioMeter = AudioMeterView(this)
         root.addView(audioMeter, lp(dp(6), dp(120), Gravity.START or Gravity.CENTER_VERTICAL, dp(1), 0, 0, 0))
-        // Landscape audio meter uses the supplied left-edge 15x300 reference position.
-        root.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
-            if (!isPortrait() && audioMeter.parent === root) {
-                audioMeter.layoutParams = lp(
-                    canvasW(10), canvasH(300), Gravity.TOP or Gravity.START,
-                    canvasX(15), canvasY(300), 0, 0
-                )
-            }
-        }
         recEdge = EdgeLineView(this).apply {
             visibility = View.GONE
             isClickable = false
@@ -1285,18 +1276,6 @@ class MainActivity : Activity(), CameraController.Callbacks {
         root.requestLayout()
     }
 
-    // Reference-layout helpers: the supplied design is authored on a 2400x1080
-    // landscape canvas and scales proportionally to the actual view dimensions.
-    private fun canvasX(v: Int) = (v * root.width / 2400f).roundToInt()
-    private fun canvasY(v: Int) = (v * root.height / 1080f).roundToInt()
-    private fun canvasW(v: Int) = canvasX(v).coerceAtLeast(1)
-    private fun canvasH(v: Int) = canvasY(v).coerceAtLeast(1)
-
-    private fun setCanvasFrame(key: String, x: Int, y: Int, w: Int, h: Int) {
-        setFrameLp(key, canvasW(w), canvasH(h), Gravity.TOP or Gravity.START,
-            canvasX(x), canvasY(y), 0, 0)
-    }
-
     private fun setFrameLp(key: String, w: Int, h: Int, g: Int, l: Int, t: Int, r: Int, b: Int) {
         val f = frames.firstOrNull { it.key == key } ?: return
         f.translationX = 0f
@@ -1321,23 +1300,17 @@ class MainActivity : Activity(), CameraController.Callbacks {
             setFrameLp("thumb", dp(52), dp(52), Gravity.START or Gravity.BOTTOM, dp(20), 0, 0, dp(24))
             setFrameLp("mode", WRAP, WRAP, Gravity.END or Gravity.BOTTOM, 0, 0, dp(14), dp(32))
         } else {
-            // Landscape reference canvas: 2400x1080. Every position and size below
-            // maps proportionally to the live preview window, not device dp.
-            setCanvasFrame("toolTimer", 40, 180, 90, 50)
-            setCanvasFrame("toolRotate", 40, 245, 90, 50)
-            setCanvasFrame("tool2x", 40, 310, 90, 50)
-            setCanvasFrame("toolPeak", 40, 375, 90, 50)
-            setCanvasFrame("toolFalse", 40, 440, 90, 50)
-            setCanvasFrame("toolTorch", 40, 505, 90, 50)
-            setCanvasFrame("focusSlider", 2320, 170, 60, 780)
-            setCanvasFrame("focusTools", 2050, 110, 100, 250)
-            setCanvasFrame("readouts", 980, 460, 520, 100)
-            setCanvasFrame("zoomPanel", 140, 710, 370, 60)
-            setCanvasFrame("exposurePanel", 60, 820, 370, 60)
-            setCanvasFrame("rackPanel", 1850, 530, 140, 150)
-            setCanvasFrame("rec", 1530, 780, 130, 130)
-            setCanvasFrame("thumb", 1720, 840, 70, 70)
-            setCanvasFrame("mode", 1240, 890, 160, 50)
+            listOf("tool2x", "toolPeak", "toolFalse", "toolTorch", "toolTimer", "toolRotate").forEachIndexed { i, key -> setFrameLp(key, dp(70), WRAP, Gravity.START or Gravity.CENTER_VERTICAL, dp(8), dp(20 + i * 58), 0, 0) }
+            setFrameLp("focusSlider", dp(56), MATCH, Gravity.END, 0, dp(56), dp(10), dp(14))
+            setFrameLp("focusTools", WRAP, WRAP, Gravity.END or Gravity.TOP, 0, dp(56), dp(76), 0)
+            // Keep the three bottom control groups in separate, non-overlapping lanes.
+            setFrameLp("readouts", WRAP, WRAP, Gravity.START or Gravity.BOTTOM, dp(76), 0, 0, dp(190))
+            setFrameLp("zoomPanel", WRAP, WRAP, Gravity.START or Gravity.BOTTOM, dp(76), 0, 0, dp(125))
+            setFrameLp("exposurePanel", WRAP, WRAP, Gravity.START or Gravity.BOTTOM, dp(76), 0, 0, dp(60))
+            setFrameLp("rackPanel", dp(92), dp(104), Gravity.END or Gravity.BOTTOM, 0, 0, dp(240), dp(60))
+            setFrameLp("rec", dp(64), dp(64), Gravity.END or Gravity.BOTTOM, 0, 0, dp(88), dp(16))
+            setFrameLp("thumb", dp(52), dp(52), Gravity.END or Gravity.BOTTOM, 0, 0, dp(166), dp(22))
+            setFrameLp("mode", WRAP, WRAP, Gravity.END or Gravity.BOTTOM, 0, 0, dp(70), dp(88))
         }
         readBoxes.forEach {
             val lpp = it.layoutParams as LinearLayout.LayoutParams
