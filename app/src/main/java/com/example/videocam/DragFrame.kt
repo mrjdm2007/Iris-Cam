@@ -45,6 +45,13 @@ class DragFrame(ctx: Context, val key: String) : FrameLayout(ctx) {
     fun clampIntoParent() {
         val p = parent as? View ?: return
         if (width <= 0 || height <= 0 || p.width <= 0 || p.height <= 0) return
+        val requestedScale = panelSizePercent / 50f
+        val fitScale = minOf(p.width.toFloat() / width, p.height.toFloat() / height)
+        val safeScale = requestedScale.coerceAtMost(fitScale.coerceAtLeast(0.25f))
+        pivotX = width / 2f
+        pivotY = height / 2f
+        scaleX = safeScale
+        scaleY = safeScale
         val minX = width * (scaleX - 1f) / 2f
         val minY = height * (scaleY - 1f) / 2f
         val maxX = p.width - width * (scaleX + 1f) / 2f
