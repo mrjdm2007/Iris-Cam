@@ -34,15 +34,35 @@ class DragFrame(ctx: Context, val key: String) : FrameLayout(ctx) {
     fun setPanelSizePercent(percent: Int) {
         panelSizePercent = percent.coerceIn(25, 100)
         val scale = panelSizePercent / 50f
+        pivotX = width / 2f
+        pivotY = height / 2f
         scaleX = scale
         scaleY = scale
+        post { clampIntoParent() }
+    }
+
+    /** Keep the scaled visual bounds within the preview root. */
+    fun clampIntoParent() {
+        val p = parent as? View ?: return
+        if (width <= 0 || height <= 0 || p.width <= 0 || p.height <= 0) return
+        val minX = width * (scaleX - 1f) / 2f
+        val minY = height * (scaleY - 1f) / 2f
+        val maxX = p.width - width * (scaleX + 1f) / 2f
+        val maxY = p.height - height * (scaleY + 1f) / 2f
+        x = x.coerceIn(minX.coerceAtMost(maxX), maxX.coerceAtLeast(minX))
+        y = y.coerceIn(minY.coerceAtMost(maxY), maxY.coerceAtLeast(minY))
+    }
+
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+        super.onSizeChanged(w, h, oldw, oldh)
+        post { clampIntoParent() }
     }
 
     var editing = false
         set(v) {
             field = v
             background = if (v) outline else null
-        if (!v) isSelectedForResize = false
+            if (!v) isSelectedForResize = false
         }
 
     override fun onInterceptTouchEvent(e: MotionEvent): Boolean = editing
@@ -58,8 +78,9 @@ class DragFrame(ctx: Context, val key: String) : FrameLayout(ctx) {
                 downY = e.rawY
             }
             MotionEvent.ACTION_MOVE -> {
-                x = (e.rawX + dx).coerceIn(0f, (p.width - width * scaleX).toFloat().coerceAtLeast(0f))
-                y = (e.rawY + dy).coerceIn(0f, (p.height - height * scaleY).toFloat().coerceAtLeast(0f))
+                x = e.rawX + dx
+                y = e.rawY + dy
+                clampIntoParent()
             }
             MotionEvent.ACTION_UP -> {
                 if (kotlin.math.hypot(e.rawX - downX, e.rawY - downY) < 12f * d) onSelected?.invoke()
