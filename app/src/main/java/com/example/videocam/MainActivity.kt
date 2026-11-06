@@ -1684,6 +1684,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
         setActive(tRot, cfg.portrait)
         tRot.visibility = if (cfg.mode == 1) View.GONE else View.VISIBLE
         applySliderWidths()
+        if (::sharedRackTime.isInitialized) sharedRackTime.text = rackSeconds.toString() + "s"
         applyBwLook()
         recEdge.visibility = if (cam.recording) View.VISIBLE else View.GONE
         audioMeter.visibility = if (cfg.mode == 0) View.VISIBLE else View.GONE
@@ -2194,6 +2195,27 @@ class MainActivity : Activity(), CameraController.Callbacks {
         refreshUi()
     }
 
+    private fun setRackTarget(target: Int) {
+        rackTarget = target.coerceIn(0, 1)
+        if (!::rackTargetLabel.isInitialized) return
+        rackTargetLabel.text = if (rackTarget == 0) "ZOOM" else "EXPOSURE"
+        setActive(zoomLabel, rackTarget == 0)
+        setActive(expLabel, rackTarget == 1)
+    }
+
+    private fun setSharedRackMark(isA: Boolean) {
+        if (rackTarget == 0) {
+            if (isA) zoomSlider.markA = cam.zoom else zoomSlider.markB = cam.zoom
+            zoomSlider.invalidate()
+            toast("Zoom " + (if (isA) "A" else "B") + " set")
+        } else {
+            val value = if (cfg.manualExposure) cfg.iso.toFloat() else cfg.ev * cam.evStepEv
+            if (isA) expSlider.markA = value else expSlider.markB = value
+            expSlider.invalidate()
+            toast("Exposure " + (if (isA) "A" else "B") + " set")
+        }
+        refreshUi()
+    }
     private fun doZoomPull() {
         val a = zoomSlider.markA
         val b = zoomSlider.markB
@@ -2201,7 +2223,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
             toast("Set zoom A and B first")
             return
         }
-        val ms = zoomSeconds * 1000L
+        val ms = rackSeconds * 1000L
         if (zoomLinked) {
             val fa = slider.markA
             val fb = slider.markB
@@ -2250,7 +2272,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
         cancelExpPull()
         val manual = cfg.manualExposure
         expAnim = ValueAnimator.ofFloat(0f, 1f).apply {
-            duration = expSeconds * 1000L
+            duration = rackSeconds * 1000L
             interpolator = LinearInterpolator()
             addUpdateListener {
                 val lin = it.animatedValue as Float
