@@ -56,6 +56,7 @@ import android.widget.LinearLayout
 import android.widget.PopupMenu
 import android.widget.ProgressBar
 import android.widget.SeekBar
+import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import java.io.ByteArrayOutputStream
@@ -612,15 +613,10 @@ class MainActivity : Activity(), CameraController.Callbacks {
     private fun showLooksDialog() {
         val groups = listOf(
             "Natural" to listOf(0),
-            "Inspired" to listOf(18, 10, 12, 3, 4, 11),
+            "Inspired" to listOf(18, 10, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28),
             "Cinematic" to listOf(2, 3, 4, 5, 6, 7, 8, 9, 13, 14, 15, 16, 17, 1)
         )
-        val names = listOf(
-            "Natural", "Black and White", "Kodak 2383", "Kodak 250D", "Kodak 500T",
-            "Fuji Eterna", "Teal & Orange", "Bleach Bypass", "Vintage Fade", "Noir",
-            "Leica Colour (inspired)", "Blue Cinematic", "Golden Hour", "Dream Glow",
-            "Halation", "Soft Diffusion", "Film Grain", "Anamorphic Flare", "Zeiss Colours (inspired)"
-        )
+        val names = Look.FILTER_NAMES
         val intensity = if (cfg.mode == 1) cfg.photoFilterIntensity else cfg.filterIntensity
         val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(18), dp(8), dp(18), dp(8)) }
         groups.forEach { (title, ids) ->
