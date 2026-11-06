@@ -575,7 +575,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
 
     private fun panelAction(title: String, detail: String, onClick: () -> Unit): TextView =
         TextView(this).apply {
-            text = "$title\n$detail"
+            text = if (detail.isBlank()) title else "$title\n$detail"
             textSize = 13f
             setTextColor(0xFFF3F0E8.toInt())
             setPadding(dp(14), dp(11), dp(14), dp(11))
@@ -632,26 +632,27 @@ class MainActivity : Activity(), CameraController.Callbacks {
         val names = Look.FILTER_NAMES
         val intensity = if (cfg.mode == 1) cfg.photoFilterIntensity else cfg.filterIntensity
         val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(18), dp(8), dp(18), dp(8)) }
-        groups.forEach { (title, ids) ->
-            box.addView(panelAction(title, "") {
-                choose(title, ids.map { (if (cfg.filterId == it) "✓ " else "") + names[it] }) { index -> applyLook(ids[index]) }
-            }, LinearLayout.LayoutParams(MATCH, WRAP).apply { setMargins(0, 0, 0, dp(8)) })
-        }
         val currentLut = TextView(this).apply {
             text = "CURRENT LUT · " + names.getOrElse(cfg.filterId) { "Natural" }
-            setTextColor(0xFFF3F0E8.toInt())
-            textSize = 12f
-            setPadding(0, dp(4), 0, dp(8))
+            setTextColor(0xFFF3F0E8.toInt()); textSize = 12f; setPadding(0, dp(4), 0, dp(8))
+        }
+        groups.forEach { (title, ids) ->
+            box.addView(panelAction(title, "") {
+                choose(title, ids.map { (if (cfg.filterId == it) "✓ " else "") + names[it] }) { index ->
+                    applyLook(ids[index])
+                    currentLut.text = "CURRENT LUT · " + names.getOrElse(cfg.filterId) { "Natural" }
+                }
+            }, LinearLayout.LayoutParams(MATCH, WRAP).apply { setMargins(0, 0, 0, dp(8)) })
         }
         box.addView(currentLut)
-        val label = TextView(this).apply { text = "INTENSITY · ${intensity}%"; setTextColor(0xFFF3F0E8.toInt()); textSize = 12f }
+        val label = TextView(this).apply { text = "INTENSITY · " + intensity + "%"; setTextColor(0xFFF3F0E8.toInt()); textSize = 12f }
         box.addView(label)
         box.addView(SeekBar(this).apply {
             max = 100
             progress = intensity
             setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                 override fun onProgressChanged(seekBar: SeekBar?, value: Int, fromUser: Boolean) {
-                    label.text = "INTENSITY · ${value}%"
+                    label.text = "INTENSITY · " + value + "%"
                     if (fromUser) {
                         if (cfg.mode == 1) cfg.photoFilterIntensity = value else cfg.filterIntensity = value
                         cfgDirty = true
