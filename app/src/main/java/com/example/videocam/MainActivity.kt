@@ -1123,6 +1123,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
         val mic = cam.mics().firstOrNull { it.id == cfg.micId }?.let { cam.micLabel(it) } ?: "Auto"
         return listOf(
             "Resolution: ${resLabel()}" to { pickRes() },
+            "Aspect ratio: ${Ratios.NAMES[cfg.ratio.coerceIn(0, Ratios.NAMES.lastIndex)]}" to { pickAspectRatio() },
             "Frame rate: ${cfg.fps} fps" to { pickFps() },
             "Bitrate: ${cfg.bitrateMbps} Mbps" to { pickBitrate() },
             "Codec: ${codecLabel()}" to { pickCodec() },
@@ -1517,29 +1518,36 @@ class MainActivity : Activity(), CameraController.Callbacks {
 
     private fun pickRes() {
         if (!idle()) return
-        val s = cam.sizes
-        if (s.isEmpty()) return
-        val items = ArrayList<Triple<Size, Int, String>>()
-        for (sz in s) {
-            val base = if (sz.height == 2160) "4K" else "${sz.height}p"
-            items.add(Triple(sz, 0, "$base 16:9  (${sz.width}\u00D7${sz.height})"))
-            if (sz.height >= 1080) {
-                for (r in 1 until Ratios.NAMES.size) {
-                    val h = minOf(Ratios.heightFor(sz.width, r), sz.height)
-                    items.add(Triple(sz, r, "$base ${Ratios.NAMES[r]}  (${sz.width}\u00D7$h)"))
+        val available = cam.sizes
+        if (available.isEmpty()) return
+        // Keep this menu focused on the familiar recording resolutions. Only show
+        // sizes actually advertised by the active camera.
+        val preferred = listOf(2160, 1440, 1080)
+        val choices = preferred.mapNotNull { h ->
+            available.firstOrNull { it.height == h }?.let { size ->
+                val label = when (h) {
+                    2160 -> "4K"
+                    else -> "${h}p"
                 }
+                size to "$label  (${size.width}\u00D7${size.height})"
             }
         }
-        choose("Resolution", items.map { it.third }) {
-            val (sz, r, _) = items[it]
-            cfg.width = sz.width
-            cfg.height = sz.height
-            cfg.ratio = r
-            if (r > 0 && cfg.fps > 60) {
+        if (choices.isEmpty()) return
+        choose("Resolution", choices.map { it.second }) {
+            val size = choices[it].first
+            cfg.width = size.width
+            cfg.height = size.height
+            streamChanged()
+        }
+    }
+
+    private fun pickAspectRatio() {
+        if (!idle()) return
+        choose("Aspect ratio", Ratios.NAMES) {
+            cfg.ratio = it
+            if (it > 0 && cfg.fps > 60) {
                 cfg.fps = 30
-                toast("Cinematic shapes record up to 60 fps, switched to 30 fps")
-            } else if (r > 0 && isPortrait()) {
-                toast("Cinematic shapes are used in landscape")
+                toast("Cinematic aspect ratios record up to 60 fps; switched to 30 fps")
             }
             streamChanged()
         }
