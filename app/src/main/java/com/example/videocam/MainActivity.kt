@@ -1169,6 +1169,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
             "Hasselblad · Natural Colour" to 19,
             "Hasselblad · Portrait" to 20,
             "Hasselblad · Vivid" to 21,
+            "Leica · Colour (inspired)" to 10,
             "Fujifilm · Classic Chrome" to 22,
             "Fujifilm · Velvia" to 23,
             "Fujifilm · Astia" to 24,
@@ -1181,24 +1182,18 @@ class MainActivity : Activity(), CameraController.Callbacks {
 
     /** Existing cinematic looks and effects remain available under the Cinematic category. */
     private fun filterItems(): List<Pair<String, () -> Unit>> = presetItems(listOf(
-        "Natural" to 0,
+        "Natural (Normal)" to 0,
         "Film Stocks · Kodak 2383" to 2,
         "Film Stocks · Kodak 250D" to 3,
         "Film Stocks · Kodak 500T" to 4,
         "Film Stocks · Fuji Eterna" to 5,
-        "Cinema · Teal & Orange" to 6,
         "Cinema · Bleach Bypass" to 7,
         "Vintage · Vintage Fade" to 8,
         "Cinema · Noir" to 9,
-        "Leica · Colour (inspired)" to 10,
-        "Colour · Blue Cinematic" to 11,
         "Colour · Golden Hour" to 12,
         "Dream · Dream Glow" to 13,
         "Effects · Black and White" to 1,
-        "Effects · Halation" to 14,
-        "Effects · Soft Diffusion" to 15,
-        "Effects · Film Grain" to 16,
-        "Effects · Anamorphic Flare" to 17
+        "Effects · Film Grain" to 16
     ))
 
     private fun presetItems(presets: List<Pair<String, Int>>): List<Pair<String, () -> Unit>> {
@@ -1207,6 +1202,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
             title to {
                 if (idle()) {
                     cfg.filterId = id
+                    cfg.lookManuallySelected = true
                     cfg.bw = id == 1
                     cfg.blue = false
                     cfg.glow = false
@@ -1222,6 +1218,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
         return items + ("Intensity: ${cfg.filterIntensity}%" to {
             choose("Look intensity", (0..100 step 10).map { "$it%" }) {
                 cfg.filterIntensity = it * 10
+                cfg.lookManuallySelected = true
                 cfgDirty = true
                 if (cfg.mode == 0) streamChanged() else applyLive()
             }
@@ -1567,6 +1564,17 @@ class MainActivity : Activity(), CameraController.Callbacks {
         if (!idle()) return
         cancelCountdown()
         cfg.mode = 1 - cfg.mode
+        // Apply the photo-mode default until the user explicitly chooses a look.
+        // Normal/0 remains a valid user choice and is preserved across mode changes.
+        if (!cfg.lookManuallySelected) {
+            cfg.filterId = if (cfg.mode == 1) 19 else 0
+            cfg.filterIntensity = 40
+            cfg.bw = false
+            cfg.blue = false
+            cfg.glow = false
+            cfg.photoLook = 0
+            cfg.flat = false
+        }
         store.save("last", cfg)
         updateOrientationMode()
         updateAudioTap()
