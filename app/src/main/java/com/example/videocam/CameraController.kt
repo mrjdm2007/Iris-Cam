@@ -685,7 +685,12 @@ class CameraController(
             rec.setOrientationHint(if (useGlRenderer) 0 else orientationHint())
             rec.setMaxFileSize(SPLIT_BYTES)
             rec.setOnInfoListener { mr, what, _ -> onRecorderInfo(mr, what) }
-            rec.setOnErrorListener { _, what, _ -> ui.onMessage("Recorder error $what") }
+            rec.setOnErrorListener { mr, what, extra ->
+                handler.post {
+                    ui.onMessage("Recorder error $what / $extra")
+                    if (recording && recorder === mr) stopRecording()
+                }
+            }
             rec.prepare()
             recorder = rec
             if (cropIt || cfg.filterId > 0) {
@@ -2116,12 +2121,15 @@ class CameraController(
         } catch (e: RuntimeException) {
             ok = false
         }
-        nextOut?.let { discardOutput(it) }
+        val completedOutput = out
+        val unusedNextOutput = nextOut
+        if (ok) completedOutput?.let { finalizeOutput(it) } else completedOutput?.let { discardOutput(it) }
+        unusedNextOutput?.let { discardOutput(it) }
         out = null
         nextOut = null
         releaseRecorder()
         ui.onRecording(false)
-        if (!ok) ui.onMessage("Recording too short, discarded")
+        if (!ok) ui.onMessage("Recording was too short or contained no valid video frames; file discarded")
         configureAndStart()
     }
 
