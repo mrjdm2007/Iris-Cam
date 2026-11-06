@@ -76,7 +76,6 @@ class CameraController(
         fun onBusy(busy: Boolean)
         fun onPhotoSaved(uri: Uri?)
         fun onLongExposure(sec: Int)
-        fun onSteadyReady(uri: Uri, log: SteadyLog)
     }
 
     private class Output(val uri: Uri, val pfd: ParcelFileDescriptor)
@@ -223,9 +222,6 @@ class CameraController(
     var lastClipUri: Uri? = null
     var lastPhotoUri: Uri? = null
 
-    @Volatile
-    private var steadyLog: SteadyLog? = null
-    private val steadyRec = SteadyRecorder(ctx)
     private var zoomAnim: ValueAnimator? = null
 
     private var afRegion: MeteringRectangle? = null
@@ -396,7 +392,12 @@ class CameraController(
         val ranges = chars.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES)
             ?: emptyArray()
         val l = mutableListOf<Int>()
-        for (f in listOf(24, 25, 30, 60)) if (ranges.any { it.upper == f }) l.add(f)
+        // 60 fps is exposed only on the primary rear camera and the selfie camera.
+        // Auxiliary wide/telephoto cameras and the all-lenses logical switch stay capped at 30.
+        val allow60 = cfg.cameraId == "0" || isFrontCamera(cfg.cameraId)
+        for (f in listOf(24, 25, 30, 60)) {
+            if ((f != 60 || allow60) && ranges.any { it.upper == f }) l.add(f)
+        }
         val hs = m.highSpeedVideoSizes
         if (hs != null && hs.contains(size)) {
             for (r in m.getHighSpeedVideoFpsRangesFor(size)) {
@@ -611,44 +612,6 @@ class CameraController(
             ctx.contentResolver.update(o.uri, v, null, null)
         } catch (_: Exception) {
         }
-    }
-
-    /** A new, empty video file for a stabilised copy. */
-    fun newSteadyOutput(): Pair<Uri, ParcelFileDescriptor> {
-        val stamp = SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.US).format(Date())
-        val values = ContentValues().apply {
-            put(MediaStore.Video.Media.DISPLAY_NAME, "VID_${stamp}_STEADY.mp4")
-            put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
-            put(MediaStore.Video.Media.RELATIVE_PATH, "DCIM/Iris Cam/")
-            put(MediaStore.Video.Media.DATE_TAKEN, System.currentTimeMillis())
-            put(MediaStore.Video.Media.IS_PENDING, 1)
-        }
-        val uri = ctx.contentResolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values)
-            ?: throw IllegalStateException("MediaStore insert failed")
-        val pfd = ctx.contentResolver.openFileDescriptor(uri, "rw")
-            ?: throw IllegalStateException("Can't open output file")
-        return Pair(uri, pfd)
-    }
-
-    fun finishSteadyOutput(uri: Uri, ok: Boolean) {
-        try {
-            if (ok) {
-                ctx.contentResolver.update(uri, ContentValues().apply { put(MediaStore.Video.Media.IS_PENDING, 0) }, null, null)
-            } else {
-                ctx.contentResolver.delete(uri, null, null)
-            }
-        } catch (_: Exception) {
-        }
-    }
-
-    /** True if super steady can line the gyro up with this camera's frame times. */
-    fun steadyPossible(): String? {
-        if (!steadyRec.available) return "This phone has no gyro sensor"
-        if (chars.get(CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE) != CameraMetadata.SENSOR_INFO_TIMESTAMP_SOURCE_REALTIME) {
-            return "Super steady can't be used: this camera's frame times don't match the gyro clock"
-        }
-        if ((chars.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 90) != 90) return "Super steady works with the back cameras only"
-        return null
     }
 
     private fun discardOutput(o: Output) {
@@ -1119,7 +1082,7 @@ class CameraController(
             b, CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE,
             CameraCharacteristics.CONTROL_AVAILABLE_VIDEO_STABILIZATION_MODES,
             listOf(
-                if (cfg.stab != 0 && !cfg.steady) CameraMetadata.CONTROL_VIDEO_STABILIZATION_MODE_ON
+                if (cfg.stab != 0) CameraMetadata.CONTROL_VIDEO_STABILIZATION_MODE_ON
                 else CameraMetadata.CONTROL_VIDEO_STABILIZATION_MODE_OFF
             )
         )
@@ -1157,10 +1120,6 @@ class CameraController(
                 }
             }
             liveFocus = res.get(CaptureResult.LENS_FOCUS_DISTANCE) ?: -1f
-            val sl = steadyLog
-            if (sl != null && sl.t0Ns == 0L) {
-                res.get(CaptureResult.SENSOR_TIMESTAMP)?.let { sl.t0Ns = it }
-            }
             if (!(cfg.faceAf && faceAfSupported)) return
             val now = SystemClock.elapsedRealtime()
             if (now - last < 400) return
@@ -2121,14 +2080,6 @@ class CameraController(
             recorder?.start()
             crop?.active = true
             recording = true
-            if (cfg.steady && steadyPossible() == null) {
-                val l = SteadyLog()
-                val f = chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.firstOrNull()
-                val w = chars.get(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE)?.width
-                if (f != null && w != null && w > 0f) l.fPx = f / w * 3840f * zoom
-                steadyLog = l
-                if (!steadyRec.start(l)) steadyLog = null
-            }
             ui.onRecording(true)
         } catch (e: Exception) {
             ui.onMessage("Couldn't start recording: ${e.message}")
@@ -2151,12 +2102,6 @@ class CameraController(
         } catch (e: RuntimeException) {
             ok = false
         }
-        val sl = steadyLog
-        steadyLog = null
-        steadyRec.stop()
-        val finished = out
-        out?.let { if (ok) finalizeOutput(it) else discardOutput(it) }
-        if (ok && sl != null && finished != null) ui.onSteadyReady(finished.uri, sl)
         nextOut?.let { discardOutput(it) }
         out = null
         nextOut = null

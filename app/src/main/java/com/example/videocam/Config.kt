@@ -88,7 +88,6 @@ data class Config(
     var photoNr: Int = 1,            // photo noise reduction: 0 minimal, 1 standard, 2 high
     var lensKeys: Boolean = false,   // show the 0.5x / 1x / 2.7x shortcut buttons
     var haptics: Boolean = true,     // subtle shutter and manual slider feedback
-    var steady: Boolean = false,     // super steady: record 4K with gyro log, make a stabilised 1080p copy
     var ver: Int = 0
 ) {
     fun copyFrom(o: Config) {
@@ -138,7 +137,6 @@ data class Config(
         photoNr = o.photoNr
         lensKeys = o.lensKeys
         haptics = o.haptics
-        steady = o.steady
         ver = o.ver
     }
 
@@ -189,7 +187,6 @@ data class Config(
         .put("photoNr", photoNr)
         .put("lensKeys", lensKeys)
         .put("haptics", haptics)
-        .put("steady", steady)
         .put("ver", ver)
         .toString()
 
@@ -253,7 +250,6 @@ data class Config(
                 photoNr = o.optInt("photoNr", if (o.optBoolean("photoNrOff", false)) 0 else d.photoNr),
                 lensKeys = o.optBoolean("lensKeys", d.lensKeys),
                 haptics = o.optBoolean("haptics", d.haptics),
-                steady = o.optBoolean("steady", d.steady),
                 ver = maxOf(1, o.optInt("ver", d.ver))
             )
         }

@@ -149,17 +149,15 @@ class MainActivity : Activity(), CameraController.Callbacks {
     private val monitorFrameBusy = AtomicBoolean(false)
     private var monitorBmp: Bitmap? = null
     @Volatile
-    private var steadyPct = -1
-    @Volatile
     private var longLeft = -1
     @Volatile
     private var lastMeterAt = 0L
     private var thermalListener: PowerManager.OnThermalStatusChangedListener? = null
-    private val steadyExec = Executors.newSingleThreadExecutor()
     private lateinit var chipRow: HorizontalScrollView
     private lateinit var topBar: LinearLayout
     private lateinit var topRow2: FrameLayout
     private lateinit var expLabel: TextView
+    private lateinit var exposureSummary: TextView
     private var prevW = 0
     private var prevH = 0
     private var photoOri = -1
@@ -177,6 +175,8 @@ class MainActivity : Activity(), CameraController.Callbacks {
     private lateinit var rEv: Readout
     private lateinit var rAe: Readout
     private lateinit var rWb: Readout
+    private lateinit var exposureControlsChip: TextView
+    private var exposureControlsExpanded = false
 
     private val frames = ArrayList<DragFrame>()
     private val ui = Handler(Looper.getMainLooper())
@@ -250,7 +250,6 @@ class MainActivity : Activity(), CameraController.Callbacks {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         store = Store(this)
         cfg = store.load("last") ?: Config()
-        cfg.steady = false // legacy software stabilization pipeline is retired
         applyRequestedOrientation()
         buildUi()
         rebuildSamplers()
@@ -359,7 +358,6 @@ class MainActivity : Activity(), CameraController.Callbacks {
         thermalListener = null
         if (::cam.isInitialized) cam.release()
         procExec.shutdownNow()
-        steadyExec.shutdown()
         super.onDestroy()
     }
 
@@ -554,6 +552,133 @@ class MainActivity : Activity(), CameraController.Callbacks {
 
     private fun fmtZoom(z: Float) = if (z == z.toInt().toFloat()) "${z.toInt()}x" else "%.1fx".format(z)
 
+    // ---------- redesigned format and looks panels ----------
+
+    private fun panelAction(title: String, detail: String, onClick: () -> Unit): TextView =
+        TextView(this).apply {
+            text = "$title\n$detail"
+            textSize = 13f
+            setTextColor(0xFFF3F0E8.toInt())
+            setPadding(dp(14), dp(11), dp(14), dp(11))
+            background = materialSurface(0xFF242830.toInt(), 14, 0x55494D55)
+            isClickable = true
+            isFocusable = true
+            setOnClickListener { onClick() }
+        }
+
+    private fun showFormatPanel() {
+        val photo = cfg.mode == 1
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(8), dp(18), dp(4))
+        }
+        fun add(title: String, detail: String, action: () -> Unit) {
+            box.addView(panelAction(title, detail, action), LinearLayout.LayoutParams(MATCH, WRAP).apply {
+                setMargins(0, 0, 0, dp(8))
+            })
+        }
+        if (photo) {
+            val size = runCatching { cam.captureSize() }.getOrNull()
+            val sizeText = size?.let { "%.1f MP · %d × %d".format(it.width * it.height / 1e6, it.width, it.height) } ?: "Unavailable"
+            add("PHOTO SIZE", sizeText) { pickPhotoRes() }
+            add("CAPTURE FORMAT", when {
+                cfg.photoFormat == 3 && cam.ultraHdrAvailable -> "Native Ultra HDR JPEG_R"
+                cam.effMode() == 1 -> "RAW develop"
+                else -> "Standard JPEG"
+            }) { pickCaptureMode() }
+            add("JPEG QUALITY", "${cfg.photoQuality}%") { pickQuality() }
+            add("SCENE", arrayOf("Normal", "Night", "Astro")[cfg.scene.coerceIn(0, 2)]) { pickScene() }
+            add("LENS", runCatching { cam.cameraLabel(cfg.cameraId) }.getOrDefault("Current lens")) { pickLens() }
+        } else {
+            add("RESOLUTION", resLabel()) { pickRes() }
+            add("ASPECT RATIO", Ratios.NAMES[cfg.ratio.coerceIn(0, Ratios.NAMES.lastIndex)]) { pickAspectRatio() }
+            add("FRAME RATE", "${cfg.fps} FPS") { pickFps() }
+            add("BITRATE", "${cfg.bitrateMbps} Mbps") { pickBitrate() }
+            add("CODEC", codecLabel()) { pickCodec() }
+            add("LENS", runCatching { cam.cameraLabel(cfg.cameraId) }.getOrDefault("Current lens")) { pickLens() }
+        }
+        MaterialAlertDialogBuilder(this)
+            .setTitle(if (photo) "PHOTO SETTINGS" else "VIDEO FORMAT")
+            .setView(box)
+            .setNegativeButton("Close", null)
+            .show()
+    }
+
+    private fun showLooksDialog() {
+        val groups = linkedMapOf(
+            "Natural" to listOf(0),
+            "Film Stocks" to listOf(2, 3, 4, 5),
+            "Cinema" to listOf(6, 7, 9),
+            "Vintage" to listOf(8),
+            "Leica & Colour" to listOf(10, 11, 12, 18),
+            "Dream" to listOf(13),
+            "Black & White" to listOf(1),
+            "Effects" to listOf(14, 15, 16, 17)
+        )
+        val names = listOf(
+            "Natural", "Black and White", "Kodak 2383", "Kodak 250D", "Kodak 500T",
+            "Fuji Eterna", "Teal & Orange", "Bleach Bypass", "Vintage Fade", "Noir",
+            "Leica Colour (inspired)", "Blue Cinematic", "Golden Hour", "Dream Glow",
+            "Halation", "Soft Diffusion", "Film Grain", "Anamorphic Flare", "Zeiss Colours (inspired)"
+        )
+        MaterialAlertDialogBuilder(this)
+            .setTitle("LOOKS · CHOOSE A CATEGORY")
+            .setItems((groups.keys.toList() + "Intensity · ${cfg.filterIntensity}%").toTypedArray()) { _, which ->
+                if (which == groups.size) {
+                    choose("Look intensity", (0..100 step 10).map { "$it%" }) {
+                        cfg.filterIntensity = it * 10
+                        cfgDirty = true
+                        if (cfg.mode == 0) streamChanged() else applyLive()
+                    }
+                } else {
+                    val ids = groups.values.elementAt(which)
+                    choose(groups.keys.elementAt(which), ids.map { (if (cfg.filterId == it) "✓ " else "") + names[it] }) { selected ->
+                        applyLook(ids[selected])
+                    }
+                }
+            }
+            .show()
+    }
+
+    private fun applyLook(id: Int) {
+        if (!idle()) return
+        cfg.filterId = id
+        cfg.bw = id == 1
+        cfg.blue = false
+        cfg.glow = false
+        cfg.photoLook = 0
+        cfg.flat = false
+        cfgDirty = true
+        if (cfg.mode == 0) streamChanged() else applyLive()
+        toast("${Look.FILTER_NAMES[id]} selected")
+    }
+
+    private fun toggleExposureControls() {
+        exposureControlsExpanded = !exposureControlsExpanded
+        exposureControlsChip.text = if (exposureControlsExpanded) "EXPOSURE ◂" else "EXPOSURE ▸"
+        setActive(exposureControlsChip, exposureControlsExpanded)
+        val controls = listOf(rIso.box, rShutter.box, rWb.box)
+        if (exposureControlsExpanded) {
+            controls.forEach { view ->
+                view.animate().cancel()
+                view.visibility = View.VISIBLE
+                view.alpha = 0f
+                view.translationX = -dp(18).toFloat()
+                view.animate().alpha(1f).translationX(0f).setDuration(180L).start()
+            }
+        } else {
+            controls.forEach { view ->
+                view.animate().cancel()
+                view.animate().alpha(0f).translationX(-dp(18).toFloat()).setDuration(140L)
+                    .withEndAction {
+                        view.visibility = View.GONE
+                        view.alpha = 1f
+                        view.translationX = 0f
+                    }.start()
+            }
+        }
+    }
+
     // ---------- UI building ----------
 
     private fun buildUi() {
@@ -600,9 +725,9 @@ class MainActivity : Activity(), CameraController.Callbacks {
             text = "STBY"
         }
         meter = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply { max = 100 }
-        formatChip = chip("") { popup(formatChip, if (cfg.mode == 1) photoItems() else videoItems()) }
+        formatChip = chip("FORMAT ▾") { showFormatPanel() }
         imageChip = chip("IMAGE \u25BE") { popup(imageChip, imageItems()) }
-        filtersChip = chip("FILTERS ▾") { popup(filtersChip, filterItems()) }
+        filtersChip = chip("LOOKS ▾") { showLooksDialog() }
         gridChip = chip("GRID \u25BE") { popup(gridChip, gridItems()) }
         toolsChip = chip("TOOLS \u25BE") { popup(toolsChip, toolsItems()) }
         statusText = TextView(this).apply {
@@ -687,7 +812,13 @@ class MainActivity : Activity(), CameraController.Callbacks {
         drag("focusSlider", slider, dp(56), MATCH, Gravity.END, 0, dp(56), dp(10), dp(14))
 
         afChip = chip("AF") {
-            cam.setAutoFocus()
+            // AF/MF is a direct toggle. In MF, the focus slider and pull-focus
+            // controls become available; the slider itself stays on screen.
+            if (cam.manualFocus) {
+                cam.setAutoFocus()
+            } else {
+                cam.setFocus(slider.fraction)
+            }
             refreshUi()
         }
         aChip = chip("Set A") {
@@ -720,13 +851,21 @@ class MainActivity : Activity(), CameraController.Callbacks {
         rEv = readout("EV") { pickEv() }
         rAe = readout("AE LOCK") { cam.toggleAeLock() }
         rWb = readout("WB") { cam.toggleAwbLock() }
+        exposureControlsChip = chip("EXPOSURE ▸") { toggleExposureControls() }
         val readRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        listOf(rMode, rIso, rShutter, rEv, rAe, rWb).forEach {
-            readBoxes.add(it.box)
-            readRow.addView(it.box, LinearLayout.LayoutParams(dp(80), WRAP).apply { setMargins(dp(3), 0, dp(3), dp(3)) })
+        listOf(rMode.box, exposureControlsChip, rIso.box, rShutter.box, rWb.box, rEv.box, rAe.box).forEach { view ->
+            if (view !== exposureControlsChip) readBoxes.add(view)
+            readRow.addView(view, LinearLayout.LayoutParams(WRAP, WRAP).apply { setMargins(dp(3), 0, dp(3), dp(3)) })
+        }
+        rIso.box.visibility = View.GONE
+        rShutter.box.visibility = View.GONE
+        rWb.box.visibility = View.GONE
+        val readScroll = HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false
+            addView(readRow, ViewGroup.LayoutParams(WRAP, WRAP))
         }
 
         zoomSlider = ZoomSlider(this)
@@ -767,9 +906,21 @@ class MainActivity : Activity(), CameraController.Callbacks {
         }
         val expStrip = strip(expLabel, eA, eB, expSlider, expGo, expTime)
 
+        exposureSummary = TextView(this).apply {
+            text = "AUTO  ·  ISO --  ·  --"
+            setTextColor(0xFFF3F0E8.toInt())
+            textSize = 11f
+            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+            setPadding(dp(12), dp(7), dp(12), dp(7))
+            background = materialSurface(0xE61C1F25.toInt(), 14, 0x55494D55)
+            gravity = Gravity.CENTER_VERTICAL
+        }
         val stack = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            addView(readRow, LinearLayout.LayoutParams(WRAP, WRAP))
+            addView(exposureSummary, LinearLayout.LayoutParams(WRAP, WRAP).apply {
+                setMargins(dp(3), 0, dp(3), dp(4))
+            })
+            addView(readScroll, LinearLayout.LayoutParams(MATCH, WRAP))
             addView(zoomStrip, LinearLayout.LayoutParams(WRAP, WRAP).apply { setMargins(0, 0, 0, dp(3)) })
             addView(expStrip, LinearLayout.LayoutParams(WRAP, WRAP))
         }
@@ -1037,6 +1188,8 @@ class MainActivity : Activity(), CameraController.Callbacks {
             it.value.textSize = if (p) 12f else 14f
             it.box.setPadding(dp(if (p) 2 else 10), dp(3), dp(if (p) 2 else 10), dp(3))
         }
+        exposureControlsChip.textSize = if (p) 11f else 12f
+        exposureControlsChip.setPadding(dp(if (p) 8 else 12), dp(7), dp(if (p) 8 else 12), dp(7))
         applySliderWidths()
         zoomLabel.visibility = if (p) View.GONE else View.VISIBLE
         expLabel.visibility = if (p) View.GONE else View.VISIBLE
@@ -1123,6 +1276,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
         val mic = cam.mics().firstOrNull { it.id == cfg.micId }?.let { cam.micLabel(it) } ?: "Auto"
         return listOf(
             "Resolution: ${resLabel()}" to { pickRes() },
+            "Aspect ratio: ${Ratios.NAMES[cfg.ratio.coerceIn(0, Ratios.NAMES.lastIndex)]}" to { pickAspectRatio() },
             "Frame rate: ${cfg.fps} fps" to { pickFps() },
             "Bitrate: ${cfg.bitrateMbps} Mbps" to { pickBitrate() },
             "Codec: ${codecLabel()}" to { pickCodec() },
@@ -1135,7 +1289,6 @@ class MainActivity : Activity(), CameraController.Callbacks {
     private fun videoImageItems(): List<Pair<String, () -> Unit>> = listOf(
         "Stabilization: ${if (cfg.stab != 0) "On (OIS + EIS where supported)" else "Off"}" to {
             cfg.stab = if (cfg.stab == 0) 2 else 0
-            cfg.steady = false
             cfgDirty = true
             applyLive()
         },
@@ -1351,17 +1504,20 @@ class MainActivity : Activity(), CameraController.Callbacks {
 
     private fun refreshUi() {
         val photo = cfg.mode == 1
-        formatChip.text = if (photo) photoFormatText() else videoFormatText()
+        formatChip.text = "FORMAT ▾"
         setActive(formatChip, false)
         setActive(imageChip, false)
         setActive(filtersChip, cfg.filterId != 0)
         setActive(gridChip, cfg.grid != 0)
         setActive(toolsChip, false)
-        modeChip.text = if (photo) "PHOTO \u21C4 VIDEO" else "VIDEO \u21C4 PHOTO"
+        modeChip.text = if (photo) "PHOTO MODE" else "VIDEO MODE"
         setActive(modeChip, false)
         val pullVis = if (photo) View.GONE else View.VISIBLE
-        listOf(zA, zB, zoomGo, zoomTime, zoomLink, eA, eB, expGo, expTime, aChip, bChip, rackChip, rackTimeChip)
+        listOf(zA, zB, zoomGo, zoomTime, zoomLink, eA, eB, expGo, expTime)
             .forEach { it.visibility = pullVis }
+        // Focus tools expand downward from AF only while manual focus is active.
+        val mfToolsVis = if (!photo && cam.manualFocus) View.VISIBLE else View.GONE
+        listOf(aChip, bChip, rackChip, rackTimeChip).forEach { it.visibility = mfToolsVis }
         tTorch.text = if (photo) "\u26A1 " + arrayOf("OFF", "ON", "AUTO")[cfg.flashMode.coerceIn(0, 2)] else "\u26A1"
         tTorch.textSize = if (photo) 11f else 18f
         setRecLook(cam.recording)
@@ -1433,6 +1589,15 @@ class MainActivity : Activity(), CameraController.Callbacks {
         setC(rAe.value, if (cam.aeLock) AMBER else Color.WHITE)
         setT(rWb.value, if (cam.awbLock) "LOCK" else "AUTO")
         setC(rWb.value, if (cam.awbLock) AMBER else Color.WHITE)
+        val shownIso = if (manual) cfg.iso else cam.liveIso
+        val shownShutter = if (manual) cfg.shutterDenom else cam.liveShutterDenom
+        val exposureMode = if (manual) "PRO" else "AUTO"
+        val exposureParts = mutableListOf(exposureMode)
+        if (shownIso > 0) exposureParts.add("ISO $shownIso")
+        if (shownShutter > 0) exposureParts.add("1/$shownShutter s")
+        if (!manual) exposureParts.add("%+.1f EV".format(cfg.ev * cam.evStepEv))
+        setT(exposureSummary, exposureParts.joinToString("  ·  "))
+        setC(exposureSummary, if (manual) AMBER else 0xFFF3F0E8.toInt())
     }
 
     /** Re-points the exposure slider at EV (Auto) or ISO (Manual). */
@@ -1499,29 +1664,31 @@ class MainActivity : Activity(), CameraController.Callbacks {
 
     private fun pickRes() {
         if (!idle()) return
-        val s = cam.sizes
-        if (s.isEmpty()) return
-        val items = ArrayList<Triple<Size, Int, String>>()
-        for (sz in s) {
-            val base = if (sz.height == 2160) "4K" else "${sz.height}p"
-            items.add(Triple(sz, 0, "$base 16:9  (${sz.width}\u00D7${sz.height})"))
-            if (sz.height >= 1080) {
-                for (r in 1 until Ratios.NAMES.size) {
-                    val h = minOf(Ratios.heightFor(sz.width, r), sz.height)
-                    items.add(Triple(sz, r, "$base ${Ratios.NAMES[r]}  (${sz.width}\u00D7$h)"))
-                }
+        val available = cam.sizes
+        if (available.isEmpty()) return
+        val preferred = listOf(2160, 1440, 1080)
+        val choices = preferred.mapNotNull { h ->
+            available.firstOrNull { it.height == h }?.let { size ->
+                val label = if (h == 2160) "4K" else "${h}p"
+                size to "$label  (${size.width}\u00D7${size.height})"
             }
         }
-        choose("Resolution", items.map { it.third }) {
-            val (sz, r, _) = items[it]
-            cfg.width = sz.width
-            cfg.height = sz.height
-            cfg.ratio = r
-            if (r > 0 && cfg.fps > 60) {
+        if (choices.isEmpty()) return
+        choose("Resolution", choices.map { it.second }) {
+            val size = choices[it].first
+            cfg.width = size.width
+            cfg.height = size.height
+            streamChanged()
+        }
+    }
+
+    private fun pickAspectRatio() {
+        if (!idle()) return
+        choose("Aspect ratio", Ratios.NAMES) {
+            cfg.ratio = it
+            if (it > 0 && cfg.fps > 60) {
                 cfg.fps = 30
-                toast("Cinematic shapes record up to 60 fps, switched to 30 fps")
-            } else if (r > 0 && isPortrait()) {
-                toast("Cinematic shapes are used in landscape")
+                toast("Cinematic aspect ratios record up to 60 fps; switched to 30 fps")
             }
             streamChanged()
         }
@@ -2302,12 +2469,11 @@ class MainActivity : Activity(), CameraController.Callbacks {
             } else {
                 val txt = when {
                     longLeft >= 0 -> "%d:%02d".format(longLeft / 60, longLeft % 60)
-                    steadyPct >= 0 -> "STEADY $steadyPct%"
                     cfg.mode == 1 -> if (cam.busy || cam.jobs > 0) "SAVING" else "PHOTO"
                     else -> "STBY"
                 }
                 setT(timecode, txt)
-                setC(timecode, if (longLeft >= 0 || steadyPct >= 0) RED else GREY)
+                setC(timecode, if (longLeft >= 0) RED else GREY)
                 if (tap?.running != true) audioMeter.setLevel(0)
             }
             if (n - statusTick >= 20) {
@@ -2358,29 +2524,6 @@ class MainActivity : Activity(), CameraController.Callbacks {
                 toast("Preview filter unavailable on this device; camera preview is continuing")
             }
         }
-    }
-
-    private fun toggleSteady() {
-        if (!idle()) return
-        if (!cfg.steady) {
-            val why = cam.steadyPossible()
-            if (why != null) {
-                toast(why)
-                return
-            }
-            cfg.steady = true
-            if (cam.sizes.any { it.height == 2160 }) {
-                cfg.width = 3840
-                cfg.height = 2160
-            }
-            cfg.fps = 30
-            cfg.ratio = 0
-            cfg.stab = 2
-            toast("Super steady on: records 4K30, then makes a stabilised 1080p copy. Keep the zoom still while filming.")
-        } else {
-            cfg.steady = false
-        }
-        streamChanged()
     }
 
     // ---------- audio level (side meter) and monitor audio ----------
@@ -2799,27 +2942,6 @@ class MainActivity : Activity(), CameraController.Callbacks {
     override fun onLongExposure(sec: Int) {
         longLeft = sec
         setRecLook(false)
-    }
-
-    override fun onSteadyReady(uri: Uri, log: SteadyLog) {
-        steadyExec.execute {
-            val out = try {
-                cam.newSteadyOutput()
-            } catch (e: Exception) {
-                ui.post { toast("Couldn't create the stabilised file") }
-                return@execute
-            }
-            val err = SteadyProcessor(this@MainActivity).process(uri, log, out.second) { pct -> steadyPct = pct }
-            try {
-                out.second.close()
-            } catch (_: Exception) {
-            }
-            cam.finishSteadyOutput(out.first, err == null)
-            steadyPct = -1
-            ui.post {
-                if (err != null) toast("Super steady failed: $err") else loadLatestClip()
-            }
-        }
     }
 
     override fun onBusy(busy: Boolean) {
