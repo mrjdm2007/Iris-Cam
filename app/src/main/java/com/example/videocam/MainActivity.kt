@@ -965,16 +965,34 @@ class MainActivity : Activity(), CameraController.Callbacks {
             background = materialSurface(0xE61C1F25.toInt(), 14, 0x55494D55)
             gravity = Gravity.CENTER_VERTICAL
         }
-        val stack = LinearLayout(this).apply {
+        val readouts = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            addView(exposureSummary, LinearLayout.LayoutParams(WRAP, WRAP).apply {
-                setMargins(dp(3), 0, dp(3), dp(4))
-            })
-            addView(readScroll, LinearLayout.LayoutParams(MATCH, WRAP))
-            addView(zoomStrip, LinearLayout.LayoutParams(WRAP, WRAP).apply { setMargins(0, 0, 0, dp(3)) })
-            addView(expStrip, LinearLayout.LayoutParams(WRAP, WRAP))
+            addView(exposureSummary, LinearLayout.LayoutParams(WRAP, WRAP).apply { setMargins(dp(3), 0, dp(3), dp(4)) })
+            addView(readScroll, LinearLayout.LayoutParams(WRAP, WRAP))
         }
-        drag("bottomStack", stack, WRAP, WRAP, Gravity.START or Gravity.BOTTOM, dp(76), 0, 0, dp(8))
+        drag("readouts", readouts, WRAP, WRAP, Gravity.START or Gravity.BOTTOM, dp(76), 0, 0, dp(132))
+        drag("zoomPanel", zoomStrip, WRAP, WRAP, Gravity.START or Gravity.BOTTOM, dp(76), 0, 0, dp(78))
+        drag("exposurePanel", expStrip, WRAP, WRAP, Gravity.START or Gravity.BOTTOM, dp(76), 0, 0, dp(8))
+
+        rackTargetLabel = TextView(this).apply { text = "ZOOM"; gravity = Gravity.CENTER; textSize = 10f; setTextColor(0xFFF3F0E8.toInt()) }
+        sharedRackA = chip("A") { setSharedRackMark(true) }
+        sharedRackB = chip("B") { setSharedRackMark(false) }
+        sharedRackRun = chip("▶") { if (rackTarget == 0) doZoomPull() else doExpPull() }
+        sharedRackTime = chip("3s") { rackSeconds = PULL_SECONDS[(PULL_SECONDS.indexOf(rackSeconds) + 1) % PULL_SECONDS.size]; sharedRackTime.text = rackSeconds.toString() + "s"; refreshUi() }
+        val rackRow1 = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER
+            addView(sharedRackA, LinearLayout.LayoutParams(dp(38), dp(34)).apply { setMargins(dp(2), dp(2), dp(2), dp(2)) })
+            addView(sharedRackB, LinearLayout.LayoutParams(dp(38), dp(34)).apply { setMargins(dp(2), dp(2), dp(2), dp(2)) })
+        }
+        val rackRow2 = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER
+            addView(sharedRackRun, LinearLayout.LayoutParams(dp(38), dp(34)).apply { setMargins(dp(2), dp(2), dp(2), dp(2)) })
+            addView(sharedRackTime, LinearLayout.LayoutParams(dp(38), dp(34)).apply { setMargins(dp(2), dp(2), dp(2), dp(2)) })
+        }
+        rackPanel = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER
+            background = materialSurface(0xE61C1F25.toInt(), 12, 0x55494D55); elevation = dp(3).toFloat()
+            addView(rackTargetLabel, LinearLayout.LayoutParams(MATCH, dp(22))); addView(rackRow1); addView(rackRow2)
+        }
+        drag("rackPanel", rackPanel, dp(92), dp(104), Gravity.END or Gravity.BOTTOM, 0, 0, dp(240), dp(8))
+        setRackTarget(0)
 
         // ----- record, thumbnail -----
         recBtn = View(this)
