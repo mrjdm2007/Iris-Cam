@@ -4,22 +4,15 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-
-    <!-- Bright outer lens ring -->
-    <path android:fillColor="#F4F6FF" android:pathData="M54,12 A42,42 0,1 0,54 96 A42,42 0,1 0,54 12 M54,20 A34,34 0,1 1,54 88 A34,34 0,1 1,54 20" android:fillType="evenOdd" />
-
-    <!-- Six vivid iris blades -->
-    <group android:pivotX="54" android:pivotY="54">
-        <path android:fillColor="#C98A9E" android:pathData="M54,24 C67,25 77,37 74,49 C70,56 61,60 54,57 C48,49 48,35 54,24 Z" />
-        <group android:rotation="60"><path android:fillColor="#D1B18A" android:pathData="M54,24 C67,25 77,37 74,49 C70,56 61,60 54,57 C48,49 48,35 54,24 Z" /></group>
-        <group android:rotation="120"><path android:fillColor="#ADB98D" android:pathData="M54,24 C67,25 77,37 74,49 C70,56 61,60 54,57 C48,49 48,35 54,24 Z" /></group>
-        <group android:rotation="180"><path android:fillColor="#8CBDB6" android:pathData="M54,24 C67,25 77,37 74,49 C70,56 61,60 54,57 C48,49 48,35 54,24 Z" /></group>
-        <group android:rotation="240"><path android:fillColor="#8CA6C8" android:pathData="M54,24 C67,25 77,37 74,49 C70,56 61,60 54,57 C48,49 48,35 54,24 Z" /></group>
-        <group android:rotation="300"><path android:fillColor="#B0A0C8" android:pathData="M54,24 C67,25 77,37 74,49 C70,56 61,60 54,57 C48,49 48,35 54,24 Z" /></group>
-    </group>
-
-    <!-- Deep glass centre and a small lens highlight -->
-    <path android:fillColor="#20232B" android:pathData="M54,39 A15,15 0,1 0,54 69 A15,15 0,1 0,54 39" />
-    <path android:fillColor="#FFFFFF" android:fillAlpha="0.72" android:pathData="M47,45 C50,41 55,40 59,42 C54,42 50,45 48,49 Z" />
-    <path android:fillColor="#A5C6C2" android:pathData="M54,48 A6,6 0,1 0,54 60 A6,6 0,1 0,54 48" />
+    <!-- Minimal two-tone Iris Cam mark -->
+    <path android:fillColor="#FFFFFF"
+        android:pathData="M34,20 H74 A14,14 0,0 1 88,34 V74 A14,14 0,0 1 74,88 H34 A14,14 0,0 1 20,74 V34 A14,14 0,0 1 34,20 Z"/>
+    <path android:fillColor="#000000"
+        android:pathData="M54,27 A27,27 0,1 0 54,81 A27,27 0,1 0 54,27 Z"/>
+    <path android:fillColor="#FFFFFF"
+        android:pathData="M54,34 A20,20 0,1 0 54,74 A20,20 0,1 0 54,34 Z"/>
+    <path android:fillColor="#000000"
+        android:pathData="M54,37.5 A16.5,16.5 0,1 0 54,70.5 A16.5,16.5 0,1 0 54,37.5 Z"/>
+    <path android:fillColor="#FFFFFF"
+        android:pathData="M60,43 A5.5,5.5 0,1 0 60,54 A5.5,5.5 0,1 0 60,43 Z"/>
 </vector>
