@@ -602,7 +602,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
         meter = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply { max = 100 }
         formatChip = chip("") { popup(formatChip, if (cfg.mode == 1) photoItems() else videoItems()) }
         imageChip = chip("IMAGE \u25BE") { popup(imageChip, imageItems()) }
-        filtersChip = chip("FILTERS ▾") { popup(filtersChip, filterItems()) }
+        filtersChip = chip("LOOKS ▾") { popup(filtersChip, looksCategoryItems()) }
         gridChip = chip("GRID \u25BE") { popup(gridChip, gridItems()) }
         toolsChip = chip("TOOLS \u25BE") { popup(toolsChip, toolsItems()) }
         statusText = TextView(this).apply {
@@ -1158,29 +1158,50 @@ class MainActivity : Activity(), CameraController.Callbacks {
     private fun imageItems(): List<Pair<String, () -> Unit>> =
         if (cfg.mode == 1) photoImageItems() else videoImageItems()
 
-    /** Dedicated Filters category. Saved stills get the full effect; video mode is preview-only. */
-    private fun filterItems(): List<Pair<String, () -> Unit>> {
+    /** Looks menu keeps inspired color profiles separate from the existing cinematic/effect presets. */
+    private fun looksCategoryItems(): List<Pair<String, () -> Unit>> = listOf(
+        "Inspired  ›" to { popup(filtersChip, inspiredItems()) },
+        "Cinematic  ›" to { popup(filtersChip, filterItems()) }
+    )
+
+    private fun inspiredItems(): List<Pair<String, () -> Unit>> {
         val presets = listOf(
-            "Natural" to 0,
-            "Film Stocks · Kodak 2383" to 2,
-            "Film Stocks · Kodak 250D" to 3,
-            "Film Stocks · Kodak 500T" to 4,
-            "Film Stocks · Fuji Eterna" to 5,
-            "Cinema · Teal & Orange" to 6,
-            "Cinema · Bleach Bypass" to 7,
-            "Cinema · Noir" to 9,
-            "Vintage · Vintage Fade" to 8,
-            "Leica · Leica Colour (inspired)" to 10,
-            "Colour · Blue Cinematic" to 11,
-            "Colour · Golden Hour" to 12,
-            "Dream · Dream Glow" to 13,
-            "Effects · Black and White" to 1,
-            "Effects · Halation" to 14,
-            "Effects · Soft Diffusion" to 15,
-            "Effects · Film Grain" to 16,
-            "Effects · Anamorphic Flare" to 17,
-            "Colour · Zeiss Colours (inspired)" to 18
+            "Hasselblad · Natural Colour" to 19,
+            "Hasselblad · Portrait" to 20,
+            "Hasselblad · Vivid" to 21,
+            "Fujifilm · Classic Chrome" to 22,
+            "Fujifilm · Velvia" to 23,
+            "Fujifilm · Astia" to 24,
+            "Fujifilm · Pro Neg" to 25,
+            "Fujifilm · Nostalgic Neg" to 26,
+            "Zeiss · Colour (inspired)" to 18
         )
+        return presetItems(presets)
+    }
+
+    /** Existing cinematic looks and effects remain available under the Cinematic category. */
+    private fun filterItems(): List<Pair<String, () -> Unit>> = presetItems(listOf(
+        "Natural" to 0,
+        "Film Stocks · Kodak 2383" to 2,
+        "Film Stocks · Kodak 250D" to 3,
+        "Film Stocks · Kodak 500T" to 4,
+        "Film Stocks · Fuji Eterna" to 5,
+        "Cinema · Teal & Orange" to 6,
+        "Cinema · Bleach Bypass" to 7,
+        "Vintage · Vintage Fade" to 8,
+        "Cinema · Noir" to 9,
+        "Leica · Colour (inspired)" to 10,
+        "Colour · Blue Cinematic" to 11,
+        "Colour · Golden Hour" to 12,
+        "Dream · Dream Glow" to 13,
+        "Effects · Black and White" to 1,
+        "Effects · Halation" to 14,
+        "Effects · Soft Diffusion" to 15,
+        "Effects · Film Grain" to 16,
+        "Effects · Anamorphic Flare" to 17
+    ))
+
+    private fun presetItems(presets: List<Pair<String, Int>>): List<Pair<String, () -> Unit>> {
         val items = presets.map { (label, id) ->
             val title = (if (cfg.filterId == id) "✓ " else "") + label
             title to {
@@ -1192,16 +1213,14 @@ class MainActivity : Activity(), CameraController.Callbacks {
                     cfg.photoLook = 0
                     cfg.flat = false
                     cfgDirty = true
-                    // The recording EGL pipeline is created when Camera2 is configured.
-                    // Rebuild it whenever the selected video look changes so the encoder
-                    // receives the filtered renderer surface, not the raw recorder surface.
+                    // Recreate the EGL recording pipeline so the encoder receives the graded surface.
                     if (cfg.mode == 0) streamChanged() else applyLive()
                     toast("${Look.FILTER_NAMES[id]} selected")
                 }
             }
         }
         return items + ("Intensity: ${cfg.filterIntensity}%" to {
-            choose("Filter intensity", (0..100 step 10).map { "$it%" }) {
+            choose("Look intensity", (0..100 step 10).map { "$it%" }) {
                 cfg.filterIntensity = it * 10
                 cfgDirty = true
                 if (cfg.mode == 0) streamChanged() else applyLive()
