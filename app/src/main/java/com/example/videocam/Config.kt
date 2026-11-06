@@ -83,7 +83,8 @@ data class Config(
     var blue: Boolean = false,        // cool blue cinematic photo filter
     var glow: Boolean = false,       // legacy setting migrated to filterId
     var filterId: Int = 18,          // default Zeiss-inspired colour profile; 0 = Natural
-    var filterIntensity: Int = 30,   // selected filter strength, 0..100
+    var filterIntensity: Int = 25,   // video look strength, 0..100
+    var photoFilterIntensity: Int = 40, // photo look strength, 0..100
     var photoLook: Int = 0,          // 0 natural, 1 golden hour, 2 dream glow
     var photoNr: Int = 1,            // photo noise reduction: 0 minimal, 1 standard, 2 high
     var lensKeys: Boolean = false,   // show the 0.5x / 1x / 2.7x shortcut buttons
