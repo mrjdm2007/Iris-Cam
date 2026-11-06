@@ -19,11 +19,30 @@ class DragFrame(ctx: Context, val key: String) : FrameLayout(ctx) {
     }
     private var dx = 0f
     private var dy = 0f
+    private var downX = 0f
+    private var downY = 0f
+
+    var onSelected: (() -> Unit)? = null
+    var panelSizePercent: Int = 50
+        private set
+    var isSelectedForResize: Boolean = false
+        set(value) {
+            field = value
+            invalidate()
+        }
+
+    fun setPanelSizePercent(percent: Int) {
+        panelSizePercent = percent.coerceIn(25, 100)
+        val scale = panelSizePercent / 50f
+        scaleX = scale
+        scaleY = scale
+    }
 
     var editing = false
         set(v) {
             field = v
             background = if (v) outline else null
+        if (!v) isSelectedForResize = false
         }
 
     override fun onInterceptTouchEvent(e: MotionEvent): Boolean = editing
@@ -35,10 +54,15 @@ class DragFrame(ctx: Context, val key: String) : FrameLayout(ctx) {
             MotionEvent.ACTION_DOWN -> {
                 dx = x - e.rawX
                 dy = y - e.rawY
+                downX = e.rawX
+                downY = e.rawY
             }
             MotionEvent.ACTION_MOVE -> {
-                x = (e.rawX + dx).coerceIn(0f, (p.width - width).toFloat().coerceAtLeast(0f))
-                y = (e.rawY + dy).coerceIn(0f, (p.height - height).toFloat().coerceAtLeast(0f))
+                x = (e.rawX + dx).coerceIn(0f, (p.width - width * scaleX).toFloat().coerceAtLeast(0f))
+                y = (e.rawY + dy).coerceIn(0f, (p.height - height * scaleY).toFloat().coerceAtLeast(0f))
+            }
+            MotionEvent.ACTION_UP -> {
+                if (kotlin.math.hypot(e.rawX - downX, e.rawY - downY) < 12f * d) onSelected?.invoke()
             }
         }
         return true
