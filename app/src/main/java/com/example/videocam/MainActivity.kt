@@ -520,7 +520,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
         }
         s.addView(label, LinearLayout.LayoutParams(dp(74), WRAP))
         views.forEach { v ->
-            val params = if (v is ZoomSlider) LinearLayout.LayoutParams(dp(210), dp(44))
+            val params = if (v is ZoomSlider) LinearLayout.LayoutParams(dp(if (isPortrait()) 210 else 280), dp(52))
             else LinearLayout.LayoutParams(WRAP, WRAP)
             params.setMargins(dp(2), 0, dp(2), 0)
             s.addView(v, params)
@@ -633,11 +633,17 @@ class MainActivity : Activity(), CameraController.Callbacks {
         val intensity = if (cfg.mode == 1) cfg.photoFilterIntensity else cfg.filterIntensity
         val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(18), dp(8), dp(18), dp(8)) }
         groups.forEach { (title, ids) ->
-            val current = ids.firstOrNull { it == cfg.filterId }?.let { names[it] } ?: "Choose a look"
-            box.addView(panelAction(title, current) {
+            box.addView(panelAction(title, "") {
                 choose(title, ids.map { (if (cfg.filterId == it) "✓ " else "") + names[it] }) { index -> applyLook(ids[index]) }
             }, LinearLayout.LayoutParams(MATCH, WRAP).apply { setMargins(0, 0, 0, dp(8)) })
         }
+        val currentLut = TextView(this).apply {
+            text = "CURRENT LUT · " + names.getOrElse(cfg.filterId) { "Natural" }
+            setTextColor(0xFFF3F0E8.toInt())
+            textSize = 12f
+            setPadding(0, dp(4), 0, dp(8))
+        }
+        box.addView(currentLut)
         val label = TextView(this).apply { text = "INTENSITY · ${intensity}%"; setTextColor(0xFFF3F0E8.toInt()); textSize = 12f }
         box.addView(label)
         box.addView(SeekBar(this).apply {
@@ -1164,7 +1170,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
         if (!::zoomSlider.isInitialized || !::expSlider.isInitialized) return
         val p = isPortrait()
         val photo = cfg.mode == 1
-        val w = dp(if (!p) (if (photo) 340 else 210) else (if (photo) 290 else 120))
+        val w = dp(if (p) 210 else 280)
         listOf(zoomSlider, expSlider).forEach {
             val l = it.layoutParams as LinearLayout.LayoutParams
             if (l.width != w) {
@@ -1283,7 +1289,10 @@ class MainActivity : Activity(), CameraController.Callbacks {
             listOf("tool2x", "toolPeak", "toolFalse", "toolTorch", "toolTimer", "toolRotate").forEachIndexed { i, key -> setFrameLp(key, dp(70), WRAP, Gravity.START or Gravity.CENTER_VERTICAL, dp(6), dp(20 + i * 58), 0, 0) }
             setFrameLp("focusSlider", dp(56), MATCH, Gravity.END, 0, dp(110), dp(6), dp(260))
             setFrameLp("focusTools", WRAP, WRAP, Gravity.END or Gravity.TOP, 0, dp(110), dp(66), 0)
-            setFrameLp("bottomStack", MATCH, WRAP, Gravity.START or Gravity.BOTTOM, 0, 0, 0, dp(100))
+            setFrameLp("readouts", WRAP, WRAP, Gravity.START or Gravity.BOTTOM, dp(70), 0, 0, dp(164))
+setFrameLp("zoomPanel", WRAP, WRAP, Gravity.START or Gravity.BOTTOM, dp(70), 0, 0, dp(106))
+setFrameLp("exposurePanel", WRAP, WRAP, Gravity.START or Gravity.BOTTOM, dp(70), 0, 0, dp(48))
+setFrameLp("rackPanel", dp(92), dp(104), Gravity.END or Gravity.BOTTOM, 0, 0, dp(74), dp(112))
             setFrameLp("rec", dp(64), dp(64), Gravity.CENTER_HORIZONTAL or Gravity.BOTTOM, 0, 0, 0, dp(18))
             setFrameLp("thumb", dp(52), dp(52), Gravity.START or Gravity.BOTTOM, dp(20), 0, 0, dp(24))
             setFrameLp("mode", WRAP, WRAP, Gravity.END or Gravity.BOTTOM, 0, 0, dp(14), dp(32))
@@ -1291,7 +1300,10 @@ class MainActivity : Activity(), CameraController.Callbacks {
             listOf("tool2x", "toolPeak", "toolFalse", "toolTorch", "toolTimer", "toolRotate").forEachIndexed { i, key -> setFrameLp(key, dp(70), WRAP, Gravity.START or Gravity.CENTER_VERTICAL, dp(8), dp(20 + i * 58), 0, 0) }
             setFrameLp("focusSlider", dp(56), MATCH, Gravity.END, 0, dp(56), dp(10), dp(14))
             setFrameLp("focusTools", WRAP, WRAP, Gravity.END or Gravity.TOP, 0, dp(56), dp(76), 0)
-            setFrameLp("bottomStack", WRAP, WRAP, Gravity.START or Gravity.BOTTOM, dp(76), 0, 0, dp(8))
+            setFrameLp("readouts", WRAP, WRAP, Gravity.START or Gravity.BOTTOM, dp(76), 0, 0, dp(132))
+setFrameLp("zoomPanel", WRAP, WRAP, Gravity.START or Gravity.BOTTOM, dp(76), 0, 0, dp(78))
+setFrameLp("exposurePanel", WRAP, WRAP, Gravity.START or Gravity.BOTTOM, dp(76), 0, 0, dp(8))
+setFrameLp("rackPanel", dp(92), dp(104), Gravity.END or Gravity.BOTTOM, 0, 0, dp(240), dp(8))
             setFrameLp("rec", dp(64), dp(64), Gravity.END or Gravity.BOTTOM, 0, 0, dp(88), dp(16))
             setFrameLp("thumb", dp(52), dp(52), Gravity.END or Gravity.BOTTOM, 0, 0, dp(166), dp(22))
             setFrameLp("mode", WRAP, WRAP, Gravity.END or Gravity.BOTTOM, 0, 0, dp(70), dp(88))
@@ -1383,11 +1395,12 @@ class MainActivity : Activity(), CameraController.Callbacks {
                     f.y = fy * root.height
                 }
             }
+            f.post { f.clampIntoParent() }
         }
     }
 
     private fun mirrorLayout() {
-        frames.forEach { it.x = root.width - it.x - it.width }
+        frames.forEach { it.x = root.width - it.x - it.width * it.scaleX; it.clampIntoParent() }
         savePositions()
     }
 
@@ -1656,8 +1669,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
         modeChip.text = if (photo) "PHOTO MODE" else "VIDEO MODE"
         setActive(modeChip, false)
         val pullVis = if (photo) View.GONE else View.VISIBLE
-        listOf(zA, zB, zoomGo, zoomTime, zoomLink, eA, eB, expGo, expTime)
-            .forEach { it.visibility = if (pullVis == View.VISIBLE && zoomControlsExpanded) View.VISIBLE else View.GONE }
+        if (::rackPanel.isInitialized) rackPanel.visibility = pullVis
         zoomPresetChips.forEach { (value, chip) ->
             val supported = value >= cam.zoomRange.lower - 0.01f && value <= cam.zoomHi() + 0.01f
             chip.visibility = if (cfg.mode == 0 && zoomControlsExpanded && supported) View.VISIBLE else View.GONE
