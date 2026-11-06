@@ -49,7 +49,7 @@ data class Config(
     var bitrateMbps: Int = 50,
     var hevc: Boolean = false,       // false = H.264, true = H.265
     var nrOff: Boolean = true,
-    var stab: Int = 2,               // 0 = off, 2 = OIS + EIS where supported
+    var stab: Int = 2,               // 0 = off, 1 = EIS, 2 = EIS + OIS
     var flat: Boolean = false,
     var manualExposure: Boolean = false,
     var shutterDenom: Int = 50,      // shutter = 1/shutterDenom seconds

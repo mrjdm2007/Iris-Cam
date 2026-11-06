@@ -1287,8 +1287,8 @@ class MainActivity : Activity(), CameraController.Callbacks {
     }
 
     private fun videoImageItems(): List<Pair<String, () -> Unit>> = listOf(
-        "Stabilization: ${if (cfg.stab != 0) "On (OIS + EIS where supported)" else "Off"}" to {
-            cfg.stab = if (cfg.stab == 0) 2 else 0
+        "Stabilization: ${when (cfg.stab) { 1 -> "EIS"; 2 -> "EIS + OIS"; else -> "Off" }}" to {
+            cfg.stab = (cfg.stab + 1) % 3
             cfgDirty = true
             applyLive()
         },

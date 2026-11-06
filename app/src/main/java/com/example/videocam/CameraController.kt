@@ -1069,22 +1069,28 @@ class CameraController(
             listOf(CameraMetadata.EDGE_MODE_OFF)
         )
 
-        // ----- stabilization: one toggle; request OIS + EIS together where supported -----
+        // ----- stabilization modes: 0 = off, 1 = EIS, 2 = EIS + OIS -----
+        // EIS-only explicitly disables OIS. Combined mode requests both independently;
+        // the device may still ignore either request if that lens/mode cannot provide it.
+        val requestedOis = if (cfg.stab == 2) {
+            CameraMetadata.LENS_OPTICAL_STABILIZATION_MODE_ON
+        } else {
+            CameraMetadata.LENS_OPTICAL_STABILIZATION_MODE_OFF
+        }
+        val requestedEis = if (cfg.stab >= 1) {
+            CameraMetadata.CONTROL_VIDEO_STABILIZATION_MODE_ON
+        } else {
+            CameraMetadata.CONTROL_VIDEO_STABILIZATION_MODE_OFF
+        }
         pick(
             b, CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE,
             CameraCharacteristics.LENS_INFO_AVAILABLE_OPTICAL_STABILIZATION,
-            listOf(
-                if (cfg.stab != 0) CameraMetadata.LENS_OPTICAL_STABILIZATION_MODE_ON
-                else CameraMetadata.LENS_OPTICAL_STABILIZATION_MODE_OFF
-            )
+            listOf(requestedOis)
         )
         pick(
             b, CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE,
             CameraCharacteristics.CONTROL_AVAILABLE_VIDEO_STABILIZATION_MODES,
-            listOf(
-                if (cfg.stab != 0) CameraMetadata.CONTROL_VIDEO_STABILIZATION_MODE_ON
-                else CameraMetadata.CONTROL_VIDEO_STABILIZATION_MODE_OFF
-            )
+            listOf(requestedEis)
         )
 
         // ----- face detection for face-priority AF -----
