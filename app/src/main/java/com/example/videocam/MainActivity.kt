@@ -121,6 +121,13 @@ class MainActivity : Activity(), CameraController.Callbacks {
     private lateinit var panelSizeLabel: TextView
     private lateinit var panelSizeSlider: SeekBar
     private var selectedFrame: DragFrame? = null
+    private lateinit var rackPanel: LinearLayout
+    private lateinit var rackTargetLabel: TextView
+    private lateinit var sharedRackA: TextView
+    private lateinit var sharedRackB: TextView
+    private lateinit var sharedRackRun: TextView
+    private lateinit var sharedRackTime: TextView
+    private var rackTarget = 0
     private lateinit var toolsCol: LinearLayout
     private lateinit var modeChip: TextView
     private lateinit var zA: TextView
@@ -295,6 +302,8 @@ class MainActivity : Activity(), CameraController.Callbacks {
             subtleSliderHaptic(slider)
             refreshUi()
         }
+        zoomSlider.onInteraction = { setRackTarget(0) }
+        expSlider.onInteraction = { setRackTarget(1) }
         zoomSlider.onChange = { z ->
             cam.cancelZoomPull()
             cam.setZoom(z)
@@ -937,7 +946,8 @@ class MainActivity : Activity(), CameraController.Callbacks {
             }
         }
         zoomPresetChips.forEach { it.second.visibility = View.GONE }
-        val zoomStrip = strip(zoomLabel, zoomControlsChip, *zoomPresetChips.map { it.second }.toTypedArray(), zA, zB, zoomSlider, zoomGo, zoomTime, zoomLink)
+        zoomLabel.setOnClickListener { setRackTarget(0) }
+        val zoomStrip = strip(zoomLabel, zoomControlsChip, *zoomPresetChips.map { it.second }.toTypedArray(), zoomSlider)
 
         expSlider = ZoomSlider(this)
         expLabel = label("EXPOSURE")
@@ -954,7 +964,8 @@ class MainActivity : Activity(), CameraController.Callbacks {
             expSeconds = PULL_SECONDS[(PULL_SECONDS.indexOf(expSeconds) + 1) % PULL_SECONDS.size]
             refreshUi()
         }
-        val expStrip = strip(expLabel, eA, eB, expSlider, expGo, expTime)
+        expLabel.setOnClickListener { setRackTarget(1) }
+        val expStrip = strip(expLabel, expSlider)
 
         exposureSummary = TextView(this).apply {
             text = "AUTO  ·  ISO --  ·  --"
