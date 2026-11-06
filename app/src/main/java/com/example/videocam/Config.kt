@@ -208,7 +208,7 @@ data class Config(
                 o.optInt("photoLook", d.photoLook) == 2 -> 13
                 else -> 0
             }
-            val selectedFilter = o.optInt("filterId", legacyFilter).coerceIn(0, 26)
+            val selectedFilter = o.optInt("filterId", legacyFilter).coerceIn(0, 28)
             return Config(
                 cameraId = o.optString("cameraId", d.cameraId),
                 width = o.optInt("width", d.width),

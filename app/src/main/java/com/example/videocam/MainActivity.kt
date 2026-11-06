@@ -1175,6 +1175,8 @@ class MainActivity : Activity(), CameraController.Callbacks {
             "Fujifilm · Astia" to 24,
             "Fujifilm · Pro Neg" to 25,
             "Fujifilm · Nostalgic Neg" to 26,
+            "Sony · S-Cinetone (inspired)" to 27,
+            "Panasonic Lumix · Cinelike D (inspired)" to 28,
             "Zeiss · Colour (inspired)" to 18
         )
         return presetItems(presets)

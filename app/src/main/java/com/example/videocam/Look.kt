@@ -174,7 +174,8 @@ object Look {
         "Hasselblad Natural Colour (inspired)", "Hasselblad Portrait (inspired)",
         "Hasselblad Vivid (inspired)", "Fujifilm Classic Chrome (inspired)",
         "Fujifilm Velvia (inspired)", "Fujifilm Astia (inspired)",
-        "Fujifilm Pro Neg (inspired)", "Fujifilm Nostalgic Neg (inspired)"
+        "Fujifilm Pro Neg (inspired)", "Fujifilm Nostalgic Neg (inspired)",
+        "Sony S-Cinetone (inspired)", "Panasonic Lumix Cinelike D (inspired)"
     )
 
     private fun filterMatrix(id: Int): ColorMatrix {
@@ -236,6 +237,8 @@ object Look {
             24 -> basic(1.02f, 0.96f, 5f, 3f, 2f) // gentle Astia-like softness
             25 -> basic(0.90f, 0.94f, 2f, 2f, 3f) // subdued Pro Neg-like colour
             26 -> basic(1.04f, 0.98f, 10f, 6f, -1f) // warm nostalgic negative-inspired grade
+            27 -> basic(0.94f, 0.98f, 4f, 2f, 1f) // S-Cinetone-inspired gentle contrast and natural color
+            28 -> basic(0.82f, 0.90f, 1f, 3f, 4f) // Cinelike D-inspired flatter, muted palette
             else -> ColorMatrix()
         }
     }
