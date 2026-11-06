@@ -15,6 +15,7 @@ import kotlin.math.pow
 class ZoomSlider(ctx: Context) : View(ctx) {
 
     var onChange: ((Float) -> Unit)? = null
+    var onInteraction: (() -> Unit)? = null
     var markA: Float? = null
     var markB: Float? = null
     var minZ = 1f
@@ -111,6 +112,7 @@ class ZoomSlider(ctx: Context) : View(ctx) {
         if (!isEnabled) return false
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE -> {
+                if (e.actionMasked == MotionEvent.ACTION_DOWN) onInteraction?.invoke()
                 parent?.requestDisallowInterceptTouchEvent(true)
                 val f = ((e.x - pad) / (width - 2 * pad)).coerceIn(0f, 1f)
                 zoom = if (log) minZ * (maxZ / minZ).pow(f) else minZ + f * (maxZ - minZ)
