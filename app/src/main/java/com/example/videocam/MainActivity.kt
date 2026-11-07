@@ -691,7 +691,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
     private fun toggleExposureControls() {
         if (!exposureControlsExpanded && zoomControlsExpanded) toggleZoomControls()
         exposureControlsExpanded = !exposureControlsExpanded
-        exposureControlsChip.text = rackIndicator(if (exposureControlsExpanded) "EXP ◂" else "EXP", rackTarget == 1)
+        exposureControlsChip.text = if (exposureControlsExpanded) "••• ◂" else "•••"
         setActive(exposureControlsChip, exposureControlsExpanded)
         val controls = listOf(rEv.box, rWb.box, rAe.box)
         if (exposureControlsExpanded) {
@@ -919,7 +919,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
         rEv = readout("EV") { pickEv() }
         rAe = readout("AE LOCK") { cam.toggleAeLock() }
         rWb = readout("WB") { cam.toggleAwbLock() }
-        exposureControlsChip = chip("EXP ▸") { toggleExposureControls() }
+        exposureControlsChip = chip("•••") { toggleExposureControls() }
         val readRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -1322,7 +1322,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
             setFrameLp("focusTools", WRAP, WRAP, Gravity.END or Gravity.TOP, 0, sy(0.16f), dp(66), 0)
 
             // Three independent bottom lanes, matching the portrait reference proportions.
-            setFrameLp("readouts", WRAP, WRAP, Gravity.START or Gravity.BOTTOM, dp(8), 0, 0, sy(0.46f))
+            setFrameLp("readouts", WRAP, WRAP, Gravity.START or Gravity.BOTTOM, dp(8), 0, 0, sy(0.38f))
             setFrameLp("zoomPanel", WRAP, WRAP, Gravity.START or Gravity.BOTTOM, dp(4), 0, 0, sy(0.139f))
             setFrameLp("exposurePanel", WRAP, WRAP, Gravity.START or Gravity.BOTTOM, dp(4), 0, 0, sy(0.055f))
             setFrameLp("rackPanel", dp(92), dp(104), Gravity.END or Gravity.BOTTOM, 0, 0, sx(0.067f), sy(0.096f))
@@ -1339,7 +1339,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
             setFrameLp("focusTools", WRAP, WRAP, Gravity.END or Gravity.TOP, 0, sy(0.135f), dp(76), 0)
 
             // Landscape lanes are deliberately staggered to mirror the supplied screenshot.
-            setFrameLp("readouts", WRAP, WRAP, Gravity.START or Gravity.BOTTOM, sx(0.397f), 0, 0, sy(0.135f))
+            setFrameLp("readouts", WRAP, WRAP, Gravity.START or Gravity.BOTTOM, sx(0.32f), 0, 0, sy(0.105f))
             setFrameLp("zoomPanel", WRAP, WRAP, Gravity.START or Gravity.BOTTOM, sx(0.145f), 0, 0, sy(0.210f))
             setFrameLp("exposurePanel", WRAP, WRAP, Gravity.START or Gravity.BOTTOM, sx(0.045f), 0, 0, sy(0.070f))
             setFrameLp("rackPanel", dp(92), dp(104), Gravity.END or Gravity.BOTTOM, 0, 0, sx(0.078f), sy(0.180f))
@@ -1366,7 +1366,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
             it.value.textSize = if (p) 12f else 14f
             it.box.setPadding(dp(if (p) 2 else 10), dp(3), dp(if (p) 2 else 10), dp(3))
         }
-        exposureSummary.orientation = if (p) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
+        exposureSummary.orientation = LinearLayout.HORIZONTAL
         exposureControlsChip.textSize = if (p) 11f else 12f
         exposureControlsChip.setPadding(dp(if (p) 8 else 12), dp(7), dp(if (p) 8 else 12), dp(7))
         if (::zoomControlsChip.isInitialized) {
@@ -1875,7 +1875,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
         setC(rShutter.value, if (manual) AMBER else Color.WHITE)
         rIso.box.alpha = if (manual) 1f else 0.72f
         rShutter.box.alpha = if (manual) 1f else 0.72f
-        exposureSummary.orientation = if (isPortrait()) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
+        exposureSummary.orientation = LinearLayout.HORIZONTAL
     }
 
     /** Re-points the exposure slider at EV (Auto) or ISO (Manual). */
@@ -2330,7 +2330,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
         zoomLabel.text = rackIndicator("ZOOM", rackTarget == 0)
         expLabel.text = rackIndicator("EXPOSURE", rackTarget == 1)
         zoomControlsChip.text = rackIndicator("ZOOM", rackTarget == 0)
-        exposureControlsChip.text = rackIndicator("EXP", rackTarget == 1)
+        exposureControlsChip.text = "•••"
         setActive(zoomLabel, false)
         setActive(expLabel, false)
     }
