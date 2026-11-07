@@ -1188,7 +1188,7 @@ class CameraController(
         // JPEG_R must be saved byte-for-byte to preserve its gain map. If a pixel filter
         // is selected, use ordinary JPEG so the requested look is actually rendered.
         cfg.photoFormat == 3 && ultraHdrAvailable &&
-            cfg.filterId == 0 -> ImageFormat.JPEG_R
+            cfg.filterId == 0 && !cfg.flat -> ImageFormat.JPEG_R
         else -> ImageFormat.JPEG
     }
 
