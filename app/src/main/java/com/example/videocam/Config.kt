@@ -85,11 +85,12 @@ data class Config(
     var filterId: Int = 18,          // default Zeiss-inspired colour profile; 0 = Natural
     var filterIntensity: Int = 50,   // default video look strength, 0..100
     var photoFilterIntensity: Int = 70, // default photo look strength, 0..100
+    var photoContrast: Int = 40, // additional saved-photo contrast strength, 0..100
     var photoLook: Int = 0,          // 0 natural, 1 golden hour, 2 dream glow
     var photoNr: Int = 1,            // photo noise reduction: 0 minimal, 1 standard, 2 high
     var lensKeys: Boolean = false,   // show the 0.5x / 1x / 2.7x shortcut buttons
     var haptics: Boolean = true,     // subtle shutter and manual slider feedback
-    var ver: Int = 3
+    var ver: Int = 4
 ) {
     fun copyFrom(o: Config) {
         cameraId = o.cameraId
@@ -135,6 +136,7 @@ data class Config(
         filterId = o.filterId
         filterIntensity = o.filterIntensity
         photoFilterIntensity = o.photoFilterIntensity
+        photoContrast = o.photoContrast
         photoLook = o.photoLook
         photoNr = o.photoNr
         lensKeys = o.lensKeys
@@ -186,6 +188,7 @@ data class Config(
         .put("filterId", filterId)
         .put("filterIntensity", filterIntensity)
         .put("photoFilterIntensity", photoFilterIntensity)
+        .put("photoContrast", photoContrast)
         .put("photoLook", photoLook)
         .put("photoNr", photoNr)
         .put("lensKeys", lensKeys)
@@ -260,11 +263,12 @@ data class Config(
                 filterId = selectedFilter,
                 filterIntensity = selectedIntensity,
                 photoFilterIntensity = selectedPhotoIntensity,
+                photoContrast = o.optInt("photoContrast", d.photoContrast).coerceIn(0, 100),
                 photoLook = 0,
                 photoNr = o.optInt("photoNr", if (o.optBoolean("photoNrOff", false)) 0 else d.photoNr),
                 lensKeys = o.optBoolean("lensKeys", d.lensKeys),
                 haptics = o.optBoolean("haptics", d.haptics),
-                ver = maxOf(3, o.optInt("ver", d.ver))
+                ver = maxOf(4, o.optInt("ver", d.ver))
             )
         }
     }
