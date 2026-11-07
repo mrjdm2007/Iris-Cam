@@ -967,8 +967,8 @@ class MainActivity : Activity(), CameraController.Callbacks {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        listOf(exposureControlsChip, rEv.box, rWb.box, rAe.box).forEach { view ->
-            if (view !== exposureControlsChip) readBoxes.add(view)
+        listOf(rEv.box, rWb.box, rAe.box).forEach { view ->
+            readBoxes.add(view)
             readRow.addView(view, LinearLayout.LayoutParams(WRAP, WRAP).apply { setMargins(dp(3), 0, dp(3), dp(3)) })
         }
         listOf(rEv.box, rWb.box, rAe.box).forEach { it.visibility = View.GONE }
@@ -1032,7 +1032,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
             gravity = Gravity.CENTER_VERTICAL
             background = materialSurface(0xE6211F26.toInt(), 18, 0x5549454F)
             setPadding(dp(8), dp(5), dp(8), dp(5))
-            listOf(rMode.box, rIso.box, rShutter.box).forEach { item ->
+            listOf(exposureControlsChip, rMode.box, rIso.box, rShutter.box).forEach { item ->
                 addView(item, LinearLayout.LayoutParams(WRAP, WRAP).apply { setMargins(dp(3), dp(2), dp(3), dp(2)) })
             }
         }
