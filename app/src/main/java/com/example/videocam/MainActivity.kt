@@ -578,6 +578,47 @@ class MainActivity : Activity(), CameraController.Callbacks {
             .show()
     }
 
+    /** Minimal monochrome shutter/video glyph used by the photo/video mode switch. */
+    private class CameraModeIconDrawable(context: Context, private val photo: Boolean) : android.graphics.drawable.Drawable() {
+        private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.WHITE
+            style = Paint.Style.STROKE
+            strokeWidth = context.resources.displayMetrics.density * 1.8f
+            strokeCap = Paint.Cap.ROUND
+            strokeJoin = Paint.Join.ROUND
+        }
+        private val d = context.resources.displayMetrics.density
+        override fun draw(canvas: android.graphics.Canvas) {
+            val b = bounds
+            val cx = b.exactCenterX()
+            val cy = b.exactCenterY()
+            val save = canvas.save()
+            canvas.translate(cx - 10f * d, cy - 10f * d)
+            if (photo) {
+                // Camera body + raised viewfinder + centered lens.
+                val body = android.graphics.RectF(1f*d, 5f*d, 19f*d, 17f*d)
+                canvas.drawRoundRect(body, 2f*d, 2f*d, paint)
+                canvas.drawRoundRect(android.graphics.RectF(5f*d, 2f*d, 11f*d, 6f*d), 1f*d, 1f*d, paint)
+                canvas.drawCircle(10f*d, 11f*d, 3.2f*d, paint)
+            } else {
+                // Camcorder body with distinct forward lens hood.
+                val body = android.graphics.RectF(1f*d, 5f*d, 14f*d, 16f*d)
+                canvas.drawRoundRect(body, 2f*d, 2f*d, paint)
+                val lens = Path().apply {
+                    moveTo(14f*d, 8f*d); lineTo(20f*d, 5f*d)
+                    lineTo(20f*d, 16f*d); lineTo(14f*d, 13f*d); close()
+                }
+                canvas.drawPath(lens, paint)
+            }
+            canvas.restoreToCount(save)
+        }
+        override fun setAlpha(alpha: Int) { paint.alpha = alpha }
+        override fun setColorFilter(colorFilter: android.graphics.ColorFilter?) { paint.colorFilter = colorFilter }
+        override fun getOpacity(): Int = android.graphics.PixelFormat.TRANSLUCENT
+        override fun getIntrinsicWidth(): Int = (24f*d).toInt()
+        override fun getIntrinsicHeight(): Int = (24f*d).toInt()
+    }
+
     private fun fmtZoom(z: Float) = if (z == z.toInt().toFloat()) "${z.toInt()}x" else "%.1fx".format(z)
 
     // ---------- redesigned format and looks panels ----------
@@ -1787,12 +1828,18 @@ class MainActivity : Activity(), CameraController.Callbacks {
         setActive(filtersChip, cfg.filterId != 0)
         setActive(gridChip, cfg.grid != 0)
         setActive(toolsChip, false)
-        modeChip.text = if (photo) "📷" else "🎥"
+        modeChip.text = ""
         modeChip.contentDescription = if (photo) "Switch to video mode" else "Switch to photo mode"
         modeChip.textSize = 25f
         modeChip.setPadding(dp(10), dp(4), dp(10), dp(4))
         modeChip.minWidth = dp(48)
         modeChip.minHeight = dp(48)
+        modeChip.gravity = Gravity.CENTER
+        modeChip.setCompoundDrawablesRelativeWithIntrinsicBounds(
+            null, null,
+            if (photo) CameraModeIconDrawable(this, true) else CameraModeIconDrawable(this, false),
+            null
+        )
         setActive(modeChip, false)
         val pullVis = if (photo) View.GONE else View.VISIBLE
         if (::rackPanel.isInitialized) rackPanel.visibility = pullVis
