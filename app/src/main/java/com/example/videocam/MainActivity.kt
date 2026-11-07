@@ -1699,7 +1699,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
             }
         },
         "Laptop monitor (Wi-Fi): ${if (monitor != null) "On — tap for connection" else "Off"}" to { toggleMonitor() },
-        "Settings guide" to { showSettingsGuide() },
+        "Settings guide" to { SettingsGuide.show(this) },
         "Dolly Zoom (linked zoom + focus): ${if (zoomLinked) "On" else "Off"}" to {
             zoomLinked = !zoomLinked
             refreshUi()
