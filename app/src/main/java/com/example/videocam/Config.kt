@@ -68,7 +68,7 @@ data class Config(
     var peak: Int = 0,               // focus peaking: 0 = off, 1 = low, 2 = medium, 3 = high
     var timer: Int = 0,              // self-timer seconds (0, 3, 5, 10)
     var mode: Int = 0,               // 0 = video, 1 = photo
-    var photoFormat: Int = 0,        // 0 = phone JPEG (default), 1 = RAW develop, 3 = native Ultra HDR JPEG_R
+    var photoFormat: Int = 0,        // 0 = phone JPEG, 1 = RAW develop, 2 = Ultra HDR 2-frame bracket, 3 = native Ultra HDR JPEG_R
     var saveDng: Boolean = false,
     var photoQuality: Int = 95,
     var photoW: Int = 0,             // 0 = default ~8 MP capture
