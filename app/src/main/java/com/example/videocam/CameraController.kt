@@ -1210,13 +1210,13 @@ class CameraController(
         else -> jpegSizes
     }
 
-    /** With nothing picked, about 12 MP: far quicker to shoot and save than the 50 MP mode. */
+    /** Logical ID 5 stays at ~8 MP for fast continuous lens switching. Separate lenses use their own maximum still size. */
     fun captureSize(): Size {
         val l = captureSizes()
         if (l.isEmpty()) return Size(4000, 3000)
         l.firstOrNull { it.width == cfg.photoW && it.height == cfg.photoH }?.let { return it }
-        if (effMode() == 1 || captureFormat() == ImageFormat.JPEG_R) return l.first()
-        // Default to a fast ~8 MP 4:3 capture and save at that exact pixel size.
+        if (effMode() == 1 || captureFormat() == ImageFormat.JPEG_R || cfg.cameraId != "5") return l.first()
+        // The all-lenses logical camera uses a fast ~8 MP 4:3 default.
         val target = min(8_000_000L, lensSafeArea)
         val ok = l.filter { it.width.toLong() * it.height <= target }
         return ok.firstOrNull { it.width * 3 == it.height * 4 }
