@@ -2722,15 +2722,18 @@ class MainActivity : Activity(), CameraController.Callbacks {
         // Avoid rebuilding ColorMatrix/Paint on every UI refresh; only update when the
         // selected look changes. A preview-layer failure must never take down the camera.
         if (!::tv.isInitialized) return
+        // Photo and video modes keep independent filter strengths. The preview must
+        // use the strength belonging to the active mode, not always the video value.
+        val intensity = if (cfg.mode == 1) cfg.photoFilterIntensity else cfg.filterIntensity
         if (appliedPreviewFilterId == cfg.filterId &&
-            appliedPreviewFilterIntensity == cfg.filterIntensity) return
+            appliedPreviewFilterIntensity == intensity) return
         try {
             val paint = if (cfg.filterId > 0) Paint().apply {
-                colorFilter = Look.previewFilter(cfg.filterId, cfg.filterIntensity)
+                colorFilter = Look.previewFilter(cfg.filterId, intensity)
             } else null
             tv.setLayerPaint(paint)
             appliedPreviewFilterId = cfg.filterId
-            appliedPreviewFilterIntensity = cfg.filterIntensity
+            appliedPreviewFilterIntensity = intensity
         } catch (e: RuntimeException) {
             runCatching { tv.setLayerPaint(null) }
             appliedPreviewFilterId = cfg.filterId
