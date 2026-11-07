@@ -27,6 +27,7 @@ import android.hardware.camera2.params.MeteringRectangle
 import android.hardware.camera2.params.OutputConfiguration
 import android.hardware.camera2.params.SessionConfiguration
 import android.hardware.camera2.params.StreamConfigurationMap
+import android.hardware.camera2.params.TonemapCurve
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import android.media.Image
@@ -1074,23 +1075,29 @@ class CameraController(
             listOf(CameraMetadata.EDGE_MODE_OFF)
         )
 
-        // ----- stabilization: one toggle; request OIS + EIS together where supported -----
+        // 0 = Off, 1 = EIS only, 2 = EIS + OIS. Each mode is requested independently.
         pick(
             b, CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE,
             CameraCharacteristics.LENS_INFO_AVAILABLE_OPTICAL_STABILIZATION,
-            listOf(
-                if (cfg.stab != 0) CameraMetadata.LENS_OPTICAL_STABILIZATION_MODE_ON
-                else CameraMetadata.LENS_OPTICAL_STABILIZATION_MODE_OFF
-            )
+            listOf(if (cfg.stab == 2) CameraMetadata.LENS_OPTICAL_STABILIZATION_MODE_ON
+                else CameraMetadata.LENS_OPTICAL_STABILIZATION_MODE_OFF)
         )
         pick(
             b, CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE,
             CameraCharacteristics.CONTROL_AVAILABLE_VIDEO_STABILIZATION_MODES,
-            listOf(
-                if (cfg.stab != 0) CameraMetadata.CONTROL_VIDEO_STABILIZATION_MODE_ON
-                else CameraMetadata.CONTROL_VIDEO_STABILIZATION_MODE_OFF
-            )
+            listOf(if (cfg.stab >= 1) CameraMetadata.CONTROL_VIDEO_STABILIZATION_MODE_ON
+                else CameraMetadata.CONTROL_VIDEO_STABILIZATION_MODE_OFF)
         )
+
+        // Flat profile is opt-in: use the camera tone curve only when explicitly enabled.
+        if (cfg.flat) {
+            val modes = chars.get(CameraCharacteristics.TONEMAP_AVAILABLE_TONE_MAP_MODES)
+            if (modes?.contains(CameraMetadata.TONEMAP_MODE_CONTRAST_CURVE) == true) {
+                val pts = Look.FLAT_POINTS
+                b.set(CaptureRequest.TONEMAP_MODE, CameraMetadata.TONEMAP_MODE_CONTRAST_CURVE)
+                b.set(CaptureRequest.TONEMAP_CURVE, TonemapCurve(pts, pts, pts))
+            }
+        }
 
         // ----- face detection for face-priority AF -----
         if (cfg.faceAf && faceAfSupported) {
@@ -1355,6 +1362,14 @@ class CameraController(
                 listOf(CameraMetadata.NOISE_REDUCTION_MODE_HIGH_QUALITY, CameraMetadata.NOISE_REDUCTION_MODE_FAST)
             )
         }
+        if (!capture && cfg.flat) {
+            val modes = chars.get(CameraCharacteristics.TONEMAP_AVAILABLE_TONE_MAP_MODES)
+            if (modes?.contains(CameraMetadata.TONEMAP_MODE_CONTRAST_CURVE) == true) {
+                val pts = Look.FLAT_POINTS
+                b.set(CaptureRequest.TONEMAP_MODE, CameraMetadata.TONEMAP_MODE_CONTRAST_CURVE)
+                b.set(CaptureRequest.TONEMAP_CURVE, TonemapCurve(pts, pts, pts))
+            }
+        }
         if (!capture && cfg.faceAf && faceAfSupported) {
             b.set(CaptureRequest.STATISTICS_FACE_DETECT_MODE, CameraMetadata.STATISTICS_FACE_DETECT_MODE_SIMPLE)
         }
@@ -1610,10 +1625,18 @@ class CameraController(
         procExec.execute { processShot(sh) }
     }
 
-    /** Apply only the explicitly selected filter; Natural returns the camera bitmap untouched. */
+    /** Apply the optional flat profile and/or selected filter; Natural otherwise stays untouched. */
     private fun finishLook(bmp: Bitmap, sh: Shot): Bitmap {
-        if (sh.filterId <= 0 || sh.filterIntensity <= 0) return bmp
-        return Look.applyPreset(bmp, sh.filterId, sh.filterIntensity)
+        var out = Look.apply(bmp, sh.bw, sh.flat)
+        if (out !== bmp) bmp.recycle()
+        if ((sh.filterId > 0 && sh.filterIntensity > 0) || sh.flat || sh.bw) {
+            val filtered = Look.applyPreset(out, sh.filterId, sh.filterIntensity)
+            if (filtered !== out) {
+                out.recycle()
+                out = filtered
+            }
+        }
+        return out
     }
 
     private fun processShot(sh: Shot) {
