@@ -1787,7 +1787,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
         setActive(filtersChip, cfg.filterId != 0)
         setActive(gridChip, cfg.grid != 0)
         setActive(toolsChip, false)
-        modeChip.text = if (photo) "▣" else "▰"
+        modeChip.text = if (photo) "📷" else "🎥"
         modeChip.contentDescription = if (photo) "Switch to video mode" else "Switch to photo mode"
         modeChip.textSize = 25f
         modeChip.setPadding(dp(10), dp(4), dp(10), dp(4))
