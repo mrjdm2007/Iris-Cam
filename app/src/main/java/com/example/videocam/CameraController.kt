@@ -1209,7 +1209,7 @@ class CameraController(
         if (l.isEmpty()) return Size(4000, 3000)
         l.firstOrNull { it.width == cfg.photoW && it.height == cfg.photoH }?.let { return it }
         if (effMode() == 1 || captureFormat() == ImageFormat.JPEG_R) return l.first()
-        // Default to a fast ~8 MP 4:3 capture; finishLook upscales it to 12.6 MP.
+        // Default to a fast ~8 MP 4:3 capture and save at that exact pixel size.
         val target = min(8_000_000L, lensSafeArea)
         val ok = l.filter { it.width.toLong() * it.height <= target }
         return ok.firstOrNull { it.width * 3 == it.height * 4 }
@@ -1543,7 +1543,7 @@ class CameraController(
             }
             val sh = Shot(
                 cfg.cameraId, fmt, chars, needRotation(), cfg.photoQuality, reqs.size,
-                cfg.bw, cfg.flat && !cfg.bw, cfg.photoLook, false, cfg.upscale, cfg.glow, cfg.blue,
+                cfg.bw, cfg.flat && !cfg.bw, cfg.photoLook, false, false, cfg.glow, cfg.blue,
                 cfg.filterId, cfg.photoFilterIntensity
             )
             synchronized(lock) { shot = sh }
@@ -1663,13 +1663,6 @@ class CameraController(
             val t = ColorTrim.apply(out, trim, 0)
             out.recycle()
             out = t
-        }
-        if (sh.upscale) {
-            val u = Look.upscale(out, 12_600_000L)
-            if (u !== out) {
-                out.recycle()
-                out = u
-            }
         }
         return out
     }
