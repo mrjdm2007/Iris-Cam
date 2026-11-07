@@ -1135,6 +1135,19 @@ class MainActivity : Activity(), CameraController.Callbacks {
         }
         root.addView(transitionCover, lp(MATCH, MATCH, Gravity.CENTER))
         setContentView(root)
+        root.post { showFirstRunLayoutTip() }
+    }
+
+    private fun showFirstRunLayoutTip() {
+        val prefs = getSharedPreferences("onboarding", MODE_PRIVATE)
+        if (prefs.getBoolean("layout_tip_seen", false)) return
+        prefs.edit().putBoolean("layout_tip_seen", true).apply()
+        MaterialAlertDialogBuilder(this)
+            .setTitle("Personalise your layout")
+            .setMessage("Edit the controls to fit your screen. Open TOOLS, then choose “Edit layout” to move and resize the panels.")
+            .setPositiveButton("Open TOOLS") { _, _ -> popup(toolsChip, toolsItems()) }
+            .setNegativeButton("Later", null)
+            .show()
     }
 
     private fun beginCameraTransition() {
@@ -1774,7 +1787,12 @@ class MainActivity : Activity(), CameraController.Callbacks {
         setActive(filtersChip, cfg.filterId != 0)
         setActive(gridChip, cfg.grid != 0)
         setActive(toolsChip, false)
-        modeChip.text = if (photo) "PHOTO MODE" else "VIDEO MODE"
+        modeChip.text = if (photo) "▣" else "▰"
+        modeChip.contentDescription = if (photo) "Switch to video mode" else "Switch to photo mode"
+        modeChip.textSize = 25f
+        modeChip.setPadding(dp(10), dp(4), dp(10), dp(4))
+        modeChip.minWidth = dp(48)
+        modeChip.minHeight = dp(48)
         setActive(modeChip, false)
         val pullVis = if (photo) View.GONE else View.VISIBLE
         if (::rackPanel.isInitialized) rackPanel.visibility = pullVis
@@ -1908,6 +1926,8 @@ class MainActivity : Activity(), CameraController.Callbacks {
     private fun switchLens(id: String) {
         if (!idle()) return
         cfg.cameraId = id
+        cfg.photoW = 0
+        cfg.photoH = 0
         store.save("last", cfg)
         cam.reopen()
         refreshUi()
@@ -2215,6 +2235,8 @@ class MainActivity : Activity(), CameraController.Callbacks {
         if (ids.isEmpty()) return
         choose("Lens", ids.map { cam.cameraLabel(it) }) {
             cfg.cameraId = ids[it]
+            cfg.photoW = 0
+            cfg.photoH = 0
             store.save("last", cfg)
             beginCameraTransition()
             cam.reopen()
