@@ -83,13 +83,13 @@ data class Config(
     var blue: Boolean = false,        // cool blue cinematic photo filter
     var glow: Boolean = false,       // legacy setting migrated to filterId
     var filterId: Int = 18,          // default Zeiss-inspired colour profile; 0 = Natural
-    var filterIntensity: Int = 25,   // video look strength, 0..100
-    var photoFilterIntensity: Int = 40, // photo look strength, 0..100
+    var filterIntensity: Int = 50,   // default video look strength, 0..100
+    var photoFilterIntensity: Int = 70, // default photo look strength, 0..100
     var photoLook: Int = 0,          // 0 natural, 1 golden hour, 2 dream glow
     var photoNr: Int = 1,            // photo noise reduction: 0 minimal, 1 standard, 2 high
     var lensKeys: Boolean = false,   // show the 0.5x / 1x / 2.7x shortcut buttons
     var haptics: Boolean = true,     // subtle shutter and manual slider feedback
-    var ver: Int = 2
+    var ver: Int = 3
 ) {
     fun copyFrom(o: Config) {
         cameraId = o.cameraId
@@ -210,8 +210,12 @@ data class Config(
             // Upgrade only the old untouched Natural/100% default; preserve explicitly selected looks.
             val migrateDefaultLook = oldVersion < 2 && storedFilter == 0 && o.optInt("filterIntensity", 100) == 100
             val selectedFilter = if (migrateDefaultLook) 18 else storedFilter.coerceIn(0, 30)
-            val selectedIntensity = if (migrateDefaultLook) 25 else o.optInt("filterIntensity", d.filterIntensity).coerceIn(0, 100)
-            val selectedPhotoIntensity = o.optInt("photoFilterIntensity", d.photoFilterIntensity).coerceIn(0, 100)
+            val storedVideoIntensity = o.optInt("filterIntensity", if (migrateDefaultLook) 25 else d.filterIntensity).coerceIn(0, 100)
+            val storedPhotoIntensity = o.optInt("photoFilterIntensity", d.photoFilterIntensity).coerceIn(0, 100)
+            // Version 3: raise only the untouched previous Zeiss defaults.
+            // Any intensity the user had already changed is preserved.
+            val selectedIntensity = if (oldVersion < 3 && selectedFilter == 18 && storedVideoIntensity == 25) 50 else storedVideoIntensity
+            val selectedPhotoIntensity = if (oldVersion < 3 && selectedFilter == 18 && storedPhotoIntensity == 40) 70 else storedPhotoIntensity
             return Config(
                 cameraId = o.optString("cameraId", d.cameraId),
                 width = o.optInt("width", d.width),
@@ -260,7 +264,7 @@ data class Config(
                 photoNr = o.optInt("photoNr", if (o.optBoolean("photoNrOff", false)) 0 else d.photoNr),
                 lensKeys = o.optBoolean("lensKeys", d.lensKeys),
                 haptics = o.optBoolean("haptics", d.haptics),
-                ver = maxOf(2, o.optInt("ver", d.ver))
+                ver = maxOf(3, o.optInt("ver", d.ver))
             )
         }
     }
