@@ -1650,7 +1650,10 @@ class CameraController(
             out.recycle()
             out = styled
         }
-        if (sh.filterId > 1) {
+        // Every non-Natural preset, including preset 1 (Black and White),
+        // must pass through the preset renderer. Previously ID 1 was excluded here
+        // and also suppressed the legacy B&W path above, so B&W photos stayed unfiltered.
+        if (sh.filterId > 0) {
             val filtered = Look.applyPreset(out, sh.filterId, sh.filterIntensity)
             if (filtered !== out) {
                 out.recycle()
