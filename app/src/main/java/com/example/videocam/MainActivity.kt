@@ -357,7 +357,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
         cancelCountdown()
         cancelExpPull()
         oriListener.disable()
-        stopMonitor() // release the Wi-Fi/ADB monitor server when the app leaves the foreground
+        stopMonitor() // release the Wi-Fi monitor server when the app leaves the foreground
         tap?.stop() // stop again after stopMonitor updates audio state; never leave mic capture running in background
         if (cfgDirty) store.save("last", cfg)
         cam.stop()
@@ -2844,8 +2844,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
     // ---------- Wi-Fi monitor ----------
 
     private fun localIp(): String? {
-        // Advertise only a Wi-Fi interface. USB tethering, Ethernet and loopback
-        // must never be presented as a supported monitor transport.
+        // Advertise only the Wi-Fi interface; other network adapters are not supported.
         try {
             for (ni in NetworkInterface.getNetworkInterfaces()) {
                 if (!ni.isUp || ni.isLoopback || !ni.name.startsWith("wlan")) continue
