@@ -606,6 +606,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
             val sizeText = size?.let { "%.1f MP · %d × %d".format(it.width * it.height / 1e6, it.width, it.height) } ?: "Unavailable"
             add("PHOTO SIZE", sizeText) { pickPhotoRes() }
             add("CAPTURE FORMAT", when {
+                cam.effMode() == 2 -> "Ultra HDR · 2-frame bracket"
                 cfg.photoFormat == 3 && cam.ultraHdrAvailable -> "Native Ultra HDR JPEG_R"
                 cam.effMode() == 1 -> "RAW develop"
                 else -> "Standard JPEG"
@@ -1560,6 +1561,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
         val sz = runCatching { cam.captureSize() }.getOrNull()
         val mp = if (sz != null) "%.1fMP".format(sz.width * sz.height / 1e6) else "--"
         val m = when {
+            cam.effMode() == 2 -> "ULTRA HDR"
             cfg.photoFormat == 3 && cam.ultraHdrAvailable && cfg.filterId == 0 && !cfg.flat && !cfg.upscale -> "ULTRA HDR"
             cfg.scene == 1 -> "NIGHT"
             cfg.scene == 2 -> "ASTRO"
@@ -1578,10 +1580,14 @@ class MainActivity : Activity(), CameraController.Callbacks {
     private fun photoItems(): List<Pair<String, () -> Unit>> {
         val sz = runCatching { cam.captureSize() }.getOrNull()
         val mp = if (sz != null) "%.1f MP".format(sz.width * sz.height / 1e6) else "?"
-        val mode = when {
-            cfg.photoFormat == 3 && cam.ultraHdrAvailable && cfg.filterId == 0 && !cfg.flat && !cfg.upscale -> "Ultra HDR (native JPEG_R)"
-            cam.effMode() == 1 -> "RAW develop"
-            else -> "Phone JPEG"
+        val mode = when (cam.effMode()) {
+            2 -> "Ultra HDR (2-frame bracket)"
+            1 -> "RAW develop"
+            else -> if (cfg.photoFormat == 3 && cam.ultraHdrAvailable && cfg.filterId == 0 && !cfg.flat) {
+                "Ultra HDR (native JPEG_R)"
+            } else {
+                "Phone JPEG"
+            }
         }
         val lens = runCatching { cam.cameraLabel(cfg.cameraId) }.getOrDefault("?")
         return listOf(
@@ -1968,16 +1974,15 @@ class MainActivity : Activity(), CameraController.Callbacks {
 
     private fun pickCaptureMode() {
         if (!idle()) return
-        choose(
-            "Capture mode",
-            buildList {
-                add("Phone JPEG (+ lens colour trim)")
-                add("RAW develop \u2014 true colour (lenses with RAW)")
-                if (cam.ultraHdrAvailable) add("Ultra HDR \u2014 native JPEG_R with HDR gain map")
-            }
-        ) {
-            cfg.photoFormat = when (it) { 0 -> 0; 1 -> 1; else -> 3 }
-            if (cfg.photoFormat == 3) cfg.scene = 0
+        val modes = buildList {
+            add("Phone JPEG (+ lens colour trim)" to 0)
+            add("RAW develop — true colour (lenses with RAW)" to 1)
+            add("Ultra HDR — 2-frame bracket (needs manual exposure on the lens)" to 2)
+            if (cam.ultraHdrAvailable) add("Ultra HDR — native JPEG_R with HDR gain map" to 3)
+        }
+        choose("Capture mode", modes.map { it.first }) {
+            cfg.photoFormat = modes[it].second
+            if (cfg.photoFormat == 2 || cfg.photoFormat == 3) cfg.scene = 0
             cfg.photoW = 0
             cfg.photoH = 0
             streamChanged()
