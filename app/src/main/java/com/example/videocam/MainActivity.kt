@@ -1314,11 +1314,11 @@ class MainActivity : Activity(), CameraController.Callbacks {
                     val bottom = sy(0.218f) + dp((4 - i).coerceAtLeast(0) * 40)
                     setFrameLp(key, dp(70), WRAP, Gravity.START or Gravity.BOTTOM, dp(6), 0, 0, bottom)
                 }
-            setFrameLp("focusSlider", dp(56), MATCH, Gravity.END, 0, sy(0.126f), dp(6), sy(0.298f))
-            setFrameLp("focusTools", WRAP, WRAP, Gravity.END or Gravity.TOP, 0, sy(0.126f), dp(66), 0)
+            setFrameLp("focusSlider", dp(56), MATCH, Gravity.END, 0, sy(0.16f), dp(6), sy(0.275f))
+            setFrameLp("focusTools", WRAP, WRAP, Gravity.END or Gravity.TOP, 0, sy(0.16f), dp(66), 0)
 
             // Three independent bottom lanes, matching the portrait reference proportions.
-            setFrameLp("readouts", WRAP, WRAP, Gravity.START or Gravity.BOTTOM, dp(8), 0, 0, sy(0.218f))
+            setFrameLp("readouts", WRAP, WRAP, Gravity.START or Gravity.BOTTOM, dp(8), 0, 0, sy(0.46f))
             setFrameLp("zoomPanel", WRAP, WRAP, Gravity.START or Gravity.BOTTOM, dp(4), 0, 0, sy(0.139f))
             setFrameLp("exposurePanel", WRAP, WRAP, Gravity.START or Gravity.BOTTOM, dp(4), 0, 0, sy(0.055f))
             setFrameLp("rackPanel", dp(92), dp(104), Gravity.END or Gravity.BOTTOM, 0, 0, sx(0.067f), sy(0.096f))
@@ -1335,7 +1335,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
             setFrameLp("focusTools", WRAP, WRAP, Gravity.END or Gravity.TOP, 0, sy(0.135f), dp(76), 0)
 
             // Landscape lanes are deliberately staggered to mirror the supplied screenshot.
-            setFrameLp("readouts", WRAP, WRAP, Gravity.START or Gravity.BOTTOM, sx(0.397f), 0, 0, sy(0.456f))
+            setFrameLp("readouts", WRAP, WRAP, Gravity.START or Gravity.BOTTOM, sx(0.397f), 0, 0, sy(0.135f))
             setFrameLp("zoomPanel", WRAP, WRAP, Gravity.START or Gravity.BOTTOM, sx(0.145f), 0, 0, sy(0.210f))
             setFrameLp("exposurePanel", WRAP, WRAP, Gravity.START or Gravity.BOTTOM, sx(0.045f), 0, 0, sy(0.070f))
             setFrameLp("rackPanel", dp(92), dp(104), Gravity.END or Gravity.BOTTOM, 0, 0, sx(0.078f), sy(0.180f))
@@ -1374,6 +1374,13 @@ class MainActivity : Activity(), CameraController.Callbacks {
         expLabel.visibility = if (p) View.GONE else View.VISIBLE
 
         // Portrait gets a dedicated second menu row; landscape keeps all five menus in the header.
+        val topParams = topBar.layoutParams as FrameLayout.LayoutParams
+        topParams.topMargin = if (p) dp(40) else 0
+        topBar.layoutParams = topParams
+        val secondRowParams = topRow2.layoutParams as FrameLayout.LayoutParams
+        secondRowParams.topMargin = if (p) dp(80) else dp(44)
+        topRow2.layoutParams = secondRowParams
+
         val parent = chipRow.parent as? ViewGroup
         if (p && parent !== topRow2) {
             parent?.removeView(chipRow)
@@ -1435,8 +1442,8 @@ class MainActivity : Activity(), CameraController.Callbacks {
         // The previous layout schema stored overlapping panel coordinates. Rebase those
         // coordinates once so the new Material control dock starts from a clean layout.
         val prefs = layoutPrefs()
-        if (prefs.getInt("layout_schema", 0) < 2) {
-            prefs.edit().clear().putInt("layout_schema", 2).apply()
+        if (prefs.getInt("layout_schema", 0) < 3) {
+            prefs.edit().clear().putInt("layout_schema", 3).apply()
         }
         frames.forEach { f ->
             f.setPanelSizePercent(prefs.getInt("size_${f.key}", 50))
