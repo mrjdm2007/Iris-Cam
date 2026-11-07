@@ -6,6 +6,10 @@ import android.content.ContentValues
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.graphics.ColorMatrix
+import android.graphics.ColorMatrixColorFilter
+import android.graphics.Paint
 import android.graphics.ImageFormat
 import android.graphics.Matrix
 import android.graphics.Rect
@@ -96,6 +100,7 @@ class CameraController(
         val blue: Boolean,
         val filterId: Int,
         val filterIntensity: Int,
+        val contrast: Int,
         val hdrFactor: Float = 1f
     ) {
         var image: Image? = null // RAW only
@@ -1473,6 +1478,9 @@ class CameraController(
             try {
                 val b = buildPhotoPreview() ?: throw IllegalStateException("no preview")
                 applyPhotoControls(b, true)
+                if (!manualFocus) {
+                    b.set(CaptureRequest.CONTROL_AF_TRIGGER, CameraMetadata.CONTROL_AF_TRIGGER_START)
+                }
                 b.set(
                     CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER,
                     CameraMetadata.CONTROL_AE_PRECAPTURE_TRIGGER_START
@@ -1593,7 +1601,7 @@ class CameraController(
             val sh = Shot(
                 cfg.cameraId, fmt, chars, needRotation(), cfg.photoQuality, reqs.size,
                 cfg.bw, cfg.flat && !cfg.bw, cfg.photoLook, bracket != null, false, cfg.glow, cfg.blue,
-                cfg.filterId, cfg.photoFilterIntensity, bracket?.factor ?: 1f
+                cfg.filterId, cfg.photoFilterIntensity, cfg.photoContrast, bracket?.factor ?: 1f
             )
             synchronized(lock) { shot = sh }
             if (plan != null && plan.expNs * reqs.size >= 1_500_000_000L) {
@@ -1689,6 +1697,22 @@ class CameraController(
                 out.recycle()
                 out = filtered
             }
+        }
+        if (sh.contrast > 0) {
+            val factor = 1f + sh.contrast.coerceIn(0, 100) / 100f
+            val offset = 127.5f * (1f - factor)
+            val matrix = ColorMatrix(floatArrayOf(
+                factor, 0f, 0f, 0f, offset,
+                0f, factor, 0f, 0f, offset,
+                0f, 0f, factor, 0f, offset,
+                0f, 0f, 0f, 1f, 0f
+            ))
+            val contrasted = Bitmap.createBitmap(out.width, out.height, Bitmap.Config.ARGB_8888)
+            Canvas(contrasted).drawBitmap(out, 0f, 0f, Paint(Paint.FILTER_BITMAP_FLAG).apply {
+                colorFilter = ColorMatrixColorFilter(matrix)
+            })
+            out.recycle()
+            out = contrasted
         }
         return out
     }
