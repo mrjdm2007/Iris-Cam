@@ -265,6 +265,11 @@ class MainActivity : Activity(), CameraController.Callbacks {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         store = Store(this)
         cfg = store.load("last") ?: Config()
+        // Retire the old photo upscaling setting; saved photos keep their captured pixel dimensions.
+        if (cfg.upscale) {
+            cfg.upscale = false
+            cfgDirty = true
+        }
         lastLandscapeRatio = cfg.ratio
         applyRequestedOrientation()
         buildUi()
@@ -288,11 +293,11 @@ class MainActivity : Activity(), CameraController.Callbacks {
             store.save("last", cfg)
         }
         if (cfg.ver < 3) {
-            // Standard JPEG by default: capture around 8 MP and upscale saved photos to 12.6 MP.
+            // Standard JPEG by default; preserve the camera capture resolution.
             cfg.photoFormat = 0
             cfg.photoW = 0
             cfg.photoH = 0
-            cfg.upscale = true
+            cfg.upscale = false
             cfg.ver = 3
             store.save("last", cfg)
         }
@@ -1543,10 +1548,6 @@ class MainActivity : Activity(), CameraController.Callbacks {
         },
         "Flat profile: ${if (cfg.flat) "On" else "Off"}" to {
             cfg.flat = !cfg.flat
-            applyLive()
-        },
-        "Aux-lens upscale to 12.6 MP: ${if (cfg.upscale) "On" else "Off"}" to {
-            cfg.upscale = !cfg.upscale
             applyLive()
         },
         "Anti-flicker: ${ANTIBAND[cfg.antiband.coerceIn(0, 3)]}" to {
