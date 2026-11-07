@@ -1467,10 +1467,6 @@ class MainActivity : Activity(), CameraController.Callbacks {
             cfg.nrOff = !cfg.nrOff
             applyLive()
         },
-        "Flat profile: ${if (cfg.flat) "On" else "Off"}" to {
-            cfg.flat = !cfg.flat
-            applyLive()
-        },
         "Anti-flicker: ${ANTIBAND[cfg.antiband.coerceIn(0, 3)]}" to {
             choose("Anti-flicker (Auto exposure only. In Manual, use 1/50 or 1/100 on 50 Hz lights)", ANTIBAND) {
                 cfg.antiband = it
@@ -1534,21 +1530,11 @@ class MainActivity : Activity(), CameraController.Callbacks {
     }
 
     private fun photoImageItems(): List<Pair<String, () -> Unit>> = listOf(
-        "Colour trim for this lens\u2026" to { showTrimDialog() },
-        "Match lens colour\u2026" to { matchLensColour() },
-        "Reset this lens's colour trim" to {
-            store.saveTrim(cfg.cameraId, Trim())
-            toast("Colour trim reset for this lens")
-        },
         "Noise reduction: ${arrayOf("Minimal", "Standard", "High")[cfg.photoNr.coerceIn(0, 2)]}" to {
             choose("Noise reduction", listOf("Minimal (sharpest, more noise)", "Standard (phone default)", "High (smoother, a bit softer)")) {
                 cfg.photoNr = it
                 applyLive()
             }
-        },
-        "Flat profile: ${if (cfg.flat) "On" else "Off"}" to {
-            cfg.flat = !cfg.flat
-            applyLive()
         },
         "Anti-flicker: ${ANTIBAND[cfg.antiband.coerceIn(0, 3)]}" to {
             choose("Anti-flicker (Auto exposure only)", ANTIBAND) {
