@@ -1539,7 +1539,49 @@ class MainActivity : Activity(), CameraController.Callbacks {
         })
     }
 
+    private fun showPhotoContrastSlider() {
+        if (!idle()) return
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(12), dp(20), dp(8))
+        }
+        val label = TextView(this).apply {
+            text = "PHOTO CONTRAST · ${cfg.photoContrast}%"
+            setTextColor(0xFFF3F0E8.toInt())
+            textSize = 12f
+        }
+        val seek = SeekBar(this).apply {
+            max = 100
+            progress = cfg.photoContrast
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(bar: SeekBar?, value: Int, fromUser: Boolean) {
+                    label.text = "PHOTO CONTRAST · ${value}%"
+                    if (fromUser) {
+                        cfg.photoContrast = value
+                        cfgDirty = true
+                    }
+                }
+                override fun onStartTrackingTouch(bar: SeekBar?) {}
+                override fun onStopTrackingTouch(bar: SeekBar?) {}
+            })
+        }
+        box.addView(label)
+        box.addView(seek, LinearLayout.LayoutParams(MATCH, WRAP))
+        MaterialAlertDialogBuilder(this)
+            .setTitle("Photo contrast")
+            .setMessage("Adds contrast to saved standard JPEG photos. 0% leaves the image unchanged.")
+            .setView(box)
+            .setPositiveButton("Done", null)
+            .setNeutralButton("Reset to 40%") { _, _ ->
+                cfg.photoContrast = 40
+                cfgDirty = true
+                toast("Photo contrast reset to 40%")
+            }
+            .show()
+    }
+
     private fun photoImageItems(): List<Pair<String, () -> Unit>> = listOf(
+        "Photo contrast: ${cfg.photoContrast}%" to { showPhotoContrastSlider() },
         "Flat profile: ${if (cfg.flat) "On" else "Off"}" to {
             cfg.flat = !cfg.flat
             cfgDirty = true
