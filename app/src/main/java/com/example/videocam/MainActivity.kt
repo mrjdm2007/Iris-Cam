@@ -6,6 +6,7 @@ import android.app.Activity
 import android.app.AlertDialog
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import android.content.ContentUris
+import android.content.Context
 import android.content.res.ColorStateList
 import android.content.ClipData
 import android.content.ClipboardManager
