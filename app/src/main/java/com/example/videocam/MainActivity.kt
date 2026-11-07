@@ -34,6 +34,9 @@ import android.os.StatFs
 import android.os.SystemClock
 import android.provider.MediaStore
 import android.util.Size
+import android.text.SpannableString
+import android.text.Spanned
+import android.text.style.ForegroundColorSpan
 import android.view.GestureDetector
 import android.view.HapticFeedbackConstants
 import android.view.Gravity
@@ -687,7 +690,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
     private fun toggleExposureControls() {
         if (!exposureControlsExpanded && zoomControlsExpanded) toggleZoomControls()
         exposureControlsExpanded = !exposureControlsExpanded
-        exposureControlsChip.text = if (exposureControlsExpanded) "EXP ◂" else "EXP ▸"
+        exposureControlsChip.text = rackIndicator(if (exposureControlsExpanded) "EXP ◂" else "EXP", rackTarget == 1)
         setActive(exposureControlsChip, exposureControlsExpanded)
         val controls = listOf(rEv.box, rWb.box, rAe.box)
         if (exposureControlsExpanded) {
@@ -714,7 +717,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
     private fun toggleZoomControls() {
         if (!zoomControlsExpanded && exposureControlsExpanded) toggleExposureControls()
         zoomControlsExpanded = !zoomControlsExpanded
-        zoomControlsChip.text = fmtZoom(cam.zoom) + (if (zoomControlsExpanded) " ◂" else " ▸")
+        zoomControlsChip.text = rackIndicator(if (zoomControlsExpanded) fmtZoom(cam.zoom) else "ZOOM", rackTarget == 0)
         setActive(zoomControlsChip, zoomControlsExpanded)
         zoomPresetChips.forEach { (value, chip) ->
             chip.animate().cancel()
@@ -2267,12 +2270,23 @@ class MainActivity : Activity(), CameraController.Callbacks {
         refreshUi()
     }
 
+    private fun rackIndicator(label: String, active: Boolean): CharSequence {
+        if (!active) return label
+        return SpannableString("$label  ●").apply {
+            setSpan(ForegroundColorSpan(0xFFD0BCFF.toInt()), length - 1, length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+        }
+    }
+
     private fun setRackTarget(target: Int) {
         rackTarget = target.coerceIn(0, 1)
         if (!::rackTargetLabel.isInitialized) return
         rackTargetLabel.text = if (rackTarget == 0) "ZOOM" else "EXPOSURE"
-        setActive(zoomLabel, rackTarget == 0)
-        setActive(expLabel, rackTarget == 1)
+        zoomLabel.text = rackIndicator("ZOOM", rackTarget == 0)
+        expLabel.text = rackIndicator("EXPOSURE", rackTarget == 1)
+        zoomControlsChip.text = rackIndicator("ZOOM", rackTarget == 0)
+        exposureControlsChip.text = rackIndicator("EXP", rackTarget == 1)
+        setActive(zoomLabel, false)
+        setActive(expLabel, false)
     }
 
     private fun setSharedRackMark(isA: Boolean) {
