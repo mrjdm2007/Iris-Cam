@@ -27,7 +27,6 @@ import android.hardware.camera2.params.MeteringRectangle
 import android.hardware.camera2.params.OutputConfiguration
 import android.hardware.camera2.params.SessionConfiguration
 import android.hardware.camera2.params.StreamConfigurationMap
-import android.hardware.camera2.params.TonemapCurve
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import android.media.Image
@@ -1098,15 +1097,6 @@ class CameraController(
             b.set(CaptureRequest.STATISTICS_FACE_DETECT_MODE, CameraMetadata.STATISTICS_FACE_DETECT_MODE_SIMPLE)
         }
 
-        // ----- look: flat (best effort via the tone curve) -----
-        if (cfg.flat) {
-            val modes = chars.get(CameraCharacteristics.TONEMAP_AVAILABLE_TONE_MAP_MODES)
-            if (modes?.contains(CameraMetadata.TONEMAP_MODE_CONTRAST_CURVE) == true) {
-                val pts = Look.FLAT_POINTS
-                b.set(CaptureRequest.TONEMAP_MODE, CameraMetadata.TONEMAP_MODE_CONTRAST_CURVE)
-                b.set(CaptureRequest.TONEMAP_CURVE, TonemapCurve(pts, pts, pts))
-            }
-        }
         return b
     }
 
@@ -1191,8 +1181,7 @@ class CameraController(
         // JPEG_R must be saved byte-for-byte to preserve its gain map. If a pixel filter
         // is selected, use ordinary JPEG so the requested look is actually rendered.
         cfg.photoFormat == 3 && ultraHdrAvailable &&
-            cfg.filterId == 0 && !cfg.flat && !cfg.upscale &&
-            store.trim(cfg.cameraId).isNeutral() -> ImageFormat.JPEG_R
+            cfg.filterId == 0 -> ImageFormat.JPEG_R
         else -> ImageFormat.JPEG
     }
 
@@ -1365,15 +1354,6 @@ class CameraController(
                 CameraCharacteristics.NOISE_REDUCTION_AVAILABLE_NOISE_REDUCTION_MODES,
                 listOf(CameraMetadata.NOISE_REDUCTION_MODE_HIGH_QUALITY, CameraMetadata.NOISE_REDUCTION_MODE_FAST)
             )
-        }
-        if (!capture && cfg.flat) {
-            // the preview shows the flat look; the saved photo gets the same curve afterwards (Look.kt)
-            val modes = chars.get(CameraCharacteristics.TONEMAP_AVAILABLE_TONE_MAP_MODES)
-            if (modes?.contains(CameraMetadata.TONEMAP_MODE_CONTRAST_CURVE) == true) {
-                val pts = Look.FLAT_POINTS
-                b.set(CaptureRequest.TONEMAP_MODE, CameraMetadata.TONEMAP_MODE_CONTRAST_CURVE)
-                b.set(CaptureRequest.TONEMAP_CURVE, TonemapCurve(pts, pts, pts))
-            }
         }
         if (!capture && cfg.faceAf && faceAfSupported) {
             b.set(CaptureRequest.STATISTICS_FACE_DETECT_MODE, CameraMetadata.STATISTICS_FACE_DETECT_MODE_SIMPLE)
@@ -1630,41 +1610,10 @@ class CameraController(
         procExec.execute { processShot(sh) }
     }
 
-    /** Applies look, lens colour trim and optional upscaling to an upright bitmap, recycling what it replaces. */
-    private fun finishLook(bmp: Bitmap, sh: Shot, trim: Trim): Bitmap {
-        var out = bmp
-        val styled = Look.apply(
-            out,
-            sh.filterId == 0 && sh.bw,
-            sh.filterId == 0 && sh.flat,
-            if (sh.filterId == 0) sh.photoLook else 0,
-            sh.filterId == 0 && sh.blue
-        )
-        if (styled !== out) {
-            out.recycle()
-            out = styled
-        }
-        // Every non-Natural preset, including preset 1 (Black and White),
-        // must pass through the preset renderer. Previously ID 1 was excluded here
-        // and also suppressed the legacy B&W path above, so B&W photos stayed unfiltered.
-        if (sh.filterId > 0) {
-            val filtered = Look.applyPreset(out, sh.filterId, sh.filterIntensity)
-            if (filtered !== out) {
-                out.recycle()
-                out = filtered
-            }
-        }
-        if (sh.glow) {
-            val bloomed = Look.glow(out)
-            out.recycle()
-            out = bloomed
-        }
-        if (!trim.isNeutral()) {
-            val t = ColorTrim.apply(out, trim, 0)
-            out.recycle()
-            out = t
-        }
-        return out
+    /** Apply only the explicitly selected filter; Natural returns the camera bitmap untouched. */
+    private fun finishLook(bmp: Bitmap, sh: Shot): Bitmap {
+        if (sh.filterId <= 0 || sh.filterIntensity <= 0) return bmp
+        return Look.applyPreset(bmp, sh.filterId, sh.filterIntensity)
     }
 
     private fun processShot(sh: Shot) {
@@ -1672,7 +1621,6 @@ class CameraController(
         try {
             val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
             val base = "IMG_${stamp}_L${sh.lens}"
-            val trim = store.trim(sh.lens)
             if (Build.VERSION.SDK_INT >= 34 && sh.format == ImageFormat.JPEG_R) {
                 // Preserve the camera-generated Ultra HDR gain map byte-for-byte. Re-encoding
                 // through Bitmap/JPEG would destroy the HDR metadata and reduce highlight range.
@@ -1680,23 +1628,23 @@ class CameraController(
             } else if (sh.format == ImageFormat.RAW_SENSOR) {
                 val img = sh.image!!
                 val res = sh.result!!
-                val dev = RawDeveloper.develop(img, sh.chars, res, trim)
+                val dev = RawDeveloper.develop(img, sh.chars, res, Trim())
                 img.close()
                 sh.image = null
-                val out = finishLook(rotateBy(dev, sh.rotDeg), sh, Trim())
+                val out = finishLook(rotateBy(dev, sh.rotDeg), sh)
                 saved = saveBitmap(out, "$base.jpg", sh.quality)
                 out.recycle()
             } else if (sh.jpegs.size > 1) {
                 // astro: several long frames added together (linear light) to make up the full exposure
                 val sum = FrameStack.sum(sh.jpegs) ?: throw IllegalStateException("Couldn't combine the frames")
-                val out = finishLook(rotateBy(sum, sh.rotDeg), sh, trim)
+                val out = finishLook(rotateBy(sum, sh.rotDeg), sh)
                 saved = saveBitmap(out, "$base.jpg", sh.quality)
                 out.recycle()
             } else {
                 val bytes = sh.jpegs[0]
-                saved = if (sh.filterId > 0 || sh.bw || sh.blue || sh.flat || sh.upscale || sh.glow || !trim.isNeutral()) {
+                saved = if (sh.filterId > 0 && sh.filterIntensity > 0) {
                     val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-                    val out = finishLook(rotateBy(bmp, sh.rotDeg), sh, trim)
+                    val out = finishLook(rotateBy(bmp, sh.rotDeg), sh)
                     val u = saveBitmap(out, "$base.jpg", sh.quality)
                     out.recycle()
                     u
