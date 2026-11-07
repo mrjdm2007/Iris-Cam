@@ -718,7 +718,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
         if (!zoomControlsExpanded && exposureControlsExpanded) toggleExposureControls()
         zoomControlsExpanded = !zoomControlsExpanded
         zoomControlsChip.text = rackIndicator(if (zoomControlsExpanded) fmtZoom(cam.zoom) else "ZOOM", rackTarget == 0)
-        setActive(zoomControlsChip, zoomControlsExpanded)
+        setActive(zoomControlsChip, false)
         zoomPresetChips.forEach { (value, chip) ->
             chip.animate().cancel()
             val supported = value >= cam.zoomRange.lower - 0.01f && value <= cam.zoomHi() + 0.01f
@@ -1741,7 +1741,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
         zoomControlsChip.visibility = if (photo) View.GONE else View.VISIBLE
         if (photo && zoomControlsExpanded) {
             zoomControlsExpanded = false
-            zoomControlsChip.text = "ZOOM ▸"
+            zoomControlsChip.text = rackIndicator("ZOOM", rackTarget == 0)
             setActive(zoomControlsChip, false)
         }
         // Focus tools expand downward from AF only while manual focus is active.
@@ -1782,7 +1782,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
         setActive(zoomTime, false)
         setActive(zoomLink, zoomLinked)
         zoomLabel.text = rackIndicator("ZOOM", rackTarget == 0)
-        zoomControlsChip.text = fmtZoom(cam.zoom) + (if (zoomControlsExpanded) " ◂" else " ▸")
+        zoomControlsChip.text = rackIndicator(if (zoomControlsExpanded) fmtZoom(cam.zoom) + " ◂" else "ZOOM", rackTarget == 0)
         setActive(zoomControlsChip, zoomControlsExpanded)
         expGo.text = if (expToB) "\u25B6 A\u2192B" else "\u25B6 B\u2192A"
         setActive(expGo, false)
@@ -3216,7 +3216,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
     }
 
     override fun onZoomChanged(z: Float) {
-        zoomLabel.text = "ZOOM " + fmtZoom(z)
+        zoomLabel.text = rackIndicator("ZOOM", rackTarget == 0)
         zoomSlider.setZoomSilently(z)
         setActive(t2x, z >= 1.9f)
     }
