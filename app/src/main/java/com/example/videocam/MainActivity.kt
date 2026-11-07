@@ -168,7 +168,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
     private lateinit var topBar: LinearLayout
     private lateinit var topRow2: FrameLayout
     private lateinit var expLabel: TextView
-    private lateinit var exposureSummary: TextView
+    private lateinit var exposureSummary: LinearLayout
     private var prevW = 0
     private var prevH = 0
     private var photoOri = -1
@@ -689,7 +689,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
         exposureControlsExpanded = !exposureControlsExpanded
         exposureControlsChip.text = if (exposureControlsExpanded) "EXP ◂" else "EXP ▸"
         setActive(exposureControlsChip, exposureControlsExpanded)
-        val controls = listOf(rMode.box, rIso.box, rShutter.box, rWb.box, rAe.box)
+        val controls = listOf(rEv.box, rWb.box, rAe.box)
         if (exposureControlsExpanded) {
             controls.forEach { view ->
                 view.animate().cancel()
@@ -905,13 +905,13 @@ class MainActivity : Activity(), CameraController.Callbacks {
         drag("focusTools", col, WRAP, WRAP, Gravity.END or Gravity.TOP, 0, dp(56), dp(76), 0)
 
         // ----- bottom stack: readouts + zoom pull + exposure pull -----
-        rMode = readout("EXPOSURE") {
+        rMode = readout("AUTO") {
             cfg.manualExposure = !cfg.manualExposure
             cam.clearAeLock()
             applyLive()
         }
-        rIso = readout("ISO") { pickIso() }
-        rShutter = readout("SHUTTER") { pickShutter() }
+        rIso = readout("ISO") { if (cfg.manualExposure) pickIso() else toast("Switch to MANUAL to edit ISO") }
+        rShutter = readout("SHUTTER") { if (cfg.manualExposure) pickShutter() else toast("Switch to MANUAL to edit shutter speed") }
         rEv = readout("EV") { pickEv() }
         rAe = readout("AE LOCK") { cam.toggleAeLock() }
         rWb = readout("WB") { cam.toggleAwbLock() }
@@ -920,11 +920,11 @@ class MainActivity : Activity(), CameraController.Callbacks {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        listOf(exposureControlsChip, rEv.box, rMode.box, rIso.box, rShutter.box, rWb.box, rAe.box).forEach { view ->
+        listOf(exposureControlsChip, rEv.box, rWb.box, rAe.box).forEach { view ->
             if (view !== exposureControlsChip) readBoxes.add(view)
             readRow.addView(view, LinearLayout.LayoutParams(WRAP, WRAP).apply { setMargins(dp(3), 0, dp(3), dp(3)) })
         }
-        listOf(rMode.box, rIso.box, rShutter.box, rWb.box, rAe.box).forEach { it.visibility = View.GONE }
+        listOf(rEv.box, rWb.box, rAe.box).forEach { it.visibility = View.GONE }
         val readScroll = HorizontalScrollView(this).apply {
             isHorizontalScrollBarEnabled = false
             addView(readRow, ViewGroup.LayoutParams(WRAP, WRAP))
@@ -980,14 +980,14 @@ class MainActivity : Activity(), CameraController.Callbacks {
         expLabel.setOnClickListener { setRackTarget(1) }
         val expStrip = strip(expLabel, expSlider)
 
-        exposureSummary = TextView(this).apply {
-            text = "AUTO  ·  ISO --  ·  --"
-            setTextColor(0xFFF3F0E8.toInt())
-            textSize = 11f
-            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-            setPadding(dp(12), dp(7), dp(12), dp(7))
-            background = materialSurface(0xE6211F26.toInt(), 14, 0x5549454F)
+        exposureSummary = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
+            background = materialSurface(0xE6211F26.toInt(), 18, 0x5549454F)
+            setPadding(dp(8), dp(5), dp(8), dp(5))
+            listOf(rMode.box, rIso.box, rShutter.box).forEach { item ->
+                addView(item, LinearLayout.LayoutParams(WRAP, WRAP).apply { setMargins(dp(3), dp(2), dp(3), dp(2)) })
+            }
         }
         val readouts = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -1818,13 +1818,15 @@ class MainActivity : Activity(), CameraController.Callbacks {
         setC(rWb.value, if (cam.awbLock) AMBER else Color.WHITE)
         val shownIso = if (manual) cfg.iso else cam.liveIso
         val shownShutter = if (manual) cfg.shutterDenom else cam.liveShutterDenom
-        val exposureMode = if (manual) "PRO" else "AUTO"
-        val exposureParts = mutableListOf(exposureMode)
-        if (shownIso > 0) exposureParts.add("ISO $shownIso")
-        if (shownShutter > 0) exposureParts.add("1/$shownShutter s")
-        if (!manual) exposureParts.add("%+.1f EV".format(cfg.ev * cam.evStepEv))
-        setT(exposureSummary, exposureParts.joinToString("  ·  "))
-        setC(exposureSummary, if (manual) AMBER else 0xFFF3F0E8.toInt())
+        setT(rMode.value, if (manual) "MANUAL" else "AUTO")
+        setC(rMode.value, if (manual) AMBER else Color.WHITE)
+        setT(rIso.value, if (shownIso > 0) shownIso.toString() else "--")
+        setC(rIso.value, if (manual) AMBER else Color.WHITE)
+        setT(rShutter.value, if (shownShutter > 0) "1/$shownShutter" else "--")
+        setC(rShutter.value, if (manual) AMBER else Color.WHITE)
+        rIso.box.alpha = if (manual) 1f else 0.72f
+        rShutter.box.alpha = if (manual) 1f else 0.72f
+        exposureSummary.orientation = if (isPortrait()) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
     }
 
     /** Re-points the exposure slider at EV (Auto) or ISO (Manual). */
