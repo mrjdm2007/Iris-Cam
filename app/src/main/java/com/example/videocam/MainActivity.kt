@@ -1529,9 +1529,10 @@ class MainActivity : Activity(), CameraController.Callbacks {
                 }
             }
         }
-        return items + ("Intensity: ${cfg.filterIntensity}%" to {
+        val activeIntensity = if (cfg.mode == 1) cfg.photoFilterIntensity else cfg.filterIntensity
+        return items + ("Intensity: ${activeIntensity}%" to {
             choose("Filter intensity", (0..100 step 10).map { "$it%" }) {
-                cfg.filterIntensity = it * 10
+                if (cfg.mode == 1) cfg.photoFilterIntensity = it * 10 else cfg.filterIntensity = it * 10
                 cfgDirty = true
                 if (cfg.mode == 0) streamChanged() else applyLive()
             }
