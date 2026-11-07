@@ -2844,20 +2844,18 @@ class MainActivity : Activity(), CameraController.Callbacks {
     // ---------- Wi-Fi monitor ----------
 
     private fun localIp(): String? {
-        var fallback: String? = null
+        // Advertise only a Wi-Fi interface. USB tethering, Ethernet and loopback
+        // must never be presented as a supported monitor transport.
         try {
             for (ni in NetworkInterface.getNetworkInterfaces()) {
-                if (!ni.isUp || ni.isLoopback) continue
+                if (!ni.isUp || ni.isLoopback || !ni.name.startsWith("wlan")) continue
                 for (a in ni.inetAddresses) {
-                    if (a is Inet4Address && !a.isLoopbackAddress) {
-                        if (ni.name.startsWith("wlan")) return a.hostAddress
-                        if (fallback == null) fallback = a.hostAddress
-                    }
+                    if (a is Inet4Address && !a.isLoopbackAddress) return a.hostAddress
                 }
             }
         } catch (_: Exception) {
         }
-        return fallback
+        return null
     }
 
     private fun copyToClipboard(label: String, text: String) {
