@@ -1781,7 +1781,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
         zoomTime.text = "${zoomSeconds}s"
         setActive(zoomTime, false)
         setActive(zoomLink, zoomLinked)
-        zoomLabel.text = "ZOOM"
+        zoomLabel.text = rackIndicator("ZOOM", rackTarget == 0)
         zoomControlsChip.text = fmtZoom(cam.zoom) + (if (zoomControlsExpanded) " ◂" else " ▸")
         setActive(zoomControlsChip, zoomControlsExpanded)
         expGo.text = if (expToB) "\u25B6 A\u2192B" else "\u25B6 B\u2192A"
