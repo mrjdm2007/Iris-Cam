@@ -76,7 +76,7 @@ object SettingsGuide {
         }
         val search = EditText(activity).apply {
             hint = "Search settings and features"
-            singleLine = true
+            isSingleLine = true
         }
         content.addView(search, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         val results = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL }
