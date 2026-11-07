@@ -64,6 +64,7 @@ import android.widget.TextView
 import android.widget.Toast
 import java.io.ByteArrayOutputStream
 import java.net.Inet4Address
+import java.net.InetAddress
 import java.net.NetworkInterface
 import java.util.concurrent.Executors
 import org.json.JSONObject
@@ -2935,10 +2936,15 @@ class MainActivity : Activity(), CameraController.Callbacks {
             showMonitorInfo()
             return
         }
+        val wifiIp = localIp()
+        if (wifiIp == null) {
+            toast("Connect to Wi-Fi before starting the laptop monitor")
+            return
+        }
         val pin = (1000 + java.util.Random().nextInt(9000)).toString()
         val m = MonitorServer(monitorHost, pin)
-        if (!m.start()) {
-            toast("Couldn't start the monitor")
+        if (!m.start(InetAddress.getByName(wifiIp))) {
+            toast("Couldn't start the Wi-Fi monitor")
             return
         }
         monitor = m
