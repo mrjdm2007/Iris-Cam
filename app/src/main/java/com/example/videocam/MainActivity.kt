@@ -1458,8 +1458,15 @@ class MainActivity : Activity(), CameraController.Callbacks {
     }
 
     private fun videoImageItems(): List<Pair<String, () -> Unit>> = listOf(
-        "Stabilization: ${if (cfg.stab != 0) "On (OIS + EIS where supported)" else "Off"}" to {
-            cfg.stab = if (cfg.stab == 0) 2 else 0
+        "Stabilization: ${when (cfg.stab) { 2 -> "EIS + OIS"; 1 -> "EIS only"; else -> "Off" }}" to {
+            choose("Video stabilization", listOf("Off", "EIS only", "EIS + OIS")) {
+                cfg.stab = it
+                cfgDirty = true
+                applyLive()
+            }
+        },
+        "Flat profile: ${if (cfg.flat) "On" else "Off"}" to {
+            cfg.flat = !cfg.flat
             cfgDirty = true
             applyLive()
         },
@@ -1530,6 +1537,11 @@ class MainActivity : Activity(), CameraController.Callbacks {
     }
 
     private fun photoImageItems(): List<Pair<String, () -> Unit>> = listOf(
+        "Flat profile: ${if (cfg.flat) "On" else "Off"}" to {
+            cfg.flat = !cfg.flat
+            cfgDirty = true
+            applyLive()
+        },
         "Noise reduction: ${arrayOf("Minimal", "Standard", "High")[cfg.photoNr.coerceIn(0, 2)]}" to {
             choose("Noise reduction", listOf("Minimal (sharpest, more noise)", "Standard (phone default)", "High (smoother, a bit softer)")) {
                 cfg.photoNr = it
