@@ -146,6 +146,10 @@ class CropRenderer(
             "rgb+=n*0.045*uStrength;}" +
             "else if(uEffect==17){float lum=dot(rgb,vec3(0.2126,0.7152,0.0722));" +
             "float flare=clamp((lum-0.82)*5.0,0.0,1.0)*0.12*uStrength;rgb+=vec3(flare);}" +
+            "else if(uEffect==30){vec2 radial=(vTc-vec2(0.5))*2.0;" +
+            "vec2 shift=radial*dot(radial,radial)*(0.0018*uStrength);" +
+            "float rr=texture2D(sTex,vTc+shift).r;float bb=texture2D(sTex,vTc-shift).b;" +
+            "rgb=vec3(rr,rgb.g,bb);}" +
             "gl_FragColor=vec4(clamp(rgb,0.0,1.0),c.a);}"
         program = link(compile(GLES20.GL_VERTEX_SHADER, vs), compile(GLES20.GL_FRAGMENT_SHADER, fs))
         uTex = GLES20.glGetUniformLocation(program, "uTex")
