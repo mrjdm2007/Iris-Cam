@@ -1525,7 +1525,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
                     // Rebuild it whenever the selected video look changes so the encoder
                     // receives the filtered renderer surface, not the raw recorder surface.
                     if (cfg.mode == 0) streamChanged() else applyLive()
-                    toast("${Look.FILTER_NAMES[id]} selected")
+                    toast(if (id == 30) "Chromatic Aberration selected · applied to photos and recorded video" else "${Look.FILTER_NAMES[id]} selected")
                 }
             }
         }
