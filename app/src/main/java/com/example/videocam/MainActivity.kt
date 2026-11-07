@@ -1182,8 +1182,10 @@ class MainActivity : Activity(), CameraController.Callbacks {
         val p = isPortrait()
         val photo = cfg.mode == 1
         val available = if (root.width > 0) root.width else resources.displayMetrics.widthPixels
-        val w = if (p) (available * 0.62f).roundToInt().coerceIn(dp(180), dp(340))
-                else (available * 0.42f).roundToInt().coerceIn(dp(240), dp(520))
+        // Reference screenshots: portrait slider occupies ~42% of the screen width;
+        // landscape slider occupies ~22%, leaving room for its label and rack controls.
+        val w = if (p) (available * 0.42f).roundToInt().coerceIn(dp(148), dp(190))
+                else (available * 0.22f).roundToInt().coerceIn(dp(180), dp(220))
         listOf(zoomSlider, expSlider).forEach {
             val l = it.layoutParams as LinearLayout.LayoutParams
             if (l.width != w) {
@@ -1298,41 +1300,69 @@ class MainActivity : Activity(), CameraController.Callbacks {
     /** Default positions for the current orientation (the user's own dragged positions are applied on top). */
     private fun applyOrientationLayout() {
         val p = isPortrait()
+        val density = resources.displayMetrics.density
+        val screenW = (root.width / density).coerceAtLeast(320f)
+        val screenH = (root.height / density).coerceAtLeast(320f)
+        fun sx(fraction: Float) = dp((screenW * fraction).roundToInt())
+        fun sy(fraction: Float) = dp((screenH * fraction).roundToInt())
+
         if (p) {
-            listOf("tool2x", "toolPeak", "toolFalse", "toolTorch", "toolTimer", "toolRotate").forEachIndexed { i, key -> setFrameLp(key, dp(70), WRAP, Gravity.START or Gravity.CENTER_VERTICAL, dp(6), dp(20 + i * 58), 0, 0) }
-            setFrameLp("focusSlider", dp(56), MATCH, Gravity.END, 0, dp(110), dp(6), dp(260))
-            setFrameLp("focusTools", WRAP, WRAP, Gravity.END or Gravity.TOP, 0, dp(110), dp(66), 0)
-            // A deliberate bottom dock: each control gets its own lane with enough
-            // vertical breathing room for its actual measured height.
-            setFrameLp("readouts", WRAP, WRAP, Gravity.START or Gravity.BOTTOM, dp(70), 0, 0, dp(235))
-            setFrameLp("zoomPanel", WRAP, WRAP, Gravity.START or Gravity.BOTTOM, dp(70), 0, 0, dp(160))
-            setFrameLp("exposurePanel", WRAP, WRAP, Gravity.START or Gravity.BOTTOM, dp(70), 0, 0, dp(85))
-            setFrameLp("rackPanel", dp(92), dp(104), Gravity.END or Gravity.BOTTOM, 0, 0, dp(74), dp(150))
+            // Portrait reference: tools form a fixed bottom-left vertical stack.
+            // Use BOTTOM gravity so their positions cannot drift with screen centre.
+            listOf("tool2x", "toolPeak", "toolFalse", "toolTorch", "toolTimer", "toolRotate")
+                .forEachIndexed { i, key ->
+                    val bottom = sy(0.218f) + dp((4 - i).coerceAtLeast(0) * 40)
+                    setFrameLp(key, dp(70), WRAP, Gravity.START or Gravity.BOTTOM, dp(6), 0, 0, bottom)
+                }
+            setFrameLp("focusSlider", dp(56), MATCH, Gravity.END, 0, sy(0.126f), dp(6), sy(0.298f))
+            setFrameLp("focusTools", WRAP, WRAP, Gravity.END or Gravity.TOP, 0, sy(0.126f), dp(66), 0)
+
+            // Three independent bottom lanes, matching the portrait reference proportions.
+            setFrameLp("readouts", WRAP, WRAP, Gravity.START or Gravity.BOTTOM, dp(8), 0, 0, sy(0.218f))
+            setFrameLp("zoomPanel", WRAP, WRAP, Gravity.START or Gravity.BOTTOM, dp(4), 0, 0, sy(0.139f))
+            setFrameLp("exposurePanel", WRAP, WRAP, Gravity.START or Gravity.BOTTOM, dp(4), 0, 0, sy(0.055f))
+            setFrameLp("rackPanel", dp(92), dp(104), Gravity.END or Gravity.BOTTOM, 0, 0, sx(0.067f), sy(0.096f))
             setFrameLp("rec", dp(64), dp(64), Gravity.CENTER_HORIZONTAL or Gravity.BOTTOM, 0, 0, 0, dp(18))
             setFrameLp("thumb", dp(52), dp(52), Gravity.START or Gravity.BOTTOM, dp(20), 0, 0, dp(24))
             setFrameLp("mode", WRAP, WRAP, Gravity.END or Gravity.BOTTOM, 0, 0, dp(14), dp(32))
         } else {
-            listOf("tool2x", "toolPeak", "toolFalse", "toolTorch", "toolTimer", "toolRotate").forEachIndexed { i, key -> setFrameLp(key, dp(70), WRAP, Gravity.START or Gravity.CENTER_VERTICAL, dp(8), dp(20 + i * 58), 0, 0) }
-            setFrameLp("focusSlider", dp(56), MATCH, Gravity.END, 0, dp(56), dp(10), dp(14))
-            setFrameLp("focusTools", WRAP, WRAP, Gravity.END or Gravity.TOP, 0, dp(56), dp(76), 0)
-            // Keep the three bottom control groups in separate, non-overlapping lanes.
-            setFrameLp("readouts", WRAP, WRAP, Gravity.START or Gravity.BOTTOM, dp(76), 0, 0, dp(190))
-            setFrameLp("zoomPanel", WRAP, WRAP, Gravity.START or Gravity.BOTTOM, dp(76), 0, 0, dp(125))
-            setFrameLp("exposurePanel", WRAP, WRAP, Gravity.START or Gravity.BOTTOM, dp(76), 0, 0, dp(60))
-            setFrameLp("rackPanel", dp(92), dp(104), Gravity.END or Gravity.BOTTOM, 0, 0, dp(240), dp(60))
-            setFrameLp("rec", dp(64), dp(64), Gravity.END or Gravity.BOTTOM, 0, 0, dp(88), dp(16))
-            setFrameLp("thumb", dp(52), dp(52), Gravity.END or Gravity.BOTTOM, 0, 0, dp(166), dp(22))
-            setFrameLp("mode", WRAP, WRAP, Gravity.END or Gravity.BOTTOM, 0, 0, dp(70), dp(88))
+            // Landscape reference: tools are pinned below the top bar on the left.
+            listOf("tool2x", "toolPeak", "toolFalse", "toolTorch", "toolTimer", "toolRotate")
+                .forEachIndexed { i, key ->
+                    setFrameLp(key, dp(70), WRAP, Gravity.START or Gravity.TOP, dp(8), sy(0.135f) + dp(i * 42), 0, 0)
+                }
+            setFrameLp("focusSlider", dp(56), MATCH, Gravity.END, 0, sy(0.135f), dp(10), sy(0.034f))
+            setFrameLp("focusTools", WRAP, WRAP, Gravity.END or Gravity.TOP, 0, sy(0.135f), dp(76), 0)
+
+            // Landscape lanes are deliberately staggered to mirror the supplied screenshot.
+            setFrameLp("readouts", WRAP, WRAP, Gravity.START or Gravity.BOTTOM, sx(0.397f), 0, 0, sy(0.456f))
+            setFrameLp("zoomPanel", WRAP, WRAP, Gravity.START or Gravity.BOTTOM, sx(0.145f), 0, 0, sy(0.210f))
+            setFrameLp("exposurePanel", WRAP, WRAP, Gravity.START or Gravity.BOTTOM, sx(0.045f), 0, 0, sy(0.070f))
+            setFrameLp("rackPanel", dp(92), dp(104), Gravity.END or Gravity.BOTTOM, 0, 0, sx(0.078f), sy(0.180f))
+            setFrameLp("rec", dp(64), dp(64), Gravity.END or Gravity.BOTTOM, 0, 0, dp(160), dp(16))
+            setFrameLp("thumb", dp(52), dp(52), Gravity.END or Gravity.BOTTOM, 0, 0, dp(84), dp(22))
+            setFrameLp("mode", WRAP, WRAP, Gravity.END or Gravity.BOTTOM, 0, 0, sx(0.264f), dp(88))
+        }
+
+        // The three primary exposure values have fixed, equal widths in both orientations.
+        listOf(rMode, rIso, rShutter).forEach {
+            val params = it.box.layoutParams as LinearLayout.LayoutParams
+            params.width = dp(if (p) 78 else 86)
+            params.height = dp(if (p) 42 else 48)
+            it.box.layoutParams = params
+            it.value.textSize = if (p) 12f else 14f
+            it.box.setPadding(dp(if (p) 3 else 8), dp(3), dp(if (p) 3 else 8), dp(3))
         }
         readBoxes.forEach {
-            val lpp = it.layoutParams as LinearLayout.LayoutParams
-            lpp.width = dp(if (p) 58 else 80)
-            it.layoutParams = lpp
+            val params = it.layoutParams as LinearLayout.LayoutParams
+            params.width = dp(if (p) 58 else 80)
+            it.layoutParams = params
         }
-        listOf(rMode, rIso, rShutter, rEv, rAe, rWb).forEach {
+        listOf(rEv, rAe, rWb).forEach {
             it.value.textSize = if (p) 12f else 14f
             it.box.setPadding(dp(if (p) 2 else 10), dp(3), dp(if (p) 2 else 10), dp(3))
         }
+        exposureSummary.orientation = if (p) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
         exposureControlsChip.textSize = if (p) 11f else 12f
         exposureControlsChip.setPadding(dp(if (p) 8 else 12), dp(7), dp(if (p) 8 else 12), dp(7))
         if (::zoomControlsChip.isInitialized) {
@@ -1342,17 +1372,19 @@ class MainActivity : Activity(), CameraController.Callbacks {
         applySliderWidths()
         zoomLabel.visibility = if (p) View.GONE else View.VISIBLE
         expLabel.visibility = if (p) View.GONE else View.VISIBLE
-        // chips (format / image / grid / tools) move to their own row in portrait so none are squeezed out
-        val par = chipRow.parent as? ViewGroup
-        if (p && par !== topRow2) {
-            par?.removeView(chipRow)
+
+        // Portrait gets a dedicated second menu row; landscape keeps all five menus in the header.
+        val parent = chipRow.parent as? ViewGroup
+        if (p && parent !== topRow2) {
+            parent?.removeView(chipRow)
             topRow2.addView(chipRow, FrameLayout.LayoutParams(MATCH, WRAP))
             topRow2.visibility = View.VISIBLE
-        } else if (!p && par !== topBar) {
-            par?.removeView(chipRow)
+        } else if (!p && parent !== topBar) {
+            parent?.removeView(chipRow)
             topBar.addView(chipRow, 2, LinearLayout.LayoutParams(0, WRAP, 1f))
             topRow2.visibility = View.GONE
         }
+
         (warn.layoutParams as FrameLayout.LayoutParams).topMargin = dp(if (p) 96 else 50)
         (lockText.layoutParams as FrameLayout.LayoutParams).topMargin = dp(if (p) 118 else 72)
         (falseLegend.layoutParams as FrameLayout.LayoutParams).topMargin = dp(if (p) 96 else 48)
