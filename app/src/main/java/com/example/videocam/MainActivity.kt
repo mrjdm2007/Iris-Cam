@@ -1180,7 +1180,9 @@ class MainActivity : Activity(), CameraController.Callbacks {
         if (!::zoomSlider.isInitialized || !::expSlider.isInitialized) return
         val p = isPortrait()
         val photo = cfg.mode == 1
-        val w = dp(if (p) 210 else 280)
+        val available = if (root.width > 0) root.width else resources.displayMetrics.widthPixels
+        val w = if (p) (available * 0.62f).roundToInt().coerceIn(dp(180), dp(340))
+                else (available * 0.42f).roundToInt().coerceIn(dp(240), dp(520))
         listOf(zoomSlider, expSlider).forEach {
             val l = it.layoutParams as LinearLayout.LayoutParams
             if (l.width != w) {
