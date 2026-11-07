@@ -1062,7 +1062,10 @@ class CameraController(
             )
         )
 
-        // ----- processing: noise reduction on/off, sharpening always off -----
+        // ----- image processing: request the camera ISP's detail-preserving edge processing -----
+        // EDGE_MODE_OFF disables the device's edge/detail processing and can make telephoto video
+        // look unusually soft. Prefer high quality, fall back to fast, and only use OFF if neither
+        // is advertised by this camera. Avoid app-side sharpening, which can create halos.
         pick(
             b, CaptureRequest.NOISE_REDUCTION_MODE,
             CameraCharacteristics.NOISE_REDUCTION_AVAILABLE_NOISE_REDUCTION_MODES,
@@ -1071,7 +1074,11 @@ class CameraController(
         )
         pick(
             b, CaptureRequest.EDGE_MODE, CameraCharacteristics.EDGE_AVAILABLE_EDGE_MODES,
-            listOf(CameraMetadata.EDGE_MODE_OFF)
+            listOf(
+                CameraMetadata.EDGE_MODE_HIGH_QUALITY,
+                CameraMetadata.EDGE_MODE_FAST,
+                CameraMetadata.EDGE_MODE_OFF
+            )
         )
 
         // ----- stabilization: one toggle; request OIS + EIS together where supported -----
