@@ -1309,11 +1309,15 @@ class MainActivity : Activity(), CameraController.Callbacks {
         if (p) {
             // Portrait reference: tools form a fixed bottom-left vertical stack.
             // Use BOTTOM gravity so their positions cannot drift with screen centre.
-            listOf("tool2x", "toolPeak", "toolFalse", "toolTorch", "toolTimer", "toolRotate")
-                .forEachIndexed { i, key ->
-                    val bottom = sy(0.218f) + dp((4 - i).coerceAtLeast(0) * 40)
-                    setFrameLp(key, dp(70), WRAP, Gravity.START or Gravity.BOTTOM, dp(6), 0, 0, bottom)
-                }
+            val portraitTools = if (cfg.mode == 1) {
+                listOf("tool2x", "toolPeak", "toolFalse", "toolTorch", "toolTimer")
+            } else {
+                listOf("tool2x", "toolPeak", "toolFalse", "toolTorch", "toolTimer", "toolRotate")
+            }
+            portraitTools.forEachIndexed { i, key ->
+                val bottom = sy(0.218f) + dp((portraitTools.lastIndex - i) * 40)
+                setFrameLp(key, dp(70), WRAP, Gravity.START or Gravity.BOTTOM, dp(6), 0, 0, bottom)
+            }
             setFrameLp("focusSlider", dp(56), MATCH, Gravity.END, 0, sy(0.16f), dp(6), sy(0.275f))
             setFrameLp("focusTools", WRAP, WRAP, Gravity.END or Gravity.TOP, 0, sy(0.16f), dp(66), 0)
 
@@ -1327,7 +1331,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
             setFrameLp("mode", WRAP, WRAP, Gravity.END or Gravity.BOTTOM, 0, 0, dp(14), dp(32))
         } else {
             // Landscape reference: tools are pinned below the top bar on the left.
-            listOf("tool2x", "toolPeak", "toolFalse", "toolTorch", "toolTimer", "toolRotate")
+            listOf("tool2x", "toolPeak", "toolFalse", "toolRotate", "toolTimer", "toolTorch")
                 .forEachIndexed { i, key ->
                     setFrameLp(key, dp(70), WRAP, Gravity.START or Gravity.TOP, dp(8), sy(0.135f) + dp(i * 42), 0, 0)
                 }
