@@ -681,7 +681,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
         cfg.flat = false
         cfgDirty = true
         if (cfg.mode == 0) streamChanged() else applyLive()
-        toast("${Look.FILTER_NAMES[id]} selected")
+        toast(if (id == 30) "Chromatic Aberration selected · applied to photos and recorded video" else "${Look.FILTER_NAMES[id]} selected")
     }
 
     private fun toggleExposureControls() {
@@ -1486,7 +1486,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
     private fun imageItems(): List<Pair<String, () -> Unit>> =
         if (cfg.mode == 1) photoImageItems() else videoImageItems()
 
-    /** Dedicated Filters category. Saved stills get the full effect; video mode is preview-only. */
+    /** Dedicated Looks category. Spatial effects are rendered into saved stills and recorded video; the live preview keeps its normal colour-matrix path. */
     private fun filterItems(): List<Pair<String, () -> Unit>> {
         val presets = listOf(
             "Natural" to 0,
