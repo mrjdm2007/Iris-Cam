@@ -1698,8 +1698,8 @@ class MainActivity : Activity(), CameraController.Callbacks {
                 applyLive()
             }
         },
-        "Laptop monitor (Wi-Fi / USB): ${if (monitor != null) "On \u2014 tap for connection" else "Off"}" to { toggleMonitor() },
-        "USB monitoring commands (Mac)" to { showUsbCommands() },
+        "Laptop monitor (Wi-Fi): ${if (monitor != null) "On — tap for connection" else "Off"}" to { toggleMonitor() },
+        "Settings guide" to { showSettingsGuide() },
         "Dolly Zoom (linked zoom + focus): ${if (zoomLinked) "On" else "Off"}" to {
             zoomLinked = !zoomLinked
             refreshUi()
@@ -2873,32 +2873,6 @@ class MainActivity : Activity(), CameraController.Callbacks {
         parent.addView(row, LinearLayout.LayoutParams(MATCH, WRAP))
     }
 
-    private fun showUsbCommands() {
-        val m = monitor
-        val port = m?.port ?: 8080
-        val usbLocalPort = 18080
-        val url = if (m != null) "http://localhost:$usbLocalPort/?pin=${m.pin}" else "http://localhost:$usbLocalPort"
-        val content = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(20), dp(8), dp(20), dp(4))
-        }
-        TextView(this).apply {
-            text = "Connect your phone to the Mac with USB debugging enabled. Start Laptop Monitor first to get its live PIN."
-            setTextColor(Color.WHITE)
-            textSize = 13f
-        }.also { content.addView(it) }
-        addCopyRow(content, "ADB devices command", "adb devices")
-        addCopyRow(content, "ADB reverse command", "adb reverse tcp:$usbLocalPort tcp:$port")
-        addCopyRow(content, "Laptop monitor URL", url)
-        addCopyRow(content, "Disconnect command", "adb reverse --remove tcp:$usbLocalPort")
-        MaterialAlertDialogBuilder(this)
-            .setTitle("USB monitoring on Mac")
-            .setView(content)
-            .setNegativeButton(if (m != null) "Turn off monitor" else "Close") { _, _ -> if (m != null) stopMonitor() }
-            .setPositiveButton("Done", null)
-            .show()
-    }
-
     private fun showMonitorInfo() {
         val m = monitor ?: return
         val ip = localIp()
@@ -2907,7 +2881,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
             setPadding(dp(20), dp(8), dp(20), dp(4))
         }
         TextView(this).apply {
-            text = "Laptop camera monitor · PIN ${m.pin}\n\nThe feed is served locally on your network or through USB ADB."
+            text = "Laptop camera monitor · PIN ${m.pin}\n\nConnect your Mac and phone to the same Wi-Fi network, then open the URL below in your browser."
             setTextColor(Color.WHITE)
             textSize = 13f
         }.also { content.addView(it) }
@@ -2920,11 +2894,6 @@ class MainActivity : Activity(), CameraController.Callbacks {
                 textSize = 12f
             }.also { content.addView(it) }
         }
-        addCopyRow(content, "ADB devices command", "adb devices")
-        val usbLocalPort = 18080
-        addCopyRow(content, "ADB reverse command", "adb reverse tcp:$usbLocalPort tcp:${m.port}")
-        addCopyRow(content, "USB monitor URL", "http://localhost:$usbLocalPort/?pin=${m.pin}")
-        addCopyRow(content, "Disconnect command", "adb reverse --remove tcp:$usbLocalPort")
         MaterialAlertDialogBuilder(this)
             .setTitle("Laptop camera monitor")
             .setView(content)
