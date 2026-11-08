@@ -959,7 +959,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
         rMode = readout("AUTO") {
             if (cfg.mode == 1) {
                 choose("Photo exposure mode", listOf("AUTO", "SMART", "MANUAL")) { selected ->
-                    if (selected == 1 && !cam.manualSensor) {
+                    if (selected == 1 && !cam.smartIsoSupported) {
                         toast("Smart mode needs manual sensor exposure support on this lens")
                     } else {
                         cfg.photoExposureMode = selected
@@ -2591,9 +2591,9 @@ class MainActivity : Activity(), CameraController.Callbacks {
             cam.takePhoto(false)
             return
         }
-        if (!cam.manualSensor) {
-            toast("Smart mode isn't supported by the active lens; choose AUTO or MANUAL")
-            cam.takePhoto(false)
+        if (!cam.smartIsoSupported) {
+            toast("Smart mode can't enforce ISO 500 on this lens. Switch to AUTO or choose a supported lens.")
+            refreshUi()
             return
         }
         if (cfg.scene != 0 || cfg.fastMovingObjects || cfg.flashMode != 0) {
@@ -2610,8 +2610,8 @@ class MainActivity : Activity(), CameraController.Callbacks {
             cam.takePhoto(false)
             return
         }
-        val durations = listOf("Once", "1 min", "3 min", "Disable Smart")
-        val durationMs = listOf(-1L, 60_000L, 180_000L, 0L)
+        val durations = listOf("1 min", "3 min", "5 min", "10 min", "30 min", "Disable")
+        val durationMs = listOf(60_000L, 180_000L, 300_000L, 600_000L, 1_800_000L, 0L)
         val content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(24), dp(8), dp(24), dp(4))
@@ -2634,7 +2634,6 @@ class MainActivity : Activity(), CameraController.Callbacks {
             .setNegativeButton("Keep ISO ≤500") { _, _ -> cam.takePhoto(false) }
             .setPositiveButton("Continue") { _, _ ->
                 when (val duration = durationMs[picker.selectedItemPosition.coerceIn(durations.indices)]) {
-                    -1L -> cam.takePhoto(true)
                     0L -> {
                         cfg.photoExposureMode = 0
                         highIsoAllowedUntil = 0L
