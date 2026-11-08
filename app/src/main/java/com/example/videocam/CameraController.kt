@@ -52,6 +52,7 @@ import android.view.Surface
 import android.view.TextureView
 import android.view.animation.AccelerateDecelerateInterpolator
 import android.view.animation.LinearInterpolator
+import java.io.ByteArrayOutputStream
 import java.text.SimpleDateFormat
 import java.util.concurrent.Executors
 import java.util.Date
