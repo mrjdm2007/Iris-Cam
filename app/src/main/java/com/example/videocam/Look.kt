@@ -174,7 +174,7 @@ object Look {
         "Hasselblad Natural Colour (inspired)", "Hasselblad Portrait (inspired)", "Hasselblad Vivid (inspired)",
         "Fujifilm Classic Chrome (inspired)", "Fujifilm Velvia (inspired)", "Fujifilm Astia (inspired)",
         "Fujifilm Pro Neg (inspired)", "Fujifilm Nostalgic Neg (inspired)", "Sony S-Cinetone (inspired)",
-        "Panasonic Lumix Cinelike D (inspired)", "Nikon Natural Colour (inspired)", "Chromatic Aberration"
+        "Panasonic Lumix Cinelike D (inspired)", "Nikon Natural Colour (inspired)"
     )
 
     private fun filterMatrix(id: Int): ColorMatrix {
@@ -318,7 +318,6 @@ object Look {
                 noise.recycle()
                 out
             }
-            30 -> applyChromaticAberration(base, strength)
             17 -> {
                 val sw = (base.width / 32).coerceAtLeast(1)
                 val sh = (base.height / 32).coerceAtLeast(1)
@@ -370,52 +369,6 @@ object Look {
      * Process in horizontal bands so full-resolution captures do not require
      * two additional full-frame pixel arrays.
      */
-    private fun applyChromaticAberration(src: Bitmap, strength: Int): Bitmap {
-        val w = src.width
-        val h = src.height
-        val amount = strength.coerceIn(0, 100) / 100f
-        if (amount <= 0f) return src
-        val maxShift = (8f * amount).toInt().coerceAtLeast(1)
-        val out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-        val band = 24
-        val cx = (w - 1) * 0.5f
-        val cy = (h - 1) * 0.5f
-        val maxRadius = kotlin.math.sqrt(cx * cx + cy * cy).coerceAtLeast(1f)
-        var y = 0
-        while (y < h) {
-            val rows = minOf(band, h - y)
-            val readY = (y - maxShift).coerceAtLeast(0)
-            val readEnd = (y + rows + maxShift).coerceAtMost(h)
-            val readRows = readEnd - readY
-            val srcBand = IntArray(w * readRows)
-            val dstBand = IntArray(w * rows)
-            src.getPixels(srcBand, 0, w, 0, readY, w, readRows)
-            for (ry in 0 until rows) {
-                val py = y + ry
-                val rowBase = (py - readY) * w
-                for (x in 0 until w) {
-                    val center = srcBand[rowBase + x]
-                    val nx = (x - cx) / maxRadius
-                    val ny = (py - cy) / maxRadius
-                    val radial = (nx * nx + ny * ny).coerceIn(0f, 1f)
-                    val dx = (nx * maxShift * radial).toInt()
-                    val dy = (ny * maxShift * radial).toInt()
-                    val rx = (x + dx).coerceIn(0, w - 1)
-                    val rySrc = (py + dy).coerceIn(0, h - 1) - readY
-                    val bx = (x - dx).coerceIn(0, w - 1)
-                    val bySrc = (py - dy).coerceIn(0, h - 1) - readY
-                    val red = (srcBand[rySrc * w + rx] ushr 16) and 255
-                    val blue = srcBand[bySrc * w + bx] and 255
-                    dstBand[ry * w + x] = (center and -0x1000000) or
-                        (red shl 16) or (center and 0x0000FF00) or blue
-                }
-            }
-            out.setPixels(dstBand, 0, w, 0, y, w, rows)
-            y += rows
-        }
-        return out
-    }
-
     /** Scales a picture up to about [targetPixels] (never down), then sharpens a little to offset the softness. */
     fun upscale(src: Bitmap, targetPixels: Long): Bitmap {
         val area = src.width.toLong() * src.height
