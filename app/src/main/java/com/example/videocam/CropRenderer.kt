@@ -183,7 +183,7 @@ class CropRenderer(
         // landscape camera buffer into it in the direction required by the camera/display
         // orientation; SurfaceTexture's matrix supplies its buffer crop/flip, not this
         // camera-to-portrait quarter-turn.
-        val q = if (portraitOutput && portraitRotationDegrees == 90) {
+        val q = if (portraitOutput && portraitRotationDegrees != 90) {
             floatArrayOf(
                 -cropX, -cropY, 1f, 0f,
                  cropX, -cropY, 1f, 1f,
