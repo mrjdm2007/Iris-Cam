@@ -1304,6 +1304,18 @@ class CameraController(
     }
 
     private fun applyPhotoControls(b: CaptureRequest.Builder, capture: Boolean) {
+        // Ask the active camera HAL to perform real lateral chromatic-aberration correction.
+        // Only request modes explicitly advertised by that camera.
+        if (Build.VERSION.SDK_INT >= 23 && cfg.chromaticAberrationCorrection) {
+            pick(
+                b, CaptureRequest.COLOR_CORRECTION_ABERRATION_MODE,
+                CameraCharacteristics.COLOR_CORRECTION_AVAILABLE_ABERRATION_MODES,
+                listOf(
+                    CameraMetadata.COLOR_CORRECTION_ABERRATION_MODE_HIGH_QUALITY,
+                    CameraMetadata.COLOR_CORRECTION_ABERRATION_MODE_FAST
+                )
+            )
+        }
         if (Build.VERSION.SDK_INT >= 30) b.set(CaptureRequest.CONTROL_ZOOM_RATIO, zoom)
 
         // focus
