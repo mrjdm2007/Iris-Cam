@@ -37,8 +37,7 @@ class CropRenderer(
     private val filterMatrix: FloatArray? = null,
     private val effectId: Int = 0,
     private val effectStrength: Float = 1f,
-    private val portraitOutput: Boolean = false,
-    private val portraitRotationDegrees: Int = 90
+    private val portraitOutput: Boolean = false
 ) {
     private val thread = HandlerThread("crop-gl").apply { start() }
     private val handler = Handler(thread.looper)
@@ -169,33 +168,19 @@ class CropRenderer(
         // Fit the rotated camera image to the recorder surface without stretching it.
         // Camera buffers are landscape (srcW x srcH); portrait output rotates that image
         // into srcH x srcW before the centre-crop is calculated.
-        val sourceAspect = if (portraitOutput) {
-            srcH.toFloat() / srcW.coerceAtLeast(1)
-        } else {
-            srcW.toFloat() / srcH.coerceAtLeast(1)
-        }
+        // Keep the incoming camera texture in its original orientation.
+        // For portrait output, centre-crop the landscape frame to portrait without
+        // applying any additional quarter-turn or mirroring in texture coordinates.
+        val sourceAspect = srcW.toFloat() / srcH.coerceAtLeast(1)
         val targetAspect = outW.toFloat() / outH.coerceAtLeast(1)
-        // Scale the quad beyond the output bounds on the axis that must be cropped.
-        // Keeping the other axis at 1 preserves the source proportions exactly.
         val cropX = maxOf(1f, sourceAspect / targetAspect)
         val cropY = maxOf(1f, targetAspect / sourceAspect)
-        // The portrait encoder surface is physically portrait-sized. Rotate the
-        // landscape camera buffer into it in the direction required by the camera/display
-        // orientation; SurfaceTexture's matrix supplies its buffer crop/flip, not this
-        // camera-to-portrait quarter-turn.
-        val q = if (portraitOutput && portraitRotationDegrees != 90) {
+        val q = if (portraitOutput) {
             floatArrayOf(
-                -cropX, -cropY, 1f, 0f,
-                 cropX, -cropY, 1f, 1f,
-                -cropX,  cropY, 0f, 0f,
-                 cropX,  cropY, 0f, 1f
-            )
-        } else if (portraitOutput) {
-            floatArrayOf(
-                -cropX, -cropY, 0f, 1f,
-                 cropX, -cropY, 0f, 0f,
-                -cropX,  cropY, 1f, 1f,
-                 cropX,  cropY, 1f, 0f
+                -cropX, -cropY, 0f, 0f,
+                 cropX, -cropY, 1f, 0f,
+                -cropX,  cropY, 0f, 1f,
+                 cropX,  cropY, 1f, 1f
             )
         } else {
             val yh = (outW * srcH.toFloat() / srcW.coerceAtLeast(1)) / outH.coerceAtLeast(1)
