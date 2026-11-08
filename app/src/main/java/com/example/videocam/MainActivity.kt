@@ -3000,7 +3000,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
         }
         val pin = (1000 + java.util.Random().nextInt(9000)).toString()
         val m = MonitorServer(monitorHost, pin)
-        if (!m.start()) {
+        if (!m.start(java.net.InetAddress.getByName("0.0.0.0"))) {
             toast("Couldn't start the monitor")
             return
         }

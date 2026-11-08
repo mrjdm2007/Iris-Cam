@@ -4,6 +4,7 @@ import java.io.BufferedInputStream
 import java.io.InputStream
 import java.io.OutputStream
 import java.net.ServerSocket
+import java.net.InetAddress
 import java.net.Socket
 import java.net.URLDecoder
 import java.security.MessageDigest
@@ -45,7 +46,7 @@ class MonitorServer(private val host: Host, val pin: String) {
         private set
 
     @Synchronized
-    fun start(): Boolean {
+    fun start(bindAddress: InetAddress): Boolean {
         if (running) return true
         // stop() shuts the executor down; recreate it so the monitor can be started again
         // after the user leaves and re-enters the monitor panel.
@@ -53,7 +54,7 @@ class MonitorServer(private val host: Host, val pin: String) {
         val executor = pool
         for (p in 8080..8090) {
             try {
-                ss = ServerSocket(p)
+                ss = ServerSocket(p, 50, bindAddress)
                 port = p
                 break
             } catch (_: Exception) {
