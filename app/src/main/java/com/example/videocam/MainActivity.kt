@@ -802,7 +802,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
             override fun onProgressChanged(seekBar: SeekBar?, value: Int, fromUser: Boolean) {
                 val v = value - 180
                 hueLabel.text = "BACKGROUND HUE · ${if (v > 0) "+" else ""}${v}°"
-                if (fromUser) { cfg.backgroundHueShift = v; cfgDirty = true }
+                cfg.backgroundHueShift = v; cfgDirty = true
             }
             override fun onStartTrackingTouch(seekBar: SeekBar?) {}
             override fun onStopTrackingTouch(seekBar: SeekBar?) {}
@@ -810,7 +810,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
         satSeek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar?, value: Int, fromUser: Boolean) {
                 satLabel.text = "BACKGROUND SATURATION · ${value}%"
-                if (fromUser) { cfg.backgroundSaturation = value; cfgDirty = true }
+                cfg.backgroundSaturation = value; cfgDirty = true
             }
             override fun onStartTrackingTouch(seekBar: SeekBar?) {}
             override fun onStopTrackingTouch(seekBar: SeekBar?) {}
@@ -819,7 +819,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
             override fun onProgressChanged(seekBar: SeekBar?, value: Int, fromUser: Boolean) {
                 val v = value - 100
                 tempLabel.text = "BACKGROUND TEMPERATURE · ${if (v > 0) "+" else ""}${v}"
-                if (fromUser) { cfg.backgroundTemperature = v; cfgDirty = true }
+                cfg.backgroundTemperature = v; cfgDirty = true
             }
             override fun onStartTrackingTouch(seekBar: SeekBar?) {}
             override fun onStopTrackingTouch(seekBar: SeekBar?) {}
