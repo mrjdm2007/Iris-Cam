@@ -1549,9 +1549,18 @@ class CameraController(
         // Four-frame bracket: -3 EV, 0 EV, +1 EV and +3 EV.
         // Keep the dark frame's shutter short; ISO carries the bracket where possible.
         val targets = doubleArrayOf(0.125, 1.0, 2.0, 8.0).map { e0.toDouble() * s0 * it }
-        val fastMain = cfg.fastMovingObjects && cfg.cameraId == "5"
-        val maxExposure = if (fastMain) min(8_000_000L, er.upper) else er.upper
-        val isoCeiling = if (cfg.smartIso && !cfg.manualExposure && !allowHighIso && !fastMain) min(500, isoRange.upper).coerceAtLeast(isoRange.lower) else isoRange.upper
+        // Camera ID 0 is the physical Main 1x lens; ID 5 is the all-lenses logical switch.
+        val fastMain = cfg.fastMovingObjects && cfg.cameraId == "0"
+        val maxFrame = chars.get(CameraCharacteristics.SENSOR_INFO_MAX_FRAME_DURATION) ?: er.upper
+        val exposureLimit = min(er.upper, maxFrame)
+        val smartIsoActive = cfg.smartIso && !cfg.manualExposure && !allowHighIso && !fastMain
+        // Smart ISO is allowed to lengthen the shutter as far as 1/20 s, but never beyond it.
+        val maxExposure = when {
+            fastMain -> min(8_000_000L, exposureLimit)
+            smartIsoActive -> min(50_000_000L, exposureLimit)
+            else -> exposureLimit
+        }
+        val isoCeiling = if (smartIsoActive) min(500, isoRange.upper).coerceAtLeast(isoRange.lower) else isoRange.upper
         val preferredTimes = longArrayOf(e0 / 8L, e0, (e0.toDouble() * 2.0).toLong(), (e0.toDouble() * 8.0).toLong()).map { it.coerceIn(er.lower, maxExposure) }
         val exposures = LongArray(4)
         val sensitivities = IntArray(4)
@@ -1573,14 +1582,29 @@ class CameraController(
         if (awbLockAvail) b.set(CaptureRequest.CONTROL_AWB_LOCK, true)
     }
 
+    /** True when the metered scene needs more than ISO 500 even at the 1/20 s limit. */
+    fun smartIsoNeedsHigh(): Boolean {
+        if (!manualSensor || cfg.manualExposure || !cfg.smartIso || cfg.fastMovingObjects) return false
+        val er = chars.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE) ?: return false
+        val maxFrame = chars.get(CameraCharacteristics.SENSOR_INFO_MAX_FRAME_DURATION) ?: er.upper
+        val maxExposure = min(50_000_000L, min(er.upper, maxFrame))
+        val currentIso = liveIso.takeIf { it > 0 } ?: return false
+        val currentExposure = liveExpNs.takeIf { it > 0L } ?: return false
+        val targetIso = 500.coerceIn(isoRange.lower, min(500, isoRange.upper).coerceAtLeast(isoRange.lower))
+        val requiredExposure = currentExposure.toDouble() * currentIso / targetIso
+        return requiredExposure > maxExposure.toDouble()
+    }
+
     private fun applySmartIsoExposure(b: CaptureRequest.Builder) {
+        if (!manualSensor) return
         val er = chars.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE) ?: return
         val currentIso = liveIso.takeIf { it > 0 } ?: 100
         val currentExposure = liveExpNs.takeIf { it > 0L } ?: 33_333_333L
         val maxFrame = chars.get(CameraCharacteristics.SENSOR_INFO_MAX_FRAME_DURATION) ?: er.upper
+        val maxExposure = min(50_000_000L, min(er.upper, maxFrame))
         val targetIso = currentIso.coerceAtMost(500).coerceIn(isoRange.lower, min(500, isoRange.upper).coerceAtLeast(isoRange.lower))
-        // Lock this capture to the metered ISO (or 500), so AE cannot push it above the ceiling after metering.
-        val targetExposure = (currentExposure.toDouble() * currentIso / targetIso).toLong().coerceIn(er.lower, min(er.upper, maxFrame))
+        // Lock the still to a metered ISO no higher than 500; use shutter time up to 1/20 s.
+        val targetExposure = (currentExposure.toDouble() * currentIso / targetIso).toLong().coerceIn(er.lower, maxExposure)
         b.set(CaptureRequest.CONTROL_AE_MODE, CameraMetadata.CONTROL_AE_MODE_OFF)
         b.set(CaptureRequest.SENSOR_EXPOSURE_TIME, targetExposure)
         b.set(CaptureRequest.SENSOR_FRAME_DURATION, targetExposure.coerceAtLeast(er.lower))
@@ -1589,11 +1613,12 @@ class CameraController(
     }
 
     private fun applyFastMotionExposure(b: CaptureRequest.Builder) {
+        if (!manualSensor) return
         val er = chars.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE) ?: return
         val currentIso = (liveIso.takeIf { it > 0 } ?: 100).coerceIn(isoRange.lower, isoRange.upper)
         val currentExposure = liveExpNs.takeIf { it > 0L } ?: 8_000_000L
         val maxFrame = chars.get(CameraCharacteristics.SENSOR_INFO_MAX_FRAME_DURATION) ?: er.upper
-        // Never slower than 1/125 s; in brighter scenes retain the AE-selected shorter exposure.
+        // 1/125 s is the slowest allowed; AE metering drives the exposure faster down to the sensor minimum.
         val targetExposure = min(currentExposure, 8_000_000L).coerceIn(er.lower, min(er.upper, maxFrame))
         val targetIso = (currentIso.toDouble() * currentExposure / targetExposure).roundToInt().coerceIn(isoRange.lower, isoRange.upper)
         b.set(CaptureRequest.CONTROL_AE_MODE, CameraMetadata.CONTROL_AE_MODE_OFF)
@@ -1643,7 +1668,7 @@ class CameraController(
                 b.addTarget(rd.surface)
                 applyPhotoControls(b, true)
                 if (bracket == null && plan == null && !cfg.manualExposure && cfg.flashMode == 0) {
-                    if (cfg.fastMovingObjects && cfg.cameraId == "5") {
+                    if (cfg.fastMovingObjects && cfg.cameraId == "0") {
                         applyFastMotionExposure(b)
                     } else if (cfg.smartIso && !allowHighIso) {
                         applySmartIsoExposure(b)
