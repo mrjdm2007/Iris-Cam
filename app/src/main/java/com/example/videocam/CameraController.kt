@@ -1047,7 +1047,7 @@ class CameraController(
         }
 
         // ----- exposure -----
-        if (photoManualExposure()) {
+        if (cfg.manualExposure) {
             b.set(CaptureRequest.CONTROL_AE_MODE, CameraMetadata.CONTROL_AE_MODE_OFF)
             var ns = (1e9 / cfg.shutterDenom).toLong()
             chars.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)?.let {
@@ -1346,7 +1346,7 @@ class CameraController(
 
         // exposure and flash
         val flash = capture && flashAvail && cfg.flashMode != 0
-        if (cfg.manualExposure) {
+        if (photoManualExposure()) {
             b.set(CaptureRequest.CONTROL_AE_MODE, CameraMetadata.CONTROL_AE_MODE_OFF)
             var ns = (1e9 / cfg.shutterDenom).toLong()
             chars.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)?.let { ns = ns.coerceIn(it.lower, it.upper) }
