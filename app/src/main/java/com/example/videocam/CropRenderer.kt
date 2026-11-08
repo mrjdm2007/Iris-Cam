@@ -171,7 +171,14 @@ class CropRenderer(
         // Keep the incoming camera texture in its original orientation.
         // For portrait output, centre-crop the landscape frame to portrait without
         // applying any additional quarter-turn or mirroring in texture coordinates.
-        val sourceAspect = srcW.toFloat() / srcH.coerceAtLeast(1)
+        // In portrait mode the incoming SurfaceTexture is already presented upright;
+        // its displayed aspect is therefore the inverse of the landscape buffer dimensions.
+        // Use that displayed aspect so the full frame maps 1:1 instead of centre-cropping it.
+        val sourceAspect = if (portraitOutput) {
+            srcH.toFloat() / srcW.coerceAtLeast(1)
+        } else {
+            srcW.toFloat() / srcH.coerceAtLeast(1)
+        }
         val targetAspect = outW.toFloat() / outH.coerceAtLeast(1)
         val cropX = maxOf(1f, sourceAspect / targetAspect)
         val cropY = maxOf(1f, targetAspect / sourceAspect)
