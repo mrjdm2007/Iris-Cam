@@ -1538,25 +1538,27 @@ class MainActivity : Activity(), CameraController.Callbacks {
         })
     }
 
-    private fun showPhotoContrastSlider() {
+    private fun showPhotoContrastSlider(lensId: String = cfg.cameraId) {
         if (!idle()) return
+        val lensName = runCatching { cam.cameraLabel(lensId) }.getOrDefault(lensId)
+        val currentContrast = (cfg.photoContrastByLens[lensId] ?: cfg.photoContrast).coerceIn(0, 100)
         val box = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(20), dp(12), dp(20), dp(8))
         }
         val label = TextView(this).apply {
-            text = "PHOTO CONTRAST · ${cfg.photoContrast}%"
+            text = "$lensName · PHOTO CONTRAST · ${currentContrast}%"
             setTextColor(0xFFF3F0E8.toInt())
             textSize = 12f
         }
         val seek = SeekBar(this).apply {
             max = 100
-            progress = cfg.photoContrast
+            progress = currentContrast
             setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                 override fun onProgressChanged(bar: SeekBar?, value: Int, fromUser: Boolean) {
-                    label.text = "PHOTO CONTRAST · ${value}%"
+                    label.text = "$lensName · PHOTO CONTRAST · ${value}%"
                     if (fromUser) {
-                        cfg.photoContrast = value
+                        cfg.photoContrastByLens[lensId] = value.coerceIn(0, 100)
                         cfgDirty = true
                     }
                 }
@@ -1567,20 +1569,43 @@ class MainActivity : Activity(), CameraController.Callbacks {
         box.addView(label)
         box.addView(seek, LinearLayout.LayoutParams(MATCH, WRAP))
         MaterialAlertDialogBuilder(this)
-            .setTitle("Photo contrast")
-            .setMessage("Adds contrast to saved standard JPEG photos. 0% leaves the image unchanged.")
+            .setTitle("Photo contrast · $lensName")
+            .setMessage("Saved separately for this lens. 0% leaves the image unchanged.")
             .setView(box)
             .setPositiveButton("Done", null)
             .setNeutralButton("Reset to 40%") { _, _ ->
-                cfg.photoContrast = 40
+                cfg.photoContrastByLens[lensId] = 40
                 cfgDirty = true
-                toast("Photo contrast reset to 40%")
+                toast("$lensName photo contrast reset to 40%")
             }
             .show()
     }
 
+    private fun showLensContrastPicker() {
+        val ids = cam.cameraIds
+        if (ids.isEmpty()) return
+        choose("Photo contrast · choose lens", ids.map { id ->
+            val name = runCatching { cam.cameraLabel(id) }.getOrDefault(id)
+            "$name · ${(cfg.photoContrastByLens[id] ?: cfg.photoContrast).coerceIn(0, 100)}%"
+        }) { index -> showPhotoContrastSlider(ids[index]) }
+    }
+
     private fun photoImageItems(): List<Pair<String, () -> Unit>> = listOf(
-        "Photo contrast: ${cfg.photoContrast}%" to { showPhotoContrastSlider() },
+        "Contrast by lens: ${runCatching { cam.cameraLabel(cfg.cameraId) }.getOrDefault(cfg.cameraId)} · ${(cfg.photoContrastByLens[cfg.cameraId] ?: cfg.photoContrast).coerceIn(0, 100)}%" to { showLensContrastPicker() },
+        "Smart ISO cap: ${if (cfg.smartIso) "500" else "Off"}" to {
+            cfg.smartIso = !cfg.smartIso
+            cfgDirty = true
+            toast(if (cfg.smartIso) "Smart ISO enabled · maximum ISO 500" else "Smart ISO disabled")
+        },
+        "Fast moving objects: ${if (cfg.fastMovingObjects) "On" else "Off"} · Main lens only" to {
+            if (cfg.cameraId != "5") {
+                toast("Select the Main 1× lens to use Fast Moving Objects")
+            } else {
+                cfg.fastMovingObjects = !cfg.fastMovingObjects
+                cfgDirty = true
+                toast("Fast Moving Objects ${if (cfg.fastMovingObjects) "enabled" else "disabled"}")
+            }
+        },
         "Flat profile: ${if (cfg.flat) "On" else "Off"}" to {
             cfg.flat = !cfg.flat
             cfgDirty = true
@@ -2402,8 +2427,22 @@ class MainActivity : Activity(), CameraController.Callbacks {
         }
     }
 
+    private fun takePhotoWithSmartIso() {
+        if (cfg.smartIso && !cfg.manualExposure && cfg.scene == 0 && !cfg.fastMovingObjects && cfg.flashMode == 0 && cam.liveIso > 500) {
+            MaterialAlertDialogBuilder(this)
+                .setTitle("Too dark")
+                .setMessage("The scene is too dark to expose correctly while keeping ISO at or below 500. Allow ISO above 500 for this capture?")
+                .setNegativeButton("Keep ISO ≤500") { _, _ -> cam.takePhoto(false) }
+                .setPositiveButton("Allow higher ISO once") { _, _ -> cam.takePhoto(true) }
+                .setOnCancelListener { }
+                .show()
+        } else {
+            cam.takePhoto(false)
+        }
+    }
+
     private fun fire() {
-        if (cfg.mode == 1) cam.takePhoto() else cam.startRecording()
+        if (cfg.mode == 1) takePhotoWithSmartIso() else cam.startRecording()
     }
 
     // ---------- gestures ----------
@@ -3113,7 +3152,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
             "rec" -> if (cfg.mode == 0) {
                 if (cam.recording) cam.stopRecording() else cam.startRecording()
             } else {
-                cam.takePhoto()
+                takePhotoWithSmartIso()
             }
             "af" -> {
                 cam.cancelRack()
