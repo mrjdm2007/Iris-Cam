@@ -487,7 +487,7 @@ class CameraController(
     /** Size of the recorded file. */
     fun outSize(): Size {
         val r = effRatio()
-        if (r == 0) return Size(cfg.width, cfg.height)
+        if (r == 0) return if (cfg.portrait) Size(cfg.height, cfg.width) else Size(cfg.width, cfg.height)
         return Size(cfg.width, min(Ratios.heightFor(cfg.width, r), cfg.height))
     }
 
@@ -688,7 +688,7 @@ class CameraController(
             }
             // The GL renderer writes physically upright frames, so don't add rotation metadata.
             // Without the renderer, let MediaRecorder carry the device orientation as metadata.
-            val useGlRenderer = cropIt || cfg.filterId > 0
+            val useGlRenderer = cropIt || cfg.filterId > 0 || cfg.portrait
             rec.setOrientationHint(if (useGlRenderer) 0 else orientationHint())
             rec.setMaxFileSize(SPLIT_BYTES)
             rec.setOnInfoListener { mr, what, _ -> onRecorderInfo(mr, what) }
@@ -700,14 +700,16 @@ class CameraController(
             }
             rec.prepare()
             recorder = rec
-            if (cropIt || cfg.filterId > 0) {
+            if (cropIt || cfg.filterId > 0 || cfg.portrait) {
                 val rot = tv.display?.rotation ?: Surface.ROTATION_90
                 val matrix = if (cfg.filterId > 0) Look.videoFilterMatrix(cfg.filterId, cfg.filterIntensity) else null
                 crop = CropRenderer(
                     rec.surface, os.width, os.height, cfg.width, cfg.height, rot,
                     fullFrame = !cropIt, filterMatrix = matrix,
                     effectId = if (cfg.filterId > 0) cfg.filterId else 0,
-                    effectStrength = cfg.filterIntensity / 100f
+                    effectStrength = cfg.filterIntensity / 100f,
+                    portraitOutput = cfg.portrait,
+                    portraitRotationDegrees = orientationHint()
                 )
             }
         } catch (e: Exception) {
@@ -1184,12 +1186,12 @@ class CameraController(
     private fun areaDesc(l: Array<Size>?): List<Size> = l?.sortedByDescending { it.width * it.height } ?: emptyList()
 
     val rawAvail get() = rawSize != null
-    val twoFrameHdrAvailable get() = manualSensor && jpegSizes.isNotEmpty()
+    val fourFrameHdrAvailable get() = manualSensor && jpegSizes.isNotEmpty()
 
-    /** 0 = phone JPEG, 1 = RAW develop, 2 = four-frame Ultra HDR bracket, 3 = native Ultra HDR JPEG_R. */
+    /** 0 = phone JPEG, 1 = RAW develop, 2 = Ultra HDR (four-frame bracket), 3 = native Ultra HDR JPEG_R. */
     fun effMode(): Int = when {
         cfg.photoFormat == 1 && rawAvail && cfg.scene == 0 -> 1
-        cfg.photoFormat == 2 && twoFrameHdrAvailable && cfg.scene == 0 -> 2
+        cfg.photoFormat == 2 && fourFrameHdrAvailable && cfg.scene == 0 -> 2
         else -> 0
     }
 
@@ -1211,13 +1213,13 @@ class CameraController(
         else -> jpegSizes
     }
 
-    /** Logical ID 5 stays at ~8 MP for fast continuous lens switching. Separate lenses use their own maximum still size. */
+    /** With nothing picked, about 12 MP: far quicker to shoot and save than the 50 MP mode. */
     fun captureSize(): Size {
         val l = captureSizes()
         if (l.isEmpty()) return Size(4000, 3000)
         l.firstOrNull { it.width == cfg.photoW && it.height == cfg.photoH }?.let { return it }
-        if (effMode() == 1 || captureFormat() == ImageFormat.JPEG_R || cfg.cameraId != "5") return l.first()
-        // The all-lenses logical camera uses a fast ~8 MP 4:3 default.
+        if (effMode() == 1 || captureFormat() == ImageFormat.JPEG_R) return l.first()
+        // Default to a fast ~8 MP 4:3 capture and save at that exact pixel size.
         val target = min(8_000_000L, lensSafeArea)
         val ok = l.filter { it.width.toLong() * it.height <= target }
         return ok.firstOrNull { it.width * 3 == it.height * 4 }
@@ -1250,7 +1252,7 @@ class CameraController(
         }
         if (cfg.photoFormat == 2 && effMode() != 2 && warnedLens != cfg.cameraId) {
             warnedLens = cfg.cameraId
-            ui.onMessage("Ultra HDR (2 frames) needs manual exposure, which this lens doesn't offer: using phone JPEG")
+            ui.onMessage("Ultra HDR (4 frames) needs manual exposure, which this lens doesn't offer: using phone JPEG")
         }
         val st = tv.surfaceTexture ?: run {
             finishConfiguration()
@@ -1304,9 +1306,9 @@ class CameraController(
     }
 
     private fun applyPhotoControls(b: CaptureRequest.Builder, capture: Boolean) {
-        // Ask the active camera HAL to perform real lateral chromatic-aberration correction.
-        // Only request modes explicitly advertised by that camera.
         if (Build.VERSION.SDK_INT >= 23 && cfg.chromaticAberrationCorrection) {
+            // Request real lateral chromatic-aberration correction from the camera ISP.
+            // Only request modes advertised by the active camera HAL.
             pick(
                 b, CaptureRequest.COLOR_CORRECTION_ABERRATION_MODE,
                 CameraCharacteristics.COLOR_CORRECTION_AVAILABLE_ABERRATION_MODES,
@@ -1476,7 +1478,7 @@ class CameraController(
         finishBusy()
     }
 
-    fun takePhoto() {
+    fun takePhoto(allowHighIso: Boolean = false) {
         if (cfg.mode != 1) return
         if (busy) {
             if (longEndAt != 0L) cancelCapture()
@@ -1501,9 +1503,9 @@ class CameraController(
                 s.capture(b.build(), null, handler)
             } catch (_: Exception) {
             }
-            handler.postDelayed({ doCapture() }, 900)
+            handler.postDelayed({ doCapture(allowHighIso) }, 900)
         } else {
-            doCapture()
+            doCapture(allowHighIso)
         }
     }
 
@@ -1525,11 +1527,12 @@ class CameraController(
         return ScenePlan(per, iso, n)
     }
 
-    /** Normal exposure plus an approximately 4x darker exposure for the two-frame Ultra HDR mode. */
+    /** Four-frame Ultra HDR bracket: -3 EV, 0 EV, +1 EV and +3 EV. */
     private class HdrPlan(val exp: LongArray, val iso: IntArray)
 
-    private fun hdrPlan(): HdrPlan? {
+    private fun hdrPlan(allowHighIso: Boolean): HdrPlan? {
         val er = chars.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE) ?: return null
+        if (!manualSensor) return null
         var e0: Long
         var s0: Int
         if (cfg.manualExposure) {
@@ -1539,20 +1542,32 @@ class CameraController(
             e0 = liveExpNs
             s0 = liveIso
         }
-        if (!manualSensor || e0 <= 0L || s0 <= 0) return null
+        if (e0 <= 0L || s0 <= 0) return null
         e0 = e0.coerceIn(er.lower, er.upper)
         s0 = s0.coerceIn(isoRange.lower, isoRange.upper)
 
-        // Verified four-frame bracket: -3 EV, 0 EV, +1 EV, +3 EV.
-        // Prefer short shutter times and adjust ISO to reach each target exposure.
+        // Four-frame bracket: -3 EV, 0 EV, +1 EV and +3 EV.
+        // Keep the dark frame's shutter short; ISO carries the bracket where possible.
         val targets = doubleArrayOf(0.125, 1.0, 2.0, 8.0).map { e0.toDouble() * s0 * it }
-        val preferredTimes = longArrayOf(e0 / 8L, e0, (e0.toDouble() * 2.0).toLong(), (e0.toDouble() * 8.0).toLong())
+        // Camera ID 0 is the physical Main 1x lens; ID 5 is the all-lenses logical switch.
+        val fastMain = cfg.fastMovingObjects && cfg.cameraId == "0"
+        val maxFrame = chars.get(CameraCharacteristics.SENSOR_INFO_MAX_FRAME_DURATION) ?: er.upper
+        val exposureLimit = min(er.upper, maxFrame)
+        val smartIsoActive = cfg.smartIso && !cfg.manualExposure && !allowHighIso && !fastMain
+        // Smart ISO is allowed to lengthen the shutter as far as 1/20 s, but never beyond it.
+        val maxExposure = when {
+            fastMain -> min(8_000_000L, exposureLimit)
+            smartIsoActive -> min(50_000_000L, exposureLimit)
+            else -> exposureLimit
+        }
+        val isoCeiling = if (smartIsoActive) min(500, isoRange.upper).coerceAtLeast(isoRange.lower) else isoRange.upper
+        val preferredTimes = longArrayOf(e0 / 8L, e0, (e0.toDouble() * 2.0).toLong(), (e0.toDouble() * 8.0).toLong()).map { it.coerceIn(er.lower, maxExposure) }
         val exposures = LongArray(4)
         val sensitivities = IntArray(4)
         for (i in 0..3) {
-            val preferred = preferredTimes[i].coerceIn(er.lower, er.upper)
-            val iso = (targets[i] / preferred).roundToInt().coerceIn(isoRange.lower, isoRange.upper)
-            val exposure = (targets[i] / iso).toLong().coerceIn(er.lower, er.upper)
+            val preferred = preferredTimes[i]
+            val iso = (targets[i] / preferred).roundToInt().coerceIn(isoRange.lower, isoCeiling)
+            val exposure = (targets[i] / iso).toLong().coerceIn(er.lower, maxExposure)
             exposures[i] = exposure
             sensitivities[i] = iso
         }
@@ -1567,7 +1582,53 @@ class CameraController(
         if (awbLockAvail) b.set(CaptureRequest.CONTROL_AWB_LOCK, true)
     }
 
-    private fun doCapture() {
+    /** True when the metered scene needs more than ISO 500 even at the 1/20 s limit. */
+    fun smartIsoNeedsHigh(): Boolean {
+        if (!manualSensor || cfg.manualExposure || !cfg.smartIso || cfg.fastMovingObjects) return false
+        val er = chars.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE) ?: return false
+        val maxFrame = chars.get(CameraCharacteristics.SENSOR_INFO_MAX_FRAME_DURATION) ?: er.upper
+        val maxExposure = min(50_000_000L, min(er.upper, maxFrame))
+        val currentIso = liveIso.takeIf { it > 0 } ?: return false
+        val currentExposure = liveExpNs.takeIf { it > 0L } ?: return false
+        val targetIso = 500.coerceIn(isoRange.lower, min(500, isoRange.upper).coerceAtLeast(isoRange.lower))
+        val requiredExposure = currentExposure.toDouble() * currentIso / targetIso
+        return requiredExposure > maxExposure.toDouble()
+    }
+
+    private fun applySmartIsoExposure(b: CaptureRequest.Builder) {
+        if (!manualSensor) return
+        val er = chars.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE) ?: return
+        val currentIso = liveIso.takeIf { it > 0 } ?: 100
+        val currentExposure = liveExpNs.takeIf { it > 0L } ?: 33_333_333L
+        val maxFrame = chars.get(CameraCharacteristics.SENSOR_INFO_MAX_FRAME_DURATION) ?: er.upper
+        val maxExposure = min(50_000_000L, min(er.upper, maxFrame))
+        val targetIso = currentIso.coerceAtMost(500).coerceIn(isoRange.lower, min(500, isoRange.upper).coerceAtLeast(isoRange.lower))
+        // Lock the still to a metered ISO no higher than 500; use shutter time up to 1/20 s.
+        val targetExposure = (currentExposure.toDouble() * currentIso / targetIso).toLong().coerceIn(er.lower, maxExposure)
+        b.set(CaptureRequest.CONTROL_AE_MODE, CameraMetadata.CONTROL_AE_MODE_OFF)
+        b.set(CaptureRequest.SENSOR_EXPOSURE_TIME, targetExposure)
+        b.set(CaptureRequest.SENSOR_FRAME_DURATION, targetExposure.coerceAtLeast(er.lower))
+        b.set(CaptureRequest.SENSOR_SENSITIVITY, targetIso)
+        b.set(CaptureRequest.FLASH_MODE, CameraMetadata.FLASH_MODE_OFF)
+    }
+
+    private fun applyFastMotionExposure(b: CaptureRequest.Builder) {
+        if (!manualSensor) return
+        val er = chars.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE) ?: return
+        val currentIso = (liveIso.takeIf { it > 0 } ?: 100).coerceIn(isoRange.lower, isoRange.upper)
+        val currentExposure = liveExpNs.takeIf { it > 0L } ?: 8_000_000L
+        val maxFrame = chars.get(CameraCharacteristics.SENSOR_INFO_MAX_FRAME_DURATION) ?: er.upper
+        // 1/125 s is the slowest allowed; AE metering drives the exposure faster down to the sensor minimum.
+        val targetExposure = min(currentExposure, 8_000_000L).coerceIn(er.lower, min(er.upper, maxFrame))
+        val targetIso = (currentIso.toDouble() * currentExposure / targetExposure).roundToInt().coerceIn(isoRange.lower, isoRange.upper)
+        b.set(CaptureRequest.CONTROL_AE_MODE, CameraMetadata.CONTROL_AE_MODE_OFF)
+        b.set(CaptureRequest.SENSOR_EXPOSURE_TIME, targetExposure)
+        b.set(CaptureRequest.SENSOR_FRAME_DURATION, targetExposure.coerceAtLeast(er.lower))
+        b.set(CaptureRequest.SENSOR_SENSITIVITY, targetIso)
+        b.set(CaptureRequest.FLASH_MODE, CameraMetadata.FLASH_MODE_OFF)
+    }
+
+    private fun doCapture(allowHighIso: Boolean) {
         val cd = device
         val s = session
         val rd = reader
@@ -1586,17 +1647,17 @@ class CameraController(
                 finishBusy()
                 return
             }
-            val bracket = if (effMode() == 2) hdrPlan() else null
+            val bracket = if (effMode() == 2) hdrPlan(allowHighIso) else null
             if (effMode() == 2 && bracket == null) {
-                handler.post { ui.onMessage("Not enough exposure range for four-frame Ultra HDR here, saving a normal JPEG") }
+                handler.post { ui.onMessage("Not enough exposure range for Ultra HDR here, saving a normal JPEG") }
             }
             if (bracket != null && (cfg.filterId > 0 || cfg.flat || cfg.bw || cfg.photoLook != 0)) {
                 handler.post { ui.onMessage("Four-frame Ultra HDR uses the camera JPEG directly; photo looks and the flat profile are bypassed.") }
             }
             val reqs = ArrayList<CaptureRequest>()
-            val count = if (bracket != null) bracket.exp.size else plan?.frames ?: 1
+            val count = bracket?.exp?.size ?: plan?.frames ?: 1
             for (i in 0 until count) {
-                // Four still-capture requests in fixed -3 EV, 0 EV, +1 EV, +3 EV order.
+                // Four-frame Ultra HDR uses four still-capture requests in a fixed exposure order.
                 // Ordinary JPEG photos retain the existing ZSL path.
                 val template = if (zeroShutterLagEligible() && bracket == null) {
                     CameraDevice.TEMPLATE_ZERO_SHUTTER_LAG
@@ -1606,12 +1667,15 @@ class CameraController(
                 val b = cd.createCaptureRequest(template)
                 b.addTarget(rd.surface)
                 applyPhotoControls(b, true)
+                if (bracket == null && plan == null && !cfg.manualExposure && cfg.flashMode == 0) {
+                    if (cfg.fastMovingObjects && cfg.cameraId == "0") {
+                        applyFastMotionExposure(b)
+                    } else if (cfg.smartIso && !allowHighIso) {
+                        applySmartIsoExposure(b)
+                    }
+                }
                 if (bracket != null) {
-                    b.set(CaptureRequest.CONTROL_AE_MODE, CameraMetadata.CONTROL_AE_MODE_OFF)
-                    b.set(CaptureRequest.SENSOR_EXPOSURE_TIME, bracket.exp[i])
-                    b.set(CaptureRequest.SENSOR_SENSITIVITY, bracket.iso[i])
-                    b.set(CaptureRequest.FLASH_MODE, CameraMetadata.FLASH_MODE_OFF)
-                    if (awbLockAvail) b.set(CaptureRequest.CONTROL_AWB_LOCK, true)
+                    setHdrManual(b, bracket.exp[i], bracket.iso[i])
                 } else if (plan != null) {
                     b.set(CaptureRequest.CONTROL_AE_MODE, CameraMetadata.CONTROL_AE_MODE_OFF)
                     b.set(CaptureRequest.SENSOR_EXPOSURE_TIME, plan.expNs)
@@ -1625,7 +1689,7 @@ class CameraController(
             val sh = Shot(
                 cfg.cameraId, fmt, chars, needRotation(), cfg.photoQuality, reqs.size,
                 cfg.bw, cfg.flat && !cfg.bw, cfg.photoLook, bracket != null, false, cfg.glow, cfg.blue,
-                cfg.filterId, cfg.photoFilterIntensity, cfg.photoContrast, if (bracket != null) 8f else 1f
+                cfg.filterId, cfg.photoFilterIntensity, (cfg.photoContrastByLens[cfg.cameraId] ?: cfg.photoContrast).coerceIn(0, 100), if (bracket != null) 8f else 1f
             )
             synchronized(lock) { shot = sh }
             if (plan != null && plan.expNs * reqs.size >= 1_500_000_000L) {
@@ -1751,13 +1815,13 @@ class CameraController(
                 // through Bitmap/JPEG would destroy the HDR metadata and reduce highlight range.
                 saved = saveBytes(sh.jpegs.first(), "$base.jpg")
             } else if (sh.hdr && sh.jpegs.size >= 4) {
-                // Same four-frame fusion path as the verified test app.
-                // Physically orient every JPEG before comparing pixels for the gain map.
-                val baseBytes = uprightJpeg(sh.jpegs[1], sh.rotDeg)
+                // Four-frame order: -3 EV, 0 EV, +1 EV, +3 EV.
+                // Rotate each frame to upright pixels before analysing and building the gain map.
                 val darkBytes = uprightJpeg(sh.jpegs[0], sh.rotDeg)
+                val baseBytes = uprightJpeg(sh.jpegs[1], sh.rotDeg)
                 val midBrightBytes = uprightJpeg(sh.jpegs[2], sh.rotDeg)
                 val brightBytes = uprightJpeg(sh.jpegs[3], sh.rotDeg)
-                val blob = UltraHdr.build(baseBytes, darkBytes, midBrightBytes, brightBytes, 8f)
+                val blob = UltraHdr.build(baseBytes, darkBytes, midBrightBytes, brightBytes, sh.hdrFactor)
                 if (blob != null) {
                     saved = saveBytes(blob, "$base.jpg")
                     handler.post {
@@ -1788,7 +1852,7 @@ class CameraController(
                 out.recycle()
             } else {
                 val bytes = sh.jpegs[0]
-                saved = if (sh.filterId > 0 && sh.filterIntensity > 0) {
+                saved = if ((sh.filterId > 0 && sh.filterIntensity > 0) || sh.contrast > 0 || sh.flat || sh.bw || sh.photoLook != 0) {
                     val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
                     val out = finishLook(rotateBy(bmp, sh.rotDeg), sh)
                     val u = saveBitmap(out, "$base.jpg", sh.quality)
@@ -1826,7 +1890,7 @@ class CameraController(
         return r
     }
 
-    /** Decode, physically orient, and re-encode a JPEG before gain-map analysis. */
+    /** Decode, physically orient, and re-encode a JPEG frame for multi-frame HDR alignment. */
     private fun uprightJpeg(bytes: ByteArray, degrees: Int): ByteArray {
         var bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
             ?: throw IllegalStateException("Couldn't decode an HDR frame")
