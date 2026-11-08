@@ -1188,7 +1188,7 @@ class CameraController(
     /** 0 = phone JPEG, 1 = RAW develop, 2 = Ultra HDR (two-frame bracket), 3 = native Ultra HDR JPEG_R. */
     fun effMode(): Int = when {
         cfg.photoFormat == 1 && rawAvail && cfg.scene == 0 -> 1
-        cfg.photoFormat == 2 && twoFrameHdrAvailable && cfg.scene == 0 -> 2
+        cfg.photoFormat == 2 && fourFrameHdrAvailable && cfg.scene == 0 -> 2
         else -> 0
     }
 
@@ -1249,7 +1249,7 @@ class CameraController(
         }
         if (cfg.photoFormat == 2 && effMode() != 2 && warnedLens != cfg.cameraId) {
             warnedLens = cfg.cameraId
-            ui.onMessage("Ultra HDR (2 frames) needs manual exposure, which this lens doesn't offer: using phone JPEG")
+            ui.onMessage("Ultra HDR (4 frames) needs manual exposure, which this lens doesn't offer: using phone JPEG")
         }
         val st = tv.surfaceTexture ?: run {
             finishConfiguration()
@@ -1303,6 +1303,18 @@ class CameraController(
     }
 
     private fun applyPhotoControls(b: CaptureRequest.Builder, capture: Boolean) {
+        if (Build.VERSION.SDK_INT >= 23 && cfg.chromaticAberrationCorrection) {
+            // Request real lateral chromatic-aberration correction from the camera ISP.
+            // Only request modes advertised by the active camera HAL.
+            pick(
+                b, CaptureRequest.COLOR_CORRECTION_ABERRATION_MODE,
+                CameraCharacteristics.COLOR_CORRECTION_AVAILABLE_ABERRATION_MODES,
+                listOf(
+                    CameraMetadata.COLOR_CORRECTION_ABERRATION_MODE_HIGH_QUALITY,
+                    CameraMetadata.COLOR_CORRECTION_ABERRATION_MODE_FAST
+                )
+            )
+        }
         if (Build.VERSION.SDK_INT >= 30) b.set(CaptureRequest.CONTROL_ZOOM_RATIO, zoom)
 
         // focus
@@ -1513,10 +1525,11 @@ class CameraController(
     }
 
     /** Normal exposure plus an approximately 4x darker exposure for the two-frame Ultra HDR mode. */
-    private class HdrPlan(val e0: Long, val s0: Int, val e1: Long, val s1: Int, val factor: Float)
+    private class HdrPlan(val exp: LongArray, val iso: IntArray)
 
     private fun hdrPlan(): HdrPlan? {
         val er = chars.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE) ?: return null
+        if (!manualSensor) return null
         var e0: Long
         var s0: Int
         if (cfg.manualExposure) {
@@ -1529,19 +1542,28 @@ class CameraController(
         if (e0 <= 0L || s0 <= 0) return null
         e0 = e0.coerceIn(er.lower, er.upper)
         s0 = s0.coerceIn(isoRange.lower, isoRange.upper)
-        val want = 4.0
-        val e1 = max(er.lower.toDouble(), e0 / want).toLong().coerceAtLeast(1L)
-        val usedT = e0.toDouble() / e1
-        val s1 = max(isoRange.lower.toDouble(), s0 / (want / usedT)).toInt().coerceAtLeast(1)
-        val total = usedT * (s0.toDouble() / s1)
-        if (total < 1.8) return null
-        return HdrPlan(e0, s0, e1, s1, total.toFloat())
+
+        // Four-frame bracket: -3 EV, 0 EV, +1 EV and +3 EV.
+        // Keep the dark frame's shutter short; ISO carries the bracket where possible.
+        val targets = doubleArrayOf(0.125, 1.0, 2.0, 8.0).map { e0.toDouble() * s0 * it }
+        val preferredTimes = longArrayOf(e0 / 8L, e0, (e0.toDouble() * 2.0).toLong(), (e0.toDouble() * 8.0).toLong())
+        val exposures = LongArray(4)
+        val sensitivities = IntArray(4)
+        for (i in 0..3) {
+            val preferred = preferredTimes[i].coerceIn(er.lower, er.upper)
+            val iso = (targets[i] / preferred).roundToInt().coerceIn(isoRange.lower, isoRange.upper)
+            val exposure = (targets[i] / iso).toLong().coerceIn(er.lower, er.upper)
+            exposures[i] = exposure
+            sensitivities[i] = iso
+        }
+        return HdrPlan(exposures, sensitivities)
     }
 
     private fun setHdrManual(b: CaptureRequest.Builder, e: Long, iso: Int) {
         b.set(CaptureRequest.CONTROL_AE_MODE, CameraMetadata.CONTROL_AE_MODE_OFF)
         b.set(CaptureRequest.SENSOR_EXPOSURE_TIME, e)
-        b.set(CaptureRequest.SENSOR_SENSITIVITY, iso)
+        b.set(CaptureRequest.SENSOR_FRAME_DURATION, e)
+        b.set(CaptureRequest.SENSOR_SENSITIVITY, iso
         b.set(CaptureRequest.FLASH_MODE, CameraMetadata.FLASH_MODE_OFF)
         if (awbLockAvail) b.set(CaptureRequest.CONTROL_AWB_LOCK, true)
     }
@@ -1570,10 +1592,10 @@ class CameraController(
                 handler.post { ui.onMessage("Not enough exposure range for Ultra HDR here, saving a normal JPEG") }
             }
             if (bracket != null && (cfg.filterId > 0 || cfg.flat || cfg.bw || cfg.photoLook != 0)) {
-                handler.post { ui.onMessage("Two-frame Ultra HDR uses the camera JPEG directly; photo looks and the flat profile are bypassed.") }
+                handler.post { ui.onMessage("Four-frame Ultra HDR uses the camera JPEG directly; photo looks and the flat profile are bypassed.") }
             }
             val reqs = ArrayList<CaptureRequest>()
-            val count = if (bracket != null) 2 else plan?.frames ?: 1
+            val count = bracket?.exp?.size ?: plan?.frames ?: 1
             for (i in 0 until count) {
                 // Multi-frame HDR uses two still-capture requests in a fixed exposure order.
                 // Ordinary JPEG photos retain the existing ZSL path.
@@ -1586,8 +1608,7 @@ class CameraController(
                 b.addTarget(rd.surface)
                 applyPhotoControls(b, true)
                 if (bracket != null) {
-                    if (i == 0) setHdrManual(b, bracket.e0, bracket.s0)
-                    else setHdrManual(b, bracket.e1, bracket.s1)
+                    setHdrManual(b, bracket.exp[i], bracket.iso[i])
                 } else if (plan != null) {
                     b.set(CaptureRequest.CONTROL_AE_MODE, CameraMetadata.CONTROL_AE_MODE_OFF)
                     b.set(CaptureRequest.SENSOR_EXPOSURE_TIME, plan.expNs)
@@ -1601,7 +1622,7 @@ class CameraController(
             val sh = Shot(
                 cfg.cameraId, fmt, chars, needRotation(), cfg.photoQuality, reqs.size,
                 cfg.bw, cfg.flat && !cfg.bw, cfg.photoLook, bracket != null, false, cfg.glow, cfg.blue,
-                cfg.filterId, cfg.photoFilterIntensity, cfg.photoContrast, bracket?.factor ?: 1f
+                cfg.filterId, cfg.photoFilterIntensity, cfg.photoContrast, if (bracket != null) 8f else 1f
             )
             synchronized(lock) { shot = sh }
             if (plan != null && plan.expNs * reqs.size >= 1_500_000_000L) {
@@ -1726,22 +1747,26 @@ class CameraController(
                 // Preserve the camera-generated Ultra HDR gain map byte-for-byte. Re-encoding
                 // through Bitmap/JPEG would destroy the HDR metadata and reduce highlight range.
                 saved = saveBytes(sh.jpegs.first(), "$base.jpg")
-            } else if (sh.hdr && sh.jpegs.size >= 2) {
-                // Preserve the normal-exposure JPEG as the SDR base and attach the gain map
-                // generated from the darker bracket frame.
-                val blob = UltraHdr.build(sh.jpegs[0], sh.jpegs[1], sh.hdrFactor)
+            } else if (sh.hdr && sh.jpegs.size >= 4) {
+                // Four-frame order: -3 EV, 0 EV, +1 EV, +3 EV.
+                // Rotate each frame to upright pixels before analysing and building the gain map.
+                val darkBytes = uprightJpeg(sh.jpegs[0], sh.rotDeg)
+                val baseBytes = uprightJpeg(sh.jpegs[1], sh.rotDeg)
+                val midBrightBytes = uprightJpeg(sh.jpegs[2], sh.rotDeg)
+                val brightBytes = uprightJpeg(sh.jpegs[3], sh.rotDeg)
+                val blob = UltraHdr.build(baseBytes, darkBytes, midBrightBytes, brightBytes, sh.hdrFactor)
                 if (blob != null) {
                     saved = saveBytes(blob, "$base.jpg")
                     handler.post {
                         if (UltraHdr.recognised(blob) == false) {
                             ui.onMessage("Saved, but this phone's decoder didn't report an HDR gain map")
                         } else {
-                            ui.onMessage("Ultra HDR saved to Pictures/Iris Cam")
+                            ui.onMessage("Four-frame Ultra HDR saved to Pictures/Iris Cam")
                         }
                     }
                 } else {
-                    saved = saveBytes(sh.jpegs[0], "$base.jpg")
-                    handler.post { ui.onMessage("Couldn't combine the two frames, saved a normal JPEG") }
+                    saved = saveBytes(baseBytes, "$base.jpg")
+                    handler.post { ui.onMessage("Ultra HDR encoding failed; saved the normal 0 EV JPEG instead") }
                 }
             } else if (sh.format == ImageFormat.RAW_SENSOR) {
                 val img = sh.image!!
@@ -1796,6 +1821,21 @@ class CameraController(
         val r = Bitmap.createBitmap(b, 0, 0, b.width, b.height, m, false)
         b.recycle()
         return r
+    }
+
+    /** Decode, physically orient, and re-encode a JPEG frame for multi-frame HDR alignment. */
+    private fun uprightJpeg(bytes: ByteArray, degrees: Int): ByteArray {
+        var bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+            ?: throw IllegalStateException("Couldn't decode an HDR frame")
+        bitmap = rotateBy(bitmap, degrees)
+        return try {
+            val stream = ByteArrayOutputStream()
+            if (!bitmap.compress(Bitmap.CompressFormat.JPEG, 98, stream))
+                throw IllegalStateException("Couldn't encode an upright HDR frame")
+            stream.toByteArray()
+        } finally {
+            bitmap.recycle()
+        }
     }
 
     private fun newImageUri(name: String, mime: String): Uri {
