@@ -1525,7 +1525,7 @@ class CameraController(
         return ScenePlan(per, iso, n)
     }
 
-    /** Normal exposure plus an approximately 4x darker exposure for the two-frame Ultra HDR mode. */
+    /** Four-frame Ultra HDR bracket: -3 EV, 0 EV, +1 EV and +3 EV. */
     private class HdrPlan(val exp: LongArray, val iso: IntArray)
 
     private fun hdrPlan(): HdrPlan? {
@@ -1597,7 +1597,7 @@ class CameraController(
             val reqs = ArrayList<CaptureRequest>()
             val count = bracket?.exp?.size ?: plan?.frames ?: 1
             for (i in 0 until count) {
-                // Multi-frame HDR uses two still-capture requests in a fixed exposure order.
+                // Four-frame Ultra HDR uses four still-capture requests in a fixed exposure order.
                 // Ordinary JPEG photos retain the existing ZSL path.
                 val template = if (zeroShutterLagEligible() && bracket == null) {
                     CameraDevice.TEMPLATE_ZERO_SHUTTER_LAG
