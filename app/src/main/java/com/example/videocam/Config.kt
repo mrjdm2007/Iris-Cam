@@ -51,7 +51,8 @@ data class Config(
     var nrOff: Boolean = true,
     var stab: Int = 2,               // 0 = off, 2 = OIS + EIS where supported
     var flat: Boolean = false,
-    var manualExposure: Boolean = false,
+    var manualExposure: Boolean = false, // video exposure only
+    var photoExposureMode: Int = 1, // 0 = Auto, 1 = Smart, 2 = Manual
     var shutterDenom: Int = 50,      // shutter = 1/shutterDenom seconds
     var iso: Int = 100,
     var ev: Int = 0,                 // exposure compensation in camera steps (auto mode)
@@ -107,6 +108,7 @@ data class Config(
         stab = o.stab
         flat = o.flat
         manualExposure = o.manualExposure
+        photoExposureMode = o.photoExposureMode
         shutterDenom = o.shutterDenom
         iso = o.iso
         ev = o.ev
@@ -163,6 +165,7 @@ data class Config(
         .put("stab", stab)
         .put("flat", flat)
         .put("manualExposure", manualExposure)
+        .put("photoExposureMode", photoExposureMode.coerceIn(0, 2))
         .put("shutterDenom", shutterDenom)
         .put("iso", iso)
         .put("ev", ev)
@@ -256,6 +259,7 @@ data class Config(
                 stab = o.optInt("stab", d.stab),
                 flat = o.optBoolean("flat", d.flat),
                 manualExposure = o.optBoolean("manualExposure", d.manualExposure),
+                photoExposureMode = o.optInt("photoExposureMode", if (o.optInt("mode", d.mode) == 1 && o.optBoolean("manualExposure", false)) 2 else if (o.optBoolean("smartIso", d.smartIso)) 1 else 0).coerceIn(0, 2),
                 shutterDenom = o.optInt("shutterDenom", d.shutterDenom),
                 iso = o.optInt("iso", d.iso),
                 ev = o.optInt("ev", d.ev),
