@@ -1047,7 +1047,7 @@ class CameraController(
         }
 
         // ----- exposure -----
-        if (cfg.manualExposure) {
+        if (photoManualExposure()) {
             b.set(CaptureRequest.CONTROL_AE_MODE, CameraMetadata.CONTROL_AE_MODE_OFF)
             var ns = (1e9 / cfg.shutterDenom).toLong()
             chars.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)?.let {
@@ -1308,6 +1308,8 @@ class CameraController(
         }
     }
 
+    private fun photoManualExposure(): Boolean = cfg.photoExposureMode == 2
+
     private fun applyPhotoControls(b: CaptureRequest.Builder, capture: Boolean) {
         if (Build.VERSION.SDK_INT >= 23 && cfg.chromaticAberrationCorrection) {
             // Request real lateral chromatic-aberration correction from the camera ISP.
@@ -1429,9 +1431,8 @@ class CameraController(
         Build.VERSION.SDK_INT >= 23 &&
             effMode() == 0 &&
             cfg.scene == 0 &&
-            !cfg.manualExposure &&
+            cfg.photoExposureMode == 0 &&
             cfg.flashMode == 0 &&
-            !cfg.smartIso &&
             zoom <= 1.01f &&
             chars.availableCaptureRequestKeys.contains(CaptureRequest.CONTROL_ENABLE_ZSL)
 
@@ -1492,7 +1493,7 @@ class CameraController(
         if (reader == null) return
         busy = true
         ui.onBusy(true)
-        val useFlash = flashAvail && cfg.flashMode != 0 && !cfg.manualExposure && cfg.scene == 0 && effMode() != 2
+        val useFlash = flashAvail && cfg.flashMode != 0 && cfg.photoExposureMode == 0 && cfg.scene == 0 && effMode() != 2
         if (useFlash) {
             try {
                 val b = buildPhotoPreview() ?: throw IllegalStateException("no preview")
@@ -1539,7 +1540,7 @@ class CameraController(
         if (!manualSensor) return null
         var e0: Long
         var s0: Int
-        if (cfg.manualExposure) {
+        if (photoManualExposure()) {
             e0 = (1e9 / cfg.shutterDenom).toLong()
             s0 = cfg.iso
         } else {
@@ -1557,7 +1558,7 @@ class CameraController(
         val fastMain = cfg.fastMovingObjects && cfg.cameraId == "0"
         val maxFrame = chars.get(CameraCharacteristics.SENSOR_INFO_MAX_FRAME_DURATION) ?: er.upper
         val exposureLimit = min(er.upper, maxFrame)
-        val smartIsoActive = cfg.smartIso && !cfg.manualExposure && !allowHighIso && !fastMain
+        val smartIsoActive = cfg.photoExposureMode == 1 && !allowHighIso && !fastMain
         // Smart ISO is allowed to lengthen the shutter as far as 1/20 s, but never beyond it.
         val maxExposure = when {
             fastMain -> min(8_000_000L, exposureLimit)
@@ -1588,7 +1589,7 @@ class CameraController(
 
     /** True when the metered scene needs more than ISO 500 even at the 1/20 s limit. */
     fun smartIsoNeedsHigh(): Boolean {
-        if (!manualSensor || cfg.manualExposure || !cfg.smartIso || cfg.fastMovingObjects) return false
+        if (!manualSensor || photoManualExposure() || cfg.photoExposureMode != 1 || cfg.fastMovingObjects) return false
         val er = chars.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE) ?: return false
         // For still-photo Smart ISO, allow the exposure to reach 1/20 s
         // whenever the sensor exposure-time range supports it.
@@ -1673,10 +1674,10 @@ class CameraController(
                 val b = cd.createCaptureRequest(template)
                 b.addTarget(rd.surface)
                 applyPhotoControls(b, true)
-                if (bracket == null && plan == null && !cfg.manualExposure && cfg.flashMode == 0) {
+                if (bracket == null && plan == null && !photoManualExposure() && cfg.flashMode == 0) {
                     if (cfg.fastMovingObjects && cfg.cameraId == "0") {
                         applyFastMotionExposure(b)
-                    } else if (cfg.smartIso && !allowHighIso) {
+                    } else if (cfg.photoExposureMode == 1 && !allowHighIso) {
                         applySmartIsoExposure(b)
                     }
                 }
