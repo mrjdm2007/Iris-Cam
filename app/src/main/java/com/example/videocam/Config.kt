@@ -82,16 +82,19 @@ data class Config(
     var bw: Boolean = false,         // photo black and white, high contrast
     var blue: Boolean = false,        // cool blue cinematic photo filter
     var glow: Boolean = false,       // legacy setting migrated to filterId
-    var filterId: Int = 18,          // default Zeiss-inspired colour profile; 0 = Natural
-    var filterIntensity: Int = 50,   // default video look strength, 0..100
-    var photoFilterIntensity: Int = 70, // default photo look strength, 0..100
-    var photoContrast: Int = 40, // additional saved-photo contrast strength, 0..100
+    var filterId: Int = 27,          // default Sony S-Cinetone-inspired colour profile; 0 = Natural
+    var filterIntensity: Int = 100,  // default video look strength, 0..100
+    var photoFilterIntensity: Int = 100, // default photo look strength, 0..100
+    var photoContrast: Int = 40, // fallback contrast strength, 0..100
+    var photoContrastByLens: MutableMap<String, Int> = mutableMapOf(), // per-camera photo contrast
+    var smartIso: Boolean = true, // auto photo ISO cap at 500
+    var fastMovingObjects: Boolean = false, // short-exposure photo mode; main lens only
     var photoLook: Int = 0,          // 0 natural, 1 golden hour, 2 dream glow
     var photoNr: Int = 1,            // photo noise reduction: 0 minimal, 1 standard, 2 high
     var chromaticAberrationCorrection: Boolean = true, // request ISP lateral colour-fringe correction
     var lensKeys: Boolean = false,   // show the 0.5x / 1x / 2.7x shortcut buttons
     var haptics: Boolean = true,     // subtle shutter and manual slider feedback
-    var ver: Int = 4
+    var ver: Int = 5
 ) {
     fun copyFrom(o: Config) {
         cameraId = o.cameraId
@@ -138,6 +141,9 @@ data class Config(
         filterIntensity = o.filterIntensity
         photoFilterIntensity = o.photoFilterIntensity
         photoContrast = o.photoContrast
+        photoContrastByLens = o.photoContrastByLens.toMutableMap()
+        smartIso = o.smartIso
+        fastMovingObjects = o.fastMovingObjects
         photoLook = o.photoLook
         photoNr = o.photoNr
         chromaticAberrationCorrection = o.chromaticAberrationCorrection
@@ -191,6 +197,9 @@ data class Config(
         .put("filterIntensity", filterIntensity)
         .put("photoFilterIntensity", photoFilterIntensity)
         .put("photoContrast", photoContrast)
+        .put("photoContrastByLens", JSONObject().apply { photoContrastByLens.forEach { (lens, value) -> put(lens, value.coerceIn(0, 100)) } })
+        .put("smartIso", smartIso)
+        .put("fastMovingObjects", fastMovingObjects)
         .put("photoLook", photoLook)
         .put("photoNr", photoNr)
         .put("chromaticAberrationCorrection", chromaticAberrationCorrection)
@@ -222,6 +231,20 @@ data class Config(
             // Any intensity the user had already changed is preserved.
             val selectedIntensity = if (oldVersion < 3 && selectedFilter == 18 && storedVideoIntensity == 25) 50 else storedVideoIntensity
             val selectedPhotoIntensity = if (oldVersion < 3 && selectedFilter == 18 && storedPhotoIntensity == 40) 70 else storedPhotoIntensity
+            // Migrate only the untouched previous Zeiss defaults to Sony S-Cinetone at full strength.
+            val migrateSonyDefault = oldVersion < 5 && selectedFilter == 18 && selectedIntensity == 50 && selectedPhotoIntensity == 70
+            val finalFilterId = if (migrateSonyDefault) 27 else selectedFilter
+            val finalVideoIntensity = if (migrateSonyDefault) 100 else selectedIntensity
+            val finalPhotoIntensity = if (migrateSonyDefault) 100 else selectedPhotoIntensity
+            val lensContrast = o.optJSONObject("photoContrastByLens")?.let { obj ->
+                mutableMapOf<String, Int>().apply {
+                    val keys = obj.keys()
+                    while (keys.hasNext()) {
+                        val key = keys.next()
+                        put(key, obj.optInt(key, d.photoContrast).coerceIn(0, 100))
+                    }
+                }
+            } ?: mutableMapOf()
             return Config(
                 cameraId = o.optString("cameraId", d.cameraId),
                 width = o.optInt("width", d.width),
@@ -263,16 +286,19 @@ data class Config(
                 bw = selectedFilter == 1,
                 blue = false,
                 glow = false,
-                filterId = selectedFilter,
-                filterIntensity = selectedIntensity,
-                photoFilterIntensity = selectedPhotoIntensity,
+                filterId = finalFilterId,
+                filterIntensity = finalVideoIntensity,
+                photoFilterIntensity = finalPhotoIntensity,
                 photoContrast = o.optInt("photoContrast", d.photoContrast).coerceIn(0, 100),
+                photoContrastByLens = lensContrast,
+                smartIso = o.optBoolean("smartIso", d.smartIso),
+                fastMovingObjects = o.optBoolean("fastMovingObjects", d.fastMovingObjects),
                 photoLook = 0,
                 photoNr = o.optInt("photoNr", if (o.optBoolean("photoNrOff", false)) 0 else d.photoNr),
                 chromaticAberrationCorrection = o.optBoolean("chromaticAberrationCorrection", d.chromaticAberrationCorrection),
                 lensKeys = o.optBoolean("lensKeys", d.lensKeys),
                 haptics = o.optBoolean("haptics", d.haptics),
-                ver = maxOf(4, o.optInt("ver", d.ver))
+                ver = maxOf(5, o.optInt("ver", d.ver))
             )
         }
     }
