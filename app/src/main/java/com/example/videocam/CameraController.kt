@@ -1183,9 +1183,9 @@ class CameraController(
     private fun areaDesc(l: Array<Size>?): List<Size> = l?.sortedByDescending { it.width * it.height } ?: emptyList()
 
     val rawAvail get() = rawSize != null
-    val twoFrameHdrAvailable get() = manualSensor && jpegSizes.isNotEmpty()
+    val fourFrameHdrAvailable get() = manualSensor && jpegSizes.isNotEmpty()
 
-    /** 0 = phone JPEG, 1 = RAW develop, 2 = Ultra HDR (two-frame bracket), 3 = native Ultra HDR JPEG_R. */
+    /** 0 = phone JPEG, 1 = RAW develop, 2 = Ultra HDR (four-frame bracket), 3 = native Ultra HDR JPEG_R. */
     fun effMode(): Int = when {
         cfg.photoFormat == 1 && rawAvail && cfg.scene == 0 -> 1
         cfg.photoFormat == 2 && fourFrameHdrAvailable && cfg.scene == 0 -> 2
