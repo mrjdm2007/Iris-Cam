@@ -1567,15 +1567,15 @@ class CameraController(
             }
             val bracket = if (effMode() == 2) hdrPlan() else null
             if (effMode() == 2 && bracket == null) {
-                handler.post { ui.onMessage("Not enough exposure range for Ultra HDR here, saving a normal JPEG") }
+                handler.post { ui.onMessage("Not enough exposure range for four-frame Ultra HDR here, saving a normal JPEG") }
             }
             if (bracket != null && (cfg.filterId > 0 || cfg.flat || cfg.bw || cfg.photoLook != 0)) {
-                handler.post { ui.onMessage("Two-frame Ultra HDR uses the camera JPEG directly; photo looks and the flat profile are bypassed.") }
+                handler.post { ui.onMessage("Four-frame Ultra HDR uses the camera JPEG directly; photo looks and the flat profile are bypassed.") }
             }
             val reqs = ArrayList<CaptureRequest>()
-            val count = if (bracket != null) 2 else plan?.frames ?: 1
+            val count = if (bracket != null) bracket.exp.size else plan?.frames ?: 1
             for (i in 0 until count) {
-                // Multi-frame HDR uses two still-capture requests in a fixed exposure order.
+                // Four still-capture requests in fixed -3 EV, 0 EV, +1 EV, +3 EV order.
                 // Ordinary JPEG photos retain the existing ZSL path.
                 val template = if (zeroShutterLagEligible() && bracket == null) {
                     CameraDevice.TEMPLATE_ZERO_SHUTTER_LAG
@@ -1586,8 +1586,11 @@ class CameraController(
                 b.addTarget(rd.surface)
                 applyPhotoControls(b, true)
                 if (bracket != null) {
-                    if (i == 0) setHdrManual(b, bracket.e0, bracket.s0)
-                    else setHdrManual(b, bracket.e1, bracket.s1)
+                    b.set(CaptureRequest.CONTROL_AE_MODE, CameraMetadata.CONTROL_AE_MODE_OFF)
+                    b.set(CaptureRequest.SENSOR_EXPOSURE_TIME, bracket.exp[i])
+                    b.set(CaptureRequest.SENSOR_SENSITIVITY, bracket.iso[i])
+                    b.set(CaptureRequest.FLASH_MODE, CameraMetadata.FLASH_MODE_OFF)
+                    if (awbLockAvail) b.set(CaptureRequest.CONTROL_AWB_LOCK, true)
                 } else if (plan != null) {
                     b.set(CaptureRequest.CONTROL_AE_MODE, CameraMetadata.CONTROL_AE_MODE_OFF)
                     b.set(CaptureRequest.SENSOR_EXPOSURE_TIME, plan.expNs)
@@ -1601,7 +1604,7 @@ class CameraController(
             val sh = Shot(
                 cfg.cameraId, fmt, chars, needRotation(), cfg.photoQuality, reqs.size,
                 cfg.bw, cfg.flat && !cfg.bw, cfg.photoLook, bracket != null, false, cfg.glow, cfg.blue,
-                cfg.filterId, cfg.photoFilterIntensity, cfg.photoContrast, bracket?.factor ?: 1f
+                cfg.filterId, cfg.photoFilterIntensity, cfg.photoContrast, if (bracket != null) 8f else 1f
             )
             synchronized(lock) { shot = sh }
             if (plan != null && plan.expNs * reqs.size >= 1_500_000_000L) {
@@ -1726,22 +1729,26 @@ class CameraController(
                 // Preserve the camera-generated Ultra HDR gain map byte-for-byte. Re-encoding
                 // through Bitmap/JPEG would destroy the HDR metadata and reduce highlight range.
                 saved = saveBytes(sh.jpegs.first(), "$base.jpg")
-            } else if (sh.hdr && sh.jpegs.size >= 2) {
-                // Preserve the normal-exposure JPEG as the SDR base and attach the gain map
-                // generated from the darker bracket frame.
-                val blob = UltraHdr.build(sh.jpegs[0], sh.jpegs[1], sh.hdrFactor)
+            } else if (sh.hdr && sh.jpegs.size >= 4) {
+                // Same four-frame fusion path as the verified test app.
+                // Physically orient every JPEG before comparing pixels for the gain map.
+                val baseBytes = uprightJpeg(sh.jpegs[1], sh.rotDeg)
+                val darkBytes = uprightJpeg(sh.jpegs[0], sh.rotDeg)
+                val midBrightBytes = uprightJpeg(sh.jpegs[2], sh.rotDeg)
+                val brightBytes = uprightJpeg(sh.jpegs[3], sh.rotDeg)
+                val blob = UltraHdr.build(baseBytes, darkBytes, midBrightBytes, brightBytes, 8f)
                 if (blob != null) {
                     saved = saveBytes(blob, "$base.jpg")
                     handler.post {
                         if (UltraHdr.recognised(blob) == false) {
                             ui.onMessage("Saved, but this phone's decoder didn't report an HDR gain map")
                         } else {
-                            ui.onMessage("Ultra HDR saved to Pictures/Iris Cam")
+                            ui.onMessage("Four-frame Ultra HDR saved to Pictures/Iris Cam")
                         }
                     }
                 } else {
-                    saved = saveBytes(sh.jpegs[0], "$base.jpg")
-                    handler.post { ui.onMessage("Couldn't combine the two frames, saved a normal JPEG") }
+                    saved = saveBytes(baseBytes, "$base.jpg")
+                    handler.post { ui.onMessage("Ultra HDR encoding failed; saved the normal 0 EV JPEG instead") }
                 }
             } else if (sh.format == ImageFormat.RAW_SENSOR) {
                 val img = sh.image!!
@@ -1796,6 +1803,21 @@ class CameraController(
         val r = Bitmap.createBitmap(b, 0, 0, b.width, b.height, m, false)
         b.recycle()
         return r
+    }
+
+    /** Decode, physically orient, and re-encode a JPEG before gain-map analysis. */
+    private fun uprightJpeg(bytes: ByteArray, degrees: Int): ByteArray {
+        var bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+            ?: throw IllegalStateException("Couldn't decode an HDR frame")
+        bitmap = rotateBy(bitmap, degrees)
+        return try {
+            val stream = ByteArrayOutputStream()
+            if (!bitmap.compress(Bitmap.CompressFormat.JPEG, 98, stream))
+                throw IllegalStateException("Couldn't encode an upright HDR frame")
+            stream.toByteArray()
+        } finally {
+            bitmap.recycle()
+        }
     }
 
     private fun newImageUri(name: String, mime: String): Uri {
