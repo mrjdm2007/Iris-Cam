@@ -76,6 +76,7 @@ data class Config(
     var photoH: Int = 0,
     var flashMode: Int = 0,          // 0 off, 1 on, 2 auto
     var photoNrOff: Boolean = false,
+    var portraitBlur: Boolean = false, // very mild photo-only background blur
     var portrait: Boolean = false,
     var scene: Int = 0,              // photo scene: 0 normal, 1 night, 2 astro, 3 multi-frame HDR fusion
     var hdrFrames: Int = 4,          // four-frame Ultra HDR bracket
@@ -132,6 +133,7 @@ data class Config(
         photoH = o.photoH
         flashMode = o.flashMode
         photoNrOff = o.photoNrOff
+        portraitBlur = o.portraitBlur
         portrait = o.portrait
         scene = o.scene
         hdrFrames = o.hdrFrames
@@ -189,6 +191,7 @@ data class Config(
         .put("photoH", photoH)
         .put("flashMode", flashMode)
         .put("photoNrOff", photoNrOff)
+        .put("portraitBlur", portraitBlur)
         .put("portrait", portrait)
         .put("scene", scene)
         .put("hdrFrames", hdrFrames)
@@ -283,6 +286,7 @@ data class Config(
                 photoH = o.optInt("photoH", d.photoH),
                 flashMode = o.optInt("flashMode", d.flashMode),
                 photoNrOff = o.optBoolean("photoNrOff", d.photoNrOff),
+                portraitBlur = o.optBoolean("portraitBlur", d.portraitBlur),
                 portrait = o.optBoolean("portrait", d.portrait),
                 scene = o.optInt("scene", d.scene),
                 hdrFrames = 4,
