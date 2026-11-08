@@ -10,6 +10,8 @@ import android.graphics.Canvas
 import android.graphics.ColorMatrix
 import android.graphics.ColorMatrixColorFilter
 import android.graphics.Paint
+import android.graphics.PorterDuff
+import android.graphics.PorterDuffXfermode
 import android.graphics.ImageFormat
 import android.graphics.Matrix
 import android.graphics.Rect
@@ -53,8 +55,10 @@ import android.view.TextureView
 import android.view.animation.AccelerateDecelerateInterpolator
 import android.view.animation.LinearInterpolator
 import java.io.ByteArrayOutputStream
+import java.nio.ByteBuffer
 import java.text.SimpleDateFormat
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import java.util.Date
 import java.util.Locale
 import kotlin.math.abs
@@ -62,6 +66,11 @@ import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
+import com.google.android.gms.tasks.Tasks
+import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.segmentation.subject.SubjectSegmentation
+import com.google.mlkit.vision.segmentation.subject.SubjectSegmenter
+import com.google.mlkit.vision.segmentation.subject.SubjectSegmenterOptions
 
 class CameraController(
     private val ctx: Context,
@@ -102,6 +111,7 @@ class CameraController(
         val filterId: Int,
         val filterIntensity: Int,
         val contrast: Int,
+        val portraitBlur: Boolean,
         val hdrFactor: Float = 1f
     ) {
         var image: Image? = null // RAW only
@@ -153,6 +163,11 @@ class CameraController(
     private var shot: Shot? = null
     private var warnedLens: String? = null
     private val procExec = Executors.newSingleThreadExecutor()
+    private val portraitSegmenterLazy = lazy {
+        SubjectSegmentation.getClient(
+            SubjectSegmenterOptions.Builder().enableForegroundConfidenceMask().build()
+        )
+    }
     private val lock = Any()
     private var crop: CropRenderer? = null
     private val jobCount = java.util.concurrent.atomic.AtomicInteger(0)
@@ -521,6 +536,9 @@ class CameraController(
         released = true
         stop()
         procExec.shutdown()
+        if (portraitSegmenterLazy.isInitialized()) {
+            runCatching { portraitSegmenterLazy.value.close() }
+        }
         cbThread.quitSafely()
     }
 
@@ -1206,7 +1224,7 @@ class CameraController(
         // JPEG_R must be saved byte-for-byte to preserve its gain map. If a pixel filter
         // is selected, use ordinary JPEG so the requested look is actually rendered.
         cfg.photoFormat == 3 && ultraHdrAvailable &&
-            cfg.filterId == 0 && !cfg.flat -> ImageFormat.JPEG_R
+            cfg.filterId == 0 && !cfg.flat && !cfg.portraitBlur -> ImageFormat.JPEG_R
         else -> ImageFormat.JPEG
     }
 
@@ -1665,7 +1683,8 @@ class CameraController(
                 finishBusy()
                 return
             }
-            val bracket = if (effMode() == 2) hdrPlan(allowHighIso) else null
+            // Portrait processing needs a regular pixel bitmap, so bypass the four-frame HDR path only for this still.
+            val bracket = if (effMode() == 2 && !cfg.portraitBlur) hdrPlan(allowHighIso) else null
             if (effMode() == 2 && bracket == null) {
                 handler.post { ui.onMessage("Not enough exposure range for Ultra HDR here, saving a normal JPEG") }
             }
@@ -1707,7 +1726,8 @@ class CameraController(
             val sh = Shot(
                 cfg.cameraId, fmt, chars, needRotation(), cfg.photoQuality, reqs.size,
                 cfg.bw, cfg.flat && !cfg.bw, cfg.photoLook, bracket != null, false, cfg.glow, cfg.blue,
-                cfg.filterId, cfg.photoFilterIntensity, (cfg.photoContrastByLens[cfg.cameraId] ?: cfg.photoContrast).coerceIn(0, 100), if (bracket != null) 8f else 1f
+                cfg.filterId, cfg.photoFilterIntensity, (cfg.photoContrastByLens[cfg.cameraId] ?: cfg.photoContrast).coerceIn(0, 100),
+                cfg.portraitBlur, if (bracket != null) 8f else 1f
             )
             synchronized(lock) { shot = sh }
             if (plan != null && plan.expNs * reqs.size >= 1_500_000_000L) {
@@ -1823,6 +1843,158 @@ class CameraController(
         return out
     }
 
+    /**
+     * Adds only a tiny amount of extra softness to the background. ML Kit supplies a
+     * foreground confidence mask; the existing subject pixels remain sharp. The
+     * quarter-size, single-pass background blur also gently softens existing bokeh
+     * highlights instead of drawing artificial circles.
+     */
+    private fun applySubtlePortraitBlur(source: Bitmap): Bitmap? {
+        val maxSide = 1024
+        val scale = min(1f, maxSide.toFloat() / max(source.width, source.height))
+        val segW = max(1, (source.width * scale).roundToInt())
+        val segH = max(1, (source.height * scale).roundToInt())
+        val segBitmap = if (segW == source.width && segH == source.height) {
+            source
+        } else {
+            Bitmap.createScaledBitmap(source, segW, segH, true)
+        }
+
+        var maskBitmap: Bitmap? = null
+        var blurredSmall: Bitmap? = null
+        try {
+            val input = InputImage.fromBitmap(segBitmap, 0)
+            val result = Tasks.await(portraitSegmenterLazy.value.process(input), 60, TimeUnit.SECONDS)
+            val maskBuffer = result.foregroundConfidenceMask ?: return null
+            val maskFloats = FloatArray(segW * segH)
+            val maskView = maskBuffer.duplicate()
+            if (maskView.remaining() < maskFloats.size) return null
+            maskView.get(maskFloats)
+
+            val width = source.width
+            val height = source.height
+            maskBitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ALPHA_8)
+            val rowBytes = maskBitmap.rowBytes
+            val alphaBytes = ByteArray(rowBytes * height)
+            var foregroundSamples = 0
+
+            // Bilinear mask enlargement avoids blocky subject edges on the full-resolution photo.
+            for (y in 0 until height) {
+                val fy = (((y + 0.5f) * segH / height) - 0.5f).coerceIn(0f, (segH - 1).toFloat())
+                val y0 = fy.toInt()
+                val y1 = min(segH - 1, y0 + 1)
+                val wy = fy - y0
+                for (x in 0 until width) {
+                    val fx = (((x + 0.5f) * segW / width) - 0.5f).coerceIn(0f, (segW - 1).toFloat())
+                    val x0 = fx.toInt()
+                    val x1 = min(segW - 1, x0 + 1)
+                    val wx = fx - x0
+                    val a = maskFloats[y0 * segW + x0]
+                    val b = maskFloats[y0 * segW + x1]
+                    val c = maskFloats[y1 * segW + x0]
+                    val d = maskFloats[y1 * segW + x1]
+                    val top = a + (b - a) * wx
+                    val bottom = c + (d - c) * wx
+                    val confidence = (top + (bottom - top) * wy).coerceIn(0f, 1f)
+
+                    // Keep confident foreground opaque while feathering uncertain hair/edge pixels.
+                    val t = ((confidence - 0.18f) / 0.52f).coerceIn(0f, 1f)
+                    val smooth = t * t * (3f - 2f * t)
+                    val alpha = (smooth * 255f).roundToInt().coerceIn(0, 255)
+                    if (alpha > 220) foregroundSamples++
+                    alphaBytes[y * rowBytes + x] = alpha.toByte()
+                }
+            }
+            if (foregroundSamples < (width * height / 100)) return null
+            maskBitmap.copyPixelsFromBuffer(ByteBuffer.wrap(alphaBytes))
+
+            // Downsample first, then use a single 3x3 separable box blur: deliberately mild.
+            val blurW = max(1, (width + 3) / 4)
+            val blurH = max(1, (height + 3) / 4)
+            blurredSmall = Bitmap.createScaledBitmap(source, blurW, blurH, true)
+            val count = blurW * blurH
+            val src = IntArray(count)
+            val horizontal = IntArray(count)
+            val outputPixels = IntArray(count)
+            blurredSmall.getPixels(src, 0, blurW, 0, 0, blurW, blurH)
+
+            for (y in 0 until blurH) {
+                val row = y * blurW
+                for (x in 0 until blurW) {
+                    val left = max(0, x - 1)
+                    val right = min(blurW - 1, x + 1)
+                    val n = right - left + 1
+                    var aa = 0
+                    var rr = 0
+                    var gg = 0
+                    var bb = 0
+                    for (xx in left..right) {
+                        val pixel = src[row + xx]
+                        aa += Color.alpha(pixel)
+                        rr += Color.red(pixel)
+                        gg += Color.green(pixel)
+                        bb += Color.blue(pixel)
+                    }
+                    horizontal[row + x] = Color.argb(aa / n, rr / n, gg / n, bb / n)
+                }
+            }
+            for (y in 0 until blurH) {
+                for (x in 0 until blurW) {
+                    val top = max(0, y - 1)
+                    val bottom = min(blurH - 1, y + 1)
+                    val n = bottom - top + 1
+                    var aa = 0
+                    var rr = 0
+                    var gg = 0
+                    var bb = 0
+                    for (yy in top..bottom) {
+                        val pixel = horizontal[yy * blurW + x]
+                        aa += Color.alpha(pixel)
+                        rr += Color.red(pixel)
+                        gg += Color.green(pixel)
+                        bb += Color.blue(pixel)
+                    }
+                    outputPixels[y * blurW + x] = Color.argb(aa / n, rr / n, gg / n, bb / n)
+                }
+            }
+            blurredSmall.setPixels(outputPixels, 0, blurW, 0, 0, blurW, blurH)
+
+            val output = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(output)
+            val fullRect = Rect(0, 0, width, height)
+            canvas.drawBitmap(blurredSmall, null, fullRect, Paint(Paint.FILTER_BITMAP_FLAG))
+
+            // Render the original subject through the soft confidence mask over the blurred background.
+            val layer = canvas.saveLayer(0f, 0f, width.toFloat(), height.toFloat(), null)
+            canvas.drawBitmap(source, 0f, 0f, Paint(Paint.FILTER_BITMAP_FLAG))
+            val maskPaint = Paint(Paint.FILTER_BITMAP_FLAG).apply {
+                xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_IN)
+            }
+            canvas.drawBitmap(maskBitmap, 0f, 0f, maskPaint)
+            canvas.restoreToCount(layer)
+            maskPaint.xfermode = null
+            return output
+        } finally {
+            if (segBitmap !== source) segBitmap.recycle()
+            maskBitmap?.recycle()
+            blurredSmall?.recycle()
+        }
+    }
+
+    private fun finishPhotoLook(bmp: Bitmap, sh: Shot): Bitmap {
+        var out = finishLook(bmp, sh)
+        if (sh.portraitBlur) {
+            val enhanced = runCatching { applySubtlePortraitBlur(out) }.getOrNull()
+            if (enhanced != null) {
+                out.recycle()
+                out = enhanced
+            } else {
+                handler.post { ui.onMessage("Portrait blur wasn't available for this shot; saved the original photo instead") }
+            }
+        }
+        return out
+    }
+
     private fun processShot(sh: Shot) {
         var saved: Uri? = null
         try {
@@ -1859,20 +2031,20 @@ class CameraController(
                 val dev = RawDeveloper.develop(img, sh.chars, res, Trim())
                 img.close()
                 sh.image = null
-                val out = finishLook(rotateBy(dev, sh.rotDeg), sh)
+                val out = finishPhotoLook(rotateBy(dev, sh.rotDeg), sh)
                 saved = saveBitmap(out, "$base.jpg", sh.quality)
                 out.recycle()
             } else if (sh.jpegs.size > 1) {
                 // astro: several long frames added together (linear light) to make up the full exposure
                 val sum = FrameStack.sum(sh.jpegs) ?: throw IllegalStateException("Couldn't combine the frames")
-                val out = finishLook(rotateBy(sum, sh.rotDeg), sh)
+                val out = finishPhotoLook(rotateBy(sum, sh.rotDeg), sh)
                 saved = saveBitmap(out, "$base.jpg", sh.quality)
                 out.recycle()
             } else {
                 val bytes = sh.jpegs[0]
-                saved = if ((sh.filterId > 0 && sh.filterIntensity > 0) || sh.contrast > 0 || sh.flat || sh.bw || sh.photoLook != 0) {
+                saved = if ((sh.filterId > 0 && sh.filterIntensity > 0) || sh.contrast > 0 || sh.flat || sh.bw || sh.photoLook != 0 || sh.portraitBlur) {
                     val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-                    val out = finishLook(rotateBy(bmp, sh.rotDeg), sh)
+                    val out = finishPhotoLook(rotateBy(bmp, sh.rotDeg), sh)
                     val u = saveBitmap(out, "$base.jpg", sh.quality)
                     out.recycle()
                     u
