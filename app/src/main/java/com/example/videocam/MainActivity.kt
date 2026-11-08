@@ -2627,8 +2627,11 @@ class MainActivity : Activity(), CameraController.Callbacks {
                     highIsoAllowedUntil = SystemClock.elapsedRealtime() + duration
                     cam.takePhoto(true)
                 } else {
-                    // Disable the temporary override and keep this capture at ISO 500 or below.
+                    // Permanently turn off the ISO 500 cap until the user re-enables Smart ISO in Tools.
                     highIsoAllowedUntil = 0L
+                    cfg.smartIso = false
+                    cfgDirty = true
+                    toast("Smart ISO cap disabled · turn it on again in Tools")
                     cam.takePhoto(false)
                 }
             }
