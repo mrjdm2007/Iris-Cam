@@ -1599,8 +1599,10 @@ class MainActivity : Activity(), CameraController.Callbacks {
             toast(if (cfg.smartIso) "Smart ISO enabled · maximum ISO 500" else "Smart ISO disabled")
         },
         "Fast moving objects: ${if (cfg.fastMovingObjects) "On" else "Off"} · Main lens only" to {
-            if (cfg.cameraId != "5") {
+            if (cfg.cameraId != "0") {
                 toast("Select the Main 1× lens to use Fast Moving Objects")
+            } else if (!cam.manualSensor) {
+                toast("Fast Moving Objects requires manual sensor exposure on this lens")
             } else {
                 cfg.fastMovingObjects = !cfg.fastMovingObjects
                 cfgDirty = true
@@ -2429,10 +2431,10 @@ class MainActivity : Activity(), CameraController.Callbacks {
     }
 
     private fun takePhotoWithSmartIso() {
-        if (cfg.smartIso && !cfg.manualExposure && cfg.scene == 0 && !cfg.fastMovingObjects && cfg.flashMode == 0 && cam.liveIso > 500) {
+        if (cfg.smartIso && !cfg.manualExposure && cfg.scene == 0 && !cfg.fastMovingObjects && cfg.flashMode == 0 && cam.manualSensor && cam.smartIsoNeedsHigh()) {
             MaterialAlertDialogBuilder(this)
                 .setTitle("Too dark")
-                .setMessage("The scene is too dark to expose correctly while keeping ISO at or below 500. Allow ISO above 500 for this capture?")
+                .setMessage("The scene needs more exposure than 1/20 s at ISO 500. Allow ISO above 500 for this capture?")
                 .setNegativeButton("Keep ISO ≤500") { _, _ -> cam.takePhoto(false) }
                 .setPositiveButton("Allow higher ISO once") { _, _ -> cam.takePhoto(true) }
                 .setOnCancelListener { }
