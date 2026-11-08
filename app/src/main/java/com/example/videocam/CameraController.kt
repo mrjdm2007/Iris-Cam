@@ -1431,6 +1431,7 @@ class CameraController(
             cfg.scene == 0 &&
             !cfg.manualExposure &&
             cfg.flashMode == 0 &&
+            !cfg.smartIso &&
             zoom <= 1.01f &&
             chars.availableCaptureRequestKeys.contains(CaptureRequest.CONTROL_ENABLE_ZSL)
 
