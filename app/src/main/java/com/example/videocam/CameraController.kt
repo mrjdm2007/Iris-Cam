@@ -52,6 +52,7 @@ import android.view.Surface
 import android.view.TextureView
 import android.view.animation.AccelerateDecelerateInterpolator
 import android.view.animation.LinearInterpolator
+import java.io.ByteArrayOutputStream
 import java.text.SimpleDateFormat
 import java.util.concurrent.Executors
 import java.util.Date
@@ -1563,7 +1564,7 @@ class CameraController(
         b.set(CaptureRequest.CONTROL_AE_MODE, CameraMetadata.CONTROL_AE_MODE_OFF)
         b.set(CaptureRequest.SENSOR_EXPOSURE_TIME, e)
         b.set(CaptureRequest.SENSOR_FRAME_DURATION, e)
-        b.set(CaptureRequest.SENSOR_SENSITIVITY, iso
+        b.set(CaptureRequest.SENSOR_SENSITIVITY, iso)
         b.set(CaptureRequest.FLASH_MODE, CameraMetadata.FLASH_MODE_OFF)
         if (awbLockAvail) b.set(CaptureRequest.CONTROL_AWB_LOCK, true)
     }
