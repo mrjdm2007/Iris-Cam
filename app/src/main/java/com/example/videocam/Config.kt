@@ -88,6 +88,7 @@ data class Config(
     var photoContrast: Int = 40, // additional saved-photo contrast strength, 0..100
     var photoLook: Int = 0,          // 0 natural, 1 golden hour, 2 dream glow
     var photoNr: Int = 1,            // photo noise reduction: 0 minimal, 1 standard, 2 high
+    var chromaticAberrationCorrection: Boolean = true, // request ISP lateral colour-fringe correction
     var lensKeys: Boolean = false,   // show the 0.5x / 1x / 2.7x shortcut buttons
     var haptics: Boolean = true,     // subtle shutter and manual slider feedback
     var ver: Int = 4
@@ -139,6 +140,7 @@ data class Config(
         photoContrast = o.photoContrast
         photoLook = o.photoLook
         photoNr = o.photoNr
+        chromaticAberrationCorrection = o.chromaticAberrationCorrection
         lensKeys = o.lensKeys
         haptics = o.haptics
         ver = o.ver
@@ -191,6 +193,7 @@ data class Config(
         .put("photoContrast", photoContrast)
         .put("photoLook", photoLook)
         .put("photoNr", photoNr)
+        .put("chromaticAberrationCorrection", chromaticAberrationCorrection)
         .put("lensKeys", lensKeys)
         .put("haptics", haptics)
         .put("ver", ver)
@@ -212,7 +215,7 @@ data class Config(
             val oldVersion = o.optInt("ver", 0)
             // Upgrade only the old untouched Natural/100% default; preserve explicitly selected looks.
             val migrateDefaultLook = oldVersion < 2 && storedFilter == 0 && o.optInt("filterIntensity", 100) == 100
-            val selectedFilter = if (migrateDefaultLook) 18 else storedFilter.coerceIn(0, 30)
+            val selectedFilter = if (migrateDefaultLook) 18 else storedFilter.coerceIn(0, 30).let { if (it == 30) 0 else it }
             val storedVideoIntensity = o.optInt("filterIntensity", if (migrateDefaultLook) 25 else d.filterIntensity).coerceIn(0, 100)
             val storedPhotoIntensity = o.optInt("photoFilterIntensity", d.photoFilterIntensity).coerceIn(0, 100)
             // Version 3: raise only the untouched previous Zeiss defaults.
@@ -266,6 +269,7 @@ data class Config(
                 photoContrast = o.optInt("photoContrast", d.photoContrast).coerceIn(0, 100),
                 photoLook = 0,
                 photoNr = o.optInt("photoNr", if (o.optBoolean("photoNrOff", false)) 0 else d.photoNr),
+                chromaticAberrationCorrection = o.optBoolean("chromaticAberrationCorrection", d.chromaticAberrationCorrection),
                 lensKeys = o.optBoolean("lensKeys", d.lensKeys),
                 haptics = o.optBoolean("haptics", d.haptics),
                 ver = maxOf(4, o.optInt("ver", d.ver))
