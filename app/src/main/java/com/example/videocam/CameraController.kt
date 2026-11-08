@@ -676,11 +676,11 @@ class CameraController(
             rec.setVideoFrameRate(cfg.fps)
             val os = outSize()
             val cropIt = effRatio() > 0
-            // For an unfiltered portrait recording, keep the camera's native landscape
-            // encoder dimensions and let MediaRecorder write the standard rotation metadata.
-            // This avoids stretching a landscape camera buffer into a portrait GL surface.
+            // Portrait recordings must keep the camera's native landscape pixel dimensions,
+            // even when a video filter uses GL. Let MediaRecorder carry the portrait rotation
+            // metadata; do not rotate a landscape camera buffer into a portrait GL viewport.
             val useGlRenderer = cropIt || cfg.filterId > 0
-            val recorderSize = if (cfg.portrait && !useGlRenderer) Size(cfg.width, cfg.height) else os
+            val recorderSize = if (cfg.portrait) Size(cfg.width, cfg.height) else os
             rec.setVideoSize(recorderSize.width, recorderSize.height)
             rec.setVideoEncoder(
                 if (cfg.hevc) MediaRecorder.VideoEncoder.HEVC else MediaRecorder.VideoEncoder.H264
@@ -691,8 +691,9 @@ class CameraController(
                 rec.setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
                 findMic()?.let { rec.setPreferredDevice(it) }
             }
-            // GL output is physically oriented; direct MediaRecorder output uses rotation metadata.
-            rec.setOrientationHint(if (useGlRenderer) 0 else orientationHint())
+            // Only cinematic-ratio GL output is physically cropped/oriented.
+            // Filter-only portrait GL output remains landscape and uses rotation metadata.
+            rec.setOrientationHint(if (cropIt) 0 else orientationHint())
             rec.setMaxFileSize(SPLIT_BYTES)
             rec.setOnInfoListener { mr, what, _ -> onRecorderInfo(mr, what) }
             rec.setOnErrorListener { mr, what, extra ->
@@ -711,8 +712,10 @@ class CameraController(
                     fullFrame = !cropIt, filterMatrix = matrix,
                     effectId = if (cfg.filterId > 0) cfg.filterId else 0,
                     effectStrength = cfg.filterIntensity / 100f,
-                    portraitOutput = cfg.portrait,
-                    portraitRotationDegrees = orientationHint()
+                    // GL is only filtering the native landscape frame in portrait mode.
+                    // The MP4 rotation metadata makes the final video portrait, as in photo mode.
+                    portraitOutput = false,
+                    portraitRotationDegrees = 0
                 )
             }
         } catch (e: Exception) {
