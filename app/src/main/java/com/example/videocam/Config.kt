@@ -76,6 +76,10 @@ data class Config(
     var photoH: Int = 0,
     var flashMode: Int = 0,          // 0 off, 1 on, 2 auto
     var photoNrOff: Boolean = false,
+    var backgroundColorShiftEnabled: Boolean = false,
+    var backgroundHueShift: Int = 24,          // -180..180 degrees
+    var backgroundSaturation: Int = 115,       // 0..200 percent
+    var backgroundTemperature: Int = 4,       // -100..100, cool to warm
     var portrait: Boolean = false,
     var scene: Int = 0,              // photo scene: 0 normal, 1 night, 2 astro, 3 multi-frame HDR fusion
     var hdrFrames: Int = 4,          // four-frame Ultra HDR bracket
@@ -95,7 +99,7 @@ data class Config(
     var chromaticAberrationCorrection: Boolean = true, // request ISP lateral colour-fringe correction
     var lensKeys: Boolean = false,   // show the 0.5x / 1x / 2.7x shortcut buttons
     var haptics: Boolean = true,     // subtle shutter and manual slider feedback
-    var ver: Int = 5
+    var ver: Int = 6
 ) {
     fun copyFrom(o: Config) {
         cameraId = o.cameraId
@@ -132,6 +136,10 @@ data class Config(
         photoH = o.photoH
         flashMode = o.flashMode
         photoNrOff = o.photoNrOff
+        backgroundColorShiftEnabled = o.backgroundColorShiftEnabled
+        backgroundHueShift = o.backgroundHueShift
+        backgroundSaturation = o.backgroundSaturation
+        backgroundTemperature = o.backgroundTemperature
         portrait = o.portrait
         scene = o.scene
         hdrFrames = o.hdrFrames
@@ -189,6 +197,10 @@ data class Config(
         .put("photoH", photoH)
         .put("flashMode", flashMode)
         .put("photoNrOff", photoNrOff)
+        .put("backgroundColorShiftEnabled", backgroundColorShiftEnabled)
+        .put("backgroundHueShift", backgroundHueShift.coerceIn(-180, 180))
+        .put("backgroundSaturation", backgroundSaturation.coerceIn(0, 200))
+        .put("backgroundTemperature", backgroundTemperature.coerceIn(-100, 100))
         .put("portrait", portrait)
         .put("scene", scene)
         .put("hdrFrames", hdrFrames)
@@ -283,6 +295,10 @@ data class Config(
                 photoH = o.optInt("photoH", d.photoH),
                 flashMode = o.optInt("flashMode", d.flashMode),
                 photoNrOff = o.optBoolean("photoNrOff", d.photoNrOff),
+                backgroundColorShiftEnabled = o.optBoolean("backgroundColorShiftEnabled", d.backgroundColorShiftEnabled),
+                backgroundHueShift = o.optInt("backgroundHueShift", d.backgroundHueShift).coerceIn(-180, 180),
+                backgroundSaturation = o.optInt("backgroundSaturation", d.backgroundSaturation).coerceIn(0, 200),
+                backgroundTemperature = o.optInt("backgroundTemperature", d.backgroundTemperature).coerceIn(-100, 100),
                 portrait = o.optBoolean("portrait", d.portrait),
                 scene = o.optInt("scene", d.scene),
                 hdrFrames = 4,
@@ -302,7 +318,7 @@ data class Config(
                 chromaticAberrationCorrection = o.optBoolean("chromaticAberrationCorrection", d.chromaticAberrationCorrection),
                 lensKeys = o.optBoolean("lensKeys", d.lensKeys),
                 haptics = o.optBoolean("haptics", d.haptics),
-                ver = maxOf(5, o.optInt("ver", d.ver))
+                ver = maxOf(6, o.optInt("ver", d.ver))
             )
         }
     }

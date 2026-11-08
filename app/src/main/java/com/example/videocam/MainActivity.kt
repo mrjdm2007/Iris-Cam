@@ -63,6 +63,7 @@ import android.widget.ProgressBar
 import android.widget.SeekBar
 import android.widget.Spinner
 import android.widget.ArrayAdapter
+import android.widget.CheckBox
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
@@ -701,6 +702,14 @@ class MainActivity : Activity(), CameraController.Callbacks {
                 }
             }, LinearLayout.LayoutParams(MATCH, WRAP).apply { setMargins(0, 0, 0, dp(8)) })
         }
+        if (cfg.mode == 1) {
+            val shiftDetail = if (cfg.backgroundColorShiftEnabled) {
+                "ON · Hue ${cfg.backgroundHueShift}° · Saturation ${cfg.backgroundSaturation}%"
+            } else "OFF · Adjust background colour without changing the subject"
+            box.addView(panelAction("BACKGROUND COLOUR SHIFT", shiftDetail) {
+                showBackgroundColorShiftDialog()
+            }, LinearLayout.LayoutParams(MATCH, WRAP).apply { setMargins(0, dp(8), 0, dp(8)) })
+        }
         box.addView(currentLut)
         val label = TextView(this).apply { text = "INTENSITY · " + intensity + "%"; setTextColor(0xFFF3F0E8.toInt()); textSize = 12f }
         box.addView(label)
@@ -722,6 +731,128 @@ class MainActivity : Activity(), CameraController.Callbacks {
         }, LinearLayout.LayoutParams(MATCH, WRAP))
         MaterialAlertDialogBuilder(this).setTitle("LOOKS").setView(box).setNegativeButton("Done", null).show()
     }
+
+    private fun showBackgroundColorShiftDialog() {
+        if (cfg.mode != 1 || !idle()) return
+
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(8), dp(18), dp(8))
+        }
+        val note = TextView(this).apply {
+            text = "The original subject colours are protected. These controls affect the background of saved photos only."
+            setTextColor(0xFFBDB8C7.toInt())
+            textSize = 12f
+            setPadding(0, 0, 0, dp(10))
+        }
+        box.addView(note)
+
+        val enabled = CheckBox(this).apply {
+            text = "Enable Background Colour Shift"
+            setTextColor(0xFFF3F0E8.toInt())
+            isChecked = cfg.backgroundColorShiftEnabled
+        }
+        box.addView(enabled)
+
+        fun addLabel(text: String): TextView = TextView(this).apply {
+            this.text = text
+            setTextColor(0xFFF3F0E8.toInt())
+            textSize = 12f
+            setPadding(0, dp(10), 0, 0)
+        }
+
+        val hueLabel = addLabel("BACKGROUND HUE · ${cfg.backgroundHueShift}°")
+        val hueSeek = SeekBar(this).apply {
+            max = 360
+            progress = (cfg.backgroundHueShift + 180).coerceIn(0, 360)
+        }
+        box.addView(hueLabel)
+        box.addView(hueSeek, LinearLayout.LayoutParams(MATCH, WRAP))
+
+        val satLabel = addLabel("BACKGROUND SATURATION · ${cfg.backgroundSaturation}%")
+        val satSeek = SeekBar(this).apply {
+            max = 200
+            progress = cfg.backgroundSaturation.coerceIn(0, 200)
+        }
+        box.addView(satLabel)
+        box.addView(satSeek, LinearLayout.LayoutParams(MATCH, WRAP))
+
+        val tempLabel = addLabel("BACKGROUND TEMPERATURE · ${cfg.backgroundTemperature}")
+        val tempSeek = SeekBar(this).apply {
+            max = 200
+            progress = (cfg.backgroundTemperature + 100).coerceIn(0, 200)
+        }
+        box.addView(tempLabel)
+        box.addView(tempSeek, LinearLayout.LayoutParams(MATCH, WRAP))
+
+        fun updateEnabled() {
+            val on = enabled.isChecked
+            hueSeek.isEnabled = on
+            satSeek.isEnabled = on
+            tempSeek.isEnabled = on
+        }
+        enabled.setOnCheckedChangeListener { _, checked ->
+            cfg.backgroundColorShiftEnabled = checked
+            cfgDirty = true
+            updateEnabled()
+            if (cfg.photoFormat == 3) streamChanged() else applyLive()
+        }
+
+        hueSeek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, value: Int, fromUser: Boolean) {
+                val v = value - 180
+                hueLabel.text = "BACKGROUND HUE · ${if (v > 0) "+" else ""}${v}°"
+                if (fromUser) { cfg.backgroundHueShift = v; cfgDirty = true }
+            }
+            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+        })
+        satSeek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, value: Int, fromUser: Boolean) {
+                satLabel.text = "BACKGROUND SATURATION · ${value}%"
+                if (fromUser) { cfg.backgroundSaturation = value; cfgDirty = true }
+            }
+            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+        })
+        tempSeek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, value: Int, fromUser: Boolean) {
+                val v = value - 100
+                tempLabel.text = "BACKGROUND TEMPERATURE · ${if (v > 0) "+" else ""}${v}"
+                if (fromUser) { cfg.backgroundTemperature = v; cfgDirty = true }
+            }
+            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+        })
+
+        val presets = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER
+        }
+        val natural = panelAction("NATURAL", "Gentle shift") {
+            hueSeek.progress = 204
+            satSeek.progress = 115
+            tempSeek.progress = 104
+            enabled.isChecked = true
+        }
+        val creative = panelAction("CREATIVE", "Stronger colour") {
+            hueSeek.progress = 270
+            satSeek.progress = 145
+            tempSeek.progress = 92
+            enabled.isChecked = true
+        }
+        presets.addView(natural, LinearLayout.LayoutParams(0, WRAP, 1f).apply { setMargins(0, dp(8), dp(4), 0) })
+        presets.addView(creative, LinearLayout.LayoutParams(0, WRAP, 1f).apply { setMargins(dp(4), dp(8), 0, 0) })
+        box.addView(presets)
+        updateEnabled()
+
+        MaterialAlertDialogBuilder(this)
+            .setTitle("BACKGROUND COLOUR SHIFT")
+            .setView(ScrollView(this).apply { addView(box) })
+            .setNegativeButton("Done", null)
+            .show()
+    }
+
     private fun applyLook(id: Int) {
         if (!idle()) return
         cfg.filterId = id

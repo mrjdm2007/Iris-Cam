@@ -53,8 +53,15 @@ import android.view.TextureView
 import android.view.animation.AccelerateDecelerateInterpolator
 import android.view.animation.LinearInterpolator
 import java.io.ByteArrayOutputStream
+import java.nio.ByteBuffer
 import java.text.SimpleDateFormat
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import com.google.android.gms.tasks.Tasks
+import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.segmentation.subject.SubjectSegmentation
+import com.google.mlkit.vision.segmentation.subject.SubjectSegmenter
+import com.google.mlkit.vision.segmentation.subject.SubjectSegmenterOptions
 import java.util.Date
 import java.util.Locale
 import kotlin.math.abs
@@ -102,6 +109,10 @@ class CameraController(
         val filterId: Int,
         val filterIntensity: Int,
         val contrast: Int,
+        val backgroundColorShift: Boolean,
+        val backgroundHueShift: Int,
+        val backgroundSaturation: Int,
+        val backgroundTemperature: Int,
         val hdrFactor: Float = 1f
     ) {
         var image: Image? = null // RAW only
@@ -153,6 +164,11 @@ class CameraController(
     private var shot: Shot? = null
     private var warnedLens: String? = null
     private val procExec = Executors.newSingleThreadExecutor()
+    private val subjectSegmenter by lazy<SubjectSegmenter> {
+        SubjectSegmentation.getClient(
+            SubjectSegmenterOptions.Builder().enableForegroundConfidenceMask().build()
+        )
+    }
     private val lock = Any()
     private var crop: CropRenderer? = null
     private val jobCount = java.util.concurrent.atomic.AtomicInteger(0)
@@ -1206,7 +1222,7 @@ class CameraController(
         // JPEG_R must be saved byte-for-byte to preserve its gain map. If a pixel filter
         // is selected, use ordinary JPEG so the requested look is actually rendered.
         cfg.photoFormat == 3 && ultraHdrAvailable &&
-            cfg.filterId == 0 && !cfg.flat -> ImageFormat.JPEG_R
+            cfg.filterId == 0 && !cfg.flat && !cfg.backgroundColorShiftEnabled -> ImageFormat.JPEG_R
         else -> ImageFormat.JPEG
     }
 
@@ -1657,7 +1673,10 @@ class CameraController(
         try {
             val fmt = captureFormat()
             if (cfg.photoFormat == 3 && ultraHdrAvailable && fmt != ImageFormat.JPEG_R) {
-                handler.post { ui.onMessage("Photo filters are active; using standard JPEG so the selected look is applied. Turn filters off for native Ultra HDR.") }
+                handler.post { ui.onMessage("Photo processing is active; using standard JPEG for this shot instead of native Ultra HDR.") }
+            }
+            if (effMode() == 2 && cfg.backgroundColorShiftEnabled) {
+                handler.post { ui.onMessage("Background Colour Shift is enabled; using a normal JPEG for this shot instead of the 4-frame HDR bracket.") }
             }
             val plan = scenePlan()
             if (cfg.scene in 1..2 && plan == null) {
@@ -1665,8 +1684,8 @@ class CameraController(
                 finishBusy()
                 return
             }
-            val bracket = if (effMode() == 2) hdrPlan(allowHighIso) else null
-            if (effMode() == 2 && bracket == null) {
+            val bracket = if (effMode() == 2 && !cfg.backgroundColorShiftEnabled) hdrPlan(allowHighIso) else null
+            if (effMode() == 2 && !cfg.backgroundColorShiftEnabled && bracket == null) {
                 handler.post { ui.onMessage("Not enough exposure range for Ultra HDR here, saving a normal JPEG") }
             }
             if (bracket != null && (cfg.filterId > 0 || cfg.flat || cfg.bw || cfg.photoLook != 0)) {
@@ -1707,7 +1726,9 @@ class CameraController(
             val sh = Shot(
                 cfg.cameraId, fmt, chars, needRotation(), cfg.photoQuality, reqs.size,
                 cfg.bw, cfg.flat && !cfg.bw, cfg.photoLook, bracket != null, false, cfg.glow, cfg.blue,
-                cfg.filterId, cfg.photoFilterIntensity, (cfg.photoContrastByLens[cfg.cameraId] ?: cfg.photoContrast).coerceIn(0, 100), if (bracket != null) 8f else 1f
+                cfg.filterId, cfg.photoFilterIntensity, (cfg.photoContrastByLens[cfg.cameraId] ?: cfg.photoContrast).coerceIn(0, 100),
+                cfg.backgroundColorShiftEnabled, cfg.backgroundHueShift, cfg.backgroundSaturation, cfg.backgroundTemperature,
+                if (bracket != null) 8f else 1f
             )
             synchronized(lock) { shot = sh }
             if (plan != null && plan.expNs * reqs.size >= 1_500_000_000L) {
@@ -1820,6 +1841,17 @@ class CameraController(
             out.recycle()
             out = contrasted
         }
+        if (sh.backgroundColorShift) {
+            val shifted = runCatching {
+                PhotoBackgroundColorShift.apply(out, sh.backgroundHueShift, sh.backgroundSaturation, sh.backgroundTemperature)
+            }.getOrNull()
+            if (shifted != null) {
+                out.recycle()
+                out = shifted
+            } else {
+                handler.post { ui.onMessage("Background Colour Shift could not identify a clear subject; saved the photo without the effect.") }
+            }
+        }
         return out
     }
 
@@ -1870,7 +1902,7 @@ class CameraController(
                 out.recycle()
             } else {
                 val bytes = sh.jpegs[0]
-                saved = if ((sh.filterId > 0 && sh.filterIntensity > 0) || sh.contrast > 0 || sh.flat || sh.bw || sh.photoLook != 0) {
+                saved = if ((sh.filterId > 0 && sh.filterIntensity > 0) || sh.contrast > 0 || sh.flat || sh.bw || sh.photoLook != 0 || sh.backgroundColorShift) {
                     val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
                     val out = finishLook(rotateBy(bmp, sh.rotDeg), sh)
                     val u = saveBitmap(out, "$base.jpg", sh.quality)

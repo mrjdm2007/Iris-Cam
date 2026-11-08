@@ -32,4 +32,5 @@ android {
 
 dependencies {
     implementation("com.google.android.material:material:1.12.0")
+    implementation("com.google.android.gms:play-services-mlkit-subject-segmentation:16.0.0-beta1")
 }
