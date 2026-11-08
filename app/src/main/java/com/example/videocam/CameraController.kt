@@ -705,7 +705,7 @@ class CameraController(
             rec.prepare()
             recorder = rec
             if (useGlRenderer) {
-                val rot = tv.display?.rotation ?: Surface.ROTATION_90
+                val rot = if (cfg.portrait && !cropIt) Surface.ROTATION_0 else (tv.display?.rotation ?: Surface.ROTATION_90)
                 val matrix = if (cfg.filterId > 0) Look.videoFilterMatrix(cfg.filterId, cfg.filterIntensity) else null
                 crop = CropRenderer(
                     rec.surface, recorderSize.width, recorderSize.height, cfg.width, cfg.height, rot,
