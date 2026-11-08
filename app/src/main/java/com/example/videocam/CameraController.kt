@@ -446,7 +446,7 @@ class CameraController(
     fun shutterOptions(): List<Int> {
         val er = chars.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)
         if (cfg.mode == 1) {
-            return listOf(1, 2, 4, 8, 15, 30, 60, 100, 125, 250, 500, 1000, 2000, 4000, 8000).filter { d ->
+            return listOf(1, 2, 4, 8, 15, 20, 30, 60, 100, 125, 250, 500, 1000, 2000, 4000, 8000).filter { d ->
                 val ns = 1e9 / d
                 er == null || (ns >= er.lower && ns <= er.upper)
             }
