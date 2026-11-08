@@ -173,7 +173,10 @@ class CropRenderer(
         } else {
             (outW * srcH.toFloat() / srcW) / outH
         }
-        val q = if (portraitOutput && portraitRotationDegrees == 90) {
+        // The SurfaceTexture transform already includes the camera's buffer-space
+        // orientation. For a 90-degree portrait hint, use the inverse quarter-turn here;
+        // the previous mapping turned upright rear-camera frames sideways in filtered clips.
+        val q = if (portraitOutput && portraitRotationDegrees == 270) {
             floatArrayOf(
                 -1f, -yh, 1f, 0f,
                  1f, -yh, 1f, 1f,
