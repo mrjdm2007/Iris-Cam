@@ -676,7 +676,12 @@ class CameraController(
             rec.setVideoFrameRate(cfg.fps)
             val os = outSize()
             val cropIt = effRatio() > 0
-            rec.setVideoSize(os.width, os.height)
+            // For an unfiltered portrait recording, keep the camera's native landscape
+            // encoder dimensions and let MediaRecorder write the standard rotation metadata.
+            // This avoids stretching a landscape camera buffer into a portrait GL surface.
+            val useGlRenderer = cropIt || cfg.filterId > 0
+            val recorderSize = if (cfg.portrait && !useGlRenderer) Size(cfg.width, cfg.height) else os
+            rec.setVideoSize(recorderSize.width, recorderSize.height)
             rec.setVideoEncoder(
                 if (cfg.hevc) MediaRecorder.VideoEncoder.HEVC else MediaRecorder.VideoEncoder.H264
             )
@@ -686,9 +691,7 @@ class CameraController(
                 rec.setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
                 findMic()?.let { rec.setPreferredDevice(it) }
             }
-            // The GL renderer writes physically upright frames, so don't add rotation metadata.
-            // Without the renderer, let MediaRecorder carry the device orientation as metadata.
-            val useGlRenderer = cropIt || cfg.filterId > 0 || cfg.portrait
+            // GL output is physically oriented; direct MediaRecorder output uses rotation metadata.
             rec.setOrientationHint(if (useGlRenderer) 0 else orientationHint())
             rec.setMaxFileSize(SPLIT_BYTES)
             rec.setOnInfoListener { mr, what, _ -> onRecorderInfo(mr, what) }
@@ -700,11 +703,11 @@ class CameraController(
             }
             rec.prepare()
             recorder = rec
-            if (cropIt || cfg.filterId > 0 || cfg.portrait) {
+            if (useGlRenderer) {
                 val rot = tv.display?.rotation ?: Surface.ROTATION_90
                 val matrix = if (cfg.filterId > 0) Look.videoFilterMatrix(cfg.filterId, cfg.filterIntensity) else null
                 crop = CropRenderer(
-                    rec.surface, os.width, os.height, cfg.width, cfg.height, rot,
+                    rec.surface, recorderSize.width, recorderSize.height, cfg.width, cfg.height, rot,
                     fullFrame = !cropIt, filterMatrix = matrix,
                     effectId = if (cfg.filterId > 0) cfg.filterId else 0,
                     effectStrength = cfg.filterIntensity / 100f,
