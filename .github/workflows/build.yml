@@ -3,7 +3,7 @@ name: Build APK
 on:
   workflow_dispatch:
   push:
-    branches: [main, master, 'feature/**', 'ui-layout-wireless-guide']
+    branches: [main, master, 'feature/**', 'ui-layout-wireless-guide', 'workflow-378-camera-fixes']
   pull_request:
     branches: [main, master]
 
