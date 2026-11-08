@@ -1563,7 +1563,6 @@ class CameraController(
     private fun setHdrManual(b: CaptureRequest.Builder, e: Long, iso: Int) {
         b.set(CaptureRequest.CONTROL_AE_MODE, CameraMetadata.CONTROL_AE_MODE_OFF)
         b.set(CaptureRequest.SENSOR_EXPOSURE_TIME, e)
-        b.set(CaptureRequest.SENSOR_FRAME_DURATION, e)
         b.set(CaptureRequest.SENSOR_SENSITIVITY, iso)
         b.set(CaptureRequest.FLASH_MODE, CameraMetadata.FLASH_MODE_OFF)
         if (awbLockAvail) b.set(CaptureRequest.CONTROL_AWB_LOCK, true)
