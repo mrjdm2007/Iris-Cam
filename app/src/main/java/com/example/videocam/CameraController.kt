@@ -1185,7 +1185,7 @@ class CameraController(
     val rawAvail get() = rawSize != null
     val twoFrameHdrAvailable get() = manualSensor && jpegSizes.isNotEmpty()
 
-    /** 0 = phone JPEG, 1 = RAW develop, 2 = Ultra HDR (two-frame bracket), 3 = native Ultra HDR JPEG_R. */
+    /** 0 = phone JPEG, 1 = RAW develop, 2 = four-frame Ultra HDR bracket, 3 = native Ultra HDR JPEG_R. */
     fun effMode(): Int = when {
         cfg.photoFormat == 1 && rawAvail && cfg.scene == 0 -> 1
         cfg.photoFormat == 2 && twoFrameHdrAvailable && cfg.scene == 0 -> 2
