@@ -3334,7 +3334,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
             "rec" -> if (cfg.mode == 0) {
                 if (cam.recording) cam.stopRecording() else cam.startRecording()
             } else {
-                cam.takePhoto()
+                takePhotoWithSmartIso()
             }
             "af" -> {
                 cam.cancelRack()
