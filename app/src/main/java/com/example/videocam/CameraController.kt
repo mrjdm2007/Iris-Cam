@@ -7,6 +7,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
+import android.graphics.Color
 import android.graphics.ColorMatrix
 import android.graphics.ColorMatrixColorFilter
 import android.graphics.Paint
@@ -163,7 +164,7 @@ class CameraController(
     private var shot: Shot? = null
     private var warnedLens: String? = null
     private val procExec = Executors.newSingleThreadExecutor()
-    private val portraitSegmenterLazy = lazy {
+    private val portraitSegmenterLazy = lazy<SubjectSegmenter> {
         SubjectSegmentation.getClient(
             SubjectSegmenterOptions.Builder().enableForegroundConfidenceMask().build()
         )
@@ -1911,7 +1912,8 @@ class CameraController(
             // Downsample first, then use a single 3x3 separable box blur: deliberately mild.
             val blurW = max(1, (width + 3) / 4)
             val blurH = max(1, (height + 3) / 4)
-            blurredSmall = Bitmap.createScaledBitmap(source, blurW, blurH, true)
+            val scaledBlur = Bitmap.createScaledBitmap(source, blurW, blurH, true)
+            blurredSmall = if (scaledBlur === source) Bitmap.createBitmap(source) else scaledBlur
             val count = blurW * blurH
             val src = IntArray(count)
             val horizontal = IntArray(count)
