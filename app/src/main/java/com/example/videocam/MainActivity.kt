@@ -957,12 +957,26 @@ class MainActivity : Activity(), CameraController.Callbacks {
 
         // ----- bottom stack: readouts + zoom pull + exposure pull -----
         rMode = readout("AUTO") {
-            cfg.manualExposure = !cfg.manualExposure
-            cam.clearAeLock()
-            applyLive()
+            if (cfg.mode == 1) {
+                choose("Photo exposure mode", listOf("AUTO", "SMART", "MANUAL")) { selected ->
+                    if (selected == 1 && !cam.manualSensor) {
+                        toast("Smart mode needs manual sensor exposure support on this lens")
+                    } else {
+                        cfg.photoExposureMode = selected
+                        highIsoAllowedUntil = 0L
+                        cfgDirty = true
+                        cam.clearAeLock()
+                        applyLive()
+                    }
+                }
+            } else {
+                cfg.manualExposure = !cfg.manualExposure
+                cam.clearAeLock()
+                applyLive()
+            }
         }
-        rIso = readout("ISO") { if (cfg.manualExposure) pickIso() else toast("Switch to MANUAL to edit ISO") }
-        rShutter = readout("SHUTTER") { if (cfg.manualExposure) pickShutter() else toast("Switch to MANUAL to edit shutter speed") }
+        rIso = readout("ISO") { if (manualExposureActive()) pickIso() else toast("Switch to MANUAL to edit ISO") }
+        rShutter = readout("SHUTTER") { if (manualExposureActive()) pickShutter() else toast("Switch to MANUAL to edit shutter speed") }
         rEv = readout("EV") { pickEv() }
         rAe = readout("AE LOCK") { cam.toggleAeLock() }
         rWb = readout("WB") { cam.toggleAwbLock() }
@@ -1701,11 +1715,6 @@ class MainActivity : Activity(), CameraController.Callbacks {
 
     private fun photoImageItems(): List<Pair<String, () -> Unit>> = listOf(
         "Contrast by lens: ${runCatching { cam.cameraLabel(cfg.cameraId) }.getOrDefault(cfg.cameraId)} · ${(cfg.photoContrastByLens[cfg.cameraId] ?: cfg.photoContrast).coerceIn(0, 100)}%" to { showLensContrastPicker() },
-        "Smart ISO cap: ${if (cfg.smartIso) "500" else "Off"}" to {
-            cfg.smartIso = !cfg.smartIso
-            cfgDirty = true
-            toast(if (cfg.smartIso) "Smart ISO enabled · maximum ISO 500" else "Smart ISO disabled")
-        },
         "Fast moving objects: ${if (cfg.fastMovingObjects) "On" else "Off"} · Main lens only" to {
             if (cfg.cameraId != "0") {
                 toast("Select the Main 1× lens to use Fast Moving Objects")
@@ -1960,9 +1969,10 @@ class MainActivity : Activity(), CameraController.Callbacks {
     }
 
     private fun refreshReadouts() {
-        val manual = cfg.manualExposure
-        setT(rMode.value, if (manual) "MANUAL" else "AUTO")
-        setC(rMode.value, if (manual) AMBER else Color.WHITE)
+        val manual = manualExposureActive()
+        val modeLabel = if (cfg.mode == 1) photoExposureModeLabel() else if (manual) "MANUAL" else "AUTO"
+        setT(rMode.value, modeLabel)
+        setC(rMode.value, if (modeLabel == "AUTO") Color.WHITE else AMBER)
         val iso = if (manual) cfg.iso else cam.liveIso
         setT(rIso.value, if (iso > 0) "$iso" else "--")
         setC(rIso.value, if (manual) AMBER else Color.WHITE)
@@ -1976,8 +1986,8 @@ class MainActivity : Activity(), CameraController.Callbacks {
         setC(rWb.value, if (cam.awbLock) AMBER else Color.WHITE)
         val shownIso = if (manual) cfg.iso else cam.liveIso
         val shownShutter = if (manual) cfg.shutterDenom else cam.liveShutterDenom
-        setT(rMode.value, if (manual) "MANUAL" else "AUTO")
-        setC(rMode.value, if (manual) AMBER else Color.WHITE)
+        setT(rMode.value, if (cfg.mode == 1) photoExposureModeLabel() else if (manual) "MANUAL" else "AUTO")
+        setC(rMode.value, if (manual || (cfg.mode == 1 && cfg.photoExposureMode == 1)) AMBER else Color.WHITE)
         setT(rIso.value, if (shownIso > 0) shownIso.toString() else "--")
         setC(rIso.value, if (manual) AMBER else Color.WHITE)
         setT(rShutter.value, if (shownShutter > 0) "1/$shownShutter" else "--")
@@ -1989,7 +1999,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
 
     /** Re-points the exposure slider at EV (Auto) or ISO (Manual). */
     private fun syncExpSlider() {
-        val manual = cfg.manualExposure
+        val manual = manualExposureActive()
         if (expSliderManual != manual) {
             expSliderManual = manual
             expSlider.markA = null
@@ -2345,8 +2355,8 @@ class MainActivity : Activity(), CameraController.Callbacks {
     }
 
     private fun pickEv() {
-        if (cfg.manualExposure) {
-            toast("EV is for Auto exposure")
+        if (manualExposureActive()) {
+            toast("EV is unavailable in Manual exposure")
             return
         }
         val o = cam.evOptions()
@@ -2357,7 +2367,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
     }
 
     private fun pickShutter() {
-        if (!cfg.manualExposure) {
+        if (!manualExposureActive()) {
             toast("Switch EXPOSURE to Manual to set the shutter")
             return
         }
@@ -2370,7 +2380,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
     }
 
     private fun pickIso() {
-        if (!cfg.manualExposure) {
+        if (!manualExposureActive()) {
             toast("Switch EXPOSURE to Manual to set ISO")
             return
         }
@@ -2454,7 +2464,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
             zoomSlider.invalidate()
             toast("Zoom " + (if (isA) "A" else "B") + " set")
         } else {
-            val value = if (cfg.manualExposure) cfg.iso.toFloat() else cfg.ev * cam.evStepEv
+            val value = if (manualExposureActive()) cfg.iso.toFloat() else cfg.ev * cam.evStepEv
             if (isA) expSlider.markA = value else expSlider.markB = value
             expSlider.invalidate()
             toast("Exposure " + (if (isA) "A" else "B") + " set")
@@ -2483,8 +2493,12 @@ class MainActivity : Activity(), CameraController.Callbacks {
         refreshUi()
     }
 
+    private fun manualExposureActive(): Boolean = if (cfg.mode == 1) cfg.photoExposureMode == 2 else cfg.manualExposure
+
+    private fun photoExposureModeLabel(): String = when (cfg.photoExposureMode) { 1 -> "SMART"; 2 -> "MANUAL"; else -> "AUTO" }
+
     private fun applyExposureValue(v: Float) {
-        if (cfg.manualExposure) {
+        if (manualExposureActive()) {
             val ni = v.roundToInt().coerceIn(cam.isoRange.lower, cam.isoRange.upper)
             if (ni == cfg.iso) return
             cfg.iso = ni
@@ -2515,7 +2529,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
         val to = if (expToB) b else a
         expToB = !expToB
         cancelExpPull()
-        val manual = cfg.manualExposure
+        val manual = manualExposureActive()
         expAnim = ValueAnimator.ofFloat(0f, 1f).apply {
             duration = rackSeconds * 1000L
             interpolator = LinearInterpolator()
@@ -2573,69 +2587,68 @@ class MainActivity : Activity(), CameraController.Callbacks {
     }
 
     private fun takePhotoWithSmartIso() {
-        val smartIsoEligible = cfg.smartIso && !cfg.manualExposure && cfg.scene == 0 &&
-            !cfg.fastMovingObjects && cfg.flashMode == 0 && cam.manualSensor
-        if (!smartIsoEligible) {
+        if (cfg.photoExposureMode != 1) {
             cam.takePhoto(false)
             return
         }
-
-        // A user-approved duration applies to subsequent low-light photos until it expires.
+        if (!cam.manualSensor) {
+            toast("Smart mode isn't supported by the active lens; choose AUTO or MANUAL")
+            cam.takePhoto(false)
+            return
+        }
+        if (cfg.scene != 0 || cfg.fastMovingObjects || cfg.flashMode != 0) {
+            toast("Smart exposure needs Normal scene, flash off and Fast Moving Objects off")
+            cam.takePhoto(false)
+            return
+        }
         if (highIsoAllowedUntil > SystemClock.elapsedRealtime()) {
             cam.takePhoto(true)
             return
         }
         highIsoAllowedUntil = 0L
-
         if (!cam.smartIsoNeedsHigh()) {
             cam.takePhoto(false)
             return
         }
-
-        val durations = listOf("1 min", "3 min", "5 min", "10 min", "30 min", "Disable")
-        val durationMs = listOf(60_000L, 180_000L, 300_000L, 600_000L, 1_800_000L, 0L)
+        val durations = listOf("Once", "1 min", "3 min", "Disable Smart")
+        val durationMs = listOf(-1L, 60_000L, 180_000L, 0L)
         val content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(24), dp(8), dp(24), dp(4))
         }
         val explanation = TextView(this).apply {
-            text = "The scene needs more exposure than 1/20 s at ISO 500. Choose how long ISO above 500 may be used."
+            text = "The scene needs more exposure than 1/20 s at ISO 500. Allow higher ISO?"
             setTextColor(Color.WHITE)
             textSize = 14f
         }
         val picker = Spinner(this).apply {
-            adapter = ArrayAdapter(
-                this@MainActivity,
-                android.R.layout.simple_spinner_dropdown_item,
-                durations
-            ).also { it.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item) }
+            adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, durations)
+                .also { it.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item) }
             setSelection(0)
         }
         content.addView(explanation)
         content.addView(picker)
         MaterialAlertDialogBuilder(this)
-            .setTitle("Allow higher ISO?")
+            .setTitle("Smart exposure limit")
             .setView(content)
-            .setNegativeButton("Keep ISO ≤500") { _, _ ->
-                highIsoAllowedUntil = 0L
-                cam.takePhoto(false)
-            }
-            .setPositiveButton("Apply") { _, _ ->
-                val selected = picker.selectedItemPosition.coerceIn(durations.indices)
-                val duration = durationMs[selected]
-                if (duration > 0L) {
-                    highIsoAllowedUntil = SystemClock.elapsedRealtime() + duration
-                    cam.takePhoto(true)
-                } else {
-                    // Permanently turn off the ISO 500 cap until the user re-enables Smart ISO in Tools.
-                    highIsoAllowedUntil = 0L
-                    cfg.smartIso = false
-                    cfgDirty = true
-                    toast("Smart ISO cap disabled · turn it on again in Tools")
-                    cam.takePhoto(false)
+            .setNegativeButton("Keep ISO ≤500") { _, _ -> cam.takePhoto(false) }
+            .setPositiveButton("Continue") { _, _ ->
+                when (val duration = durationMs[picker.selectedItemPosition.coerceIn(durations.indices)]) {
+                    -1L -> cam.takePhoto(true)
+                    0L -> {
+                        cfg.photoExposureMode = 0
+                        highIsoAllowedUntil = 0L
+                        cfgDirty = true
+                        toast("Photo exposure switched to AUTO")
+                        cam.takePhoto(false)
+                        refreshUi()
+                    }
+                    else -> {
+                        highIsoAllowedUntil = SystemClock.elapsedRealtime() + duration
+                        cam.takePhoto(true)
+                    }
                 }
             }
-            .setOnCancelListener { }
             .show()
     }
 
