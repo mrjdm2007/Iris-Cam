@@ -61,6 +61,8 @@ import android.widget.LinearLayout
 import android.widget.PopupMenu
 import android.widget.ProgressBar
 import android.widget.SeekBar
+import android.widget.Spinner
+import android.widget.ArrayAdapter
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
@@ -216,6 +218,8 @@ class MainActivity : Activity(), CameraController.Callbacks {
     private var expAnim: ValueAnimator? = null
     private var expSliderManual: Boolean? = null
     private var cfgDirty = false
+    // Temporary permission to exceed ISO 500; expires automatically.
+    private var highIsoAllowedUntil = 0L
     private var lastSliderHapticMs = 0L
     private var countdown = 0
     private var askedPerms = false
@@ -2569,17 +2573,67 @@ class MainActivity : Activity(), CameraController.Callbacks {
     }
 
     private fun takePhotoWithSmartIso() {
-        if (cfg.smartIso && !cfg.manualExposure && cfg.scene == 0 && !cfg.fastMovingObjects && cfg.flashMode == 0 && cam.manualSensor && cam.smartIsoNeedsHigh()) {
-            MaterialAlertDialogBuilder(this)
-                .setTitle("Too dark")
-                .setMessage("The scene needs more exposure than 1/20 s at ISO 500. Allow ISO above 500 for this capture?")
-                .setNegativeButton("Keep ISO ≤500") { _, _ -> cam.takePhoto(false) }
-                .setPositiveButton("Allow higher ISO once") { _, _ -> cam.takePhoto(true) }
-                .setOnCancelListener { }
-                .show()
-        } else {
+        val smartIsoEligible = cfg.smartIso && !cfg.manualExposure && cfg.scene == 0 &&
+            !cfg.fastMovingObjects && cfg.flashMode == 0 && cam.manualSensor
+        if (!smartIsoEligible) {
             cam.takePhoto(false)
+            return
         }
+
+        // A user-approved duration applies to subsequent low-light photos until it expires.
+        if (highIsoAllowedUntil > SystemClock.elapsedRealtime()) {
+            cam.takePhoto(true)
+            return
+        }
+        highIsoAllowedUntil = 0L
+
+        if (!cam.smartIsoNeedsHigh()) {
+            cam.takePhoto(false)
+            return
+        }
+
+        val durations = listOf("1 min", "3 min", "5 min", "10 min", "30 min", "Disable")
+        val durationMs = listOf(60_000L, 180_000L, 300_000L, 600_000L, 1_800_000L, 0L)
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(24), dp(8), dp(24), dp(4))
+        }
+        val explanation = TextView(this).apply {
+            text = "The scene needs more exposure than 1/20 s at ISO 500. Choose how long ISO above 500 may be used."
+            setTextColor(Color.WHITE)
+            textSize = 14f
+        }
+        val picker = Spinner(this).apply {
+            adapter = ArrayAdapter(
+                this@MainActivity,
+                android.R.layout.simple_spinner_dropdown_item,
+                durations
+            ).also { it.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item) }
+            setSelection(0)
+        }
+        content.addView(explanation)
+        content.addView(picker)
+        MaterialAlertDialogBuilder(this)
+            .setTitle("Allow higher ISO?")
+            .setView(content)
+            .setNegativeButton("Keep ISO ≤500") { _, _ ->
+                highIsoAllowedUntil = 0L
+                cam.takePhoto(false)
+            }
+            .setPositiveButton("Apply") { _, _ ->
+                val selected = picker.selectedItemPosition.coerceIn(durations.indices)
+                val duration = durationMs[selected]
+                if (duration > 0L) {
+                    highIsoAllowedUntil = SystemClock.elapsedRealtime() + duration
+                    cam.takePhoto(true)
+                } else {
+                    // Disable the temporary override and keep this capture at ISO 500 or below.
+                    highIsoAllowedUntil = 0L
+                    cam.takePhoto(false)
+                }
+            }
+            .setOnCancelListener { }
+            .show()
     }
 
     private fun fire() {
