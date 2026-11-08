@@ -1587,34 +1587,44 @@ class CameraController(
         if (awbLockAvail) b.set(CaptureRequest.CONTROL_AWB_LOCK, true)
     }
 
+    /** Smart ISO is available only when this active camera can enforce ISO <= 500 manually. */
+    val smartIsoSupported: Boolean
+        get() = manualSensor && isoRange.lower <= 500 && isoRange.upper >= 500 &&
+            (chars.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)?.upper ?: 0L) > 0L
+
+    private fun smartIsoMaxExposure(): Long {
+        val er = chars.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)
+            ?: return 0L
+        val maxFrame = chars.get(CameraCharacteristics.SENSOR_INFO_MAX_FRAME_DURATION) ?: er.upper
+        return min(50_000_000L, min(er.upper, maxFrame))
+    }
+
     /** True when the metered scene needs more than ISO 500 even at the 1/20 s limit. */
     fun smartIsoNeedsHigh(): Boolean {
-        if (!manualSensor || photoManualExposure() || cfg.photoExposureMode != 1 || cfg.fastMovingObjects) return false
-        val er = chars.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE) ?: return false
-        // For still-photo Smart ISO, allow the exposure to reach 1/20 s
-        // whenever the sensor exposure-time range supports it.
-        val maxExposure = min(50_000_000L, er.upper)
+        if (!smartIsoSupported || photoManualExposure() || cfg.photoExposureMode != 1 || cfg.fastMovingObjects) return false
+        val maxExposure = smartIsoMaxExposure()
         val currentIso = liveIso.takeIf { it > 0 } ?: return false
         val currentExposure = liveExpNs.takeIf { it > 0L } ?: return false
-        val targetIso = 500.coerceIn(isoRange.lower, min(500, isoRange.upper).coerceAtLeast(isoRange.lower))
+        val targetIso = currentIso.coerceAtMost(500).coerceIn(isoRange.lower, 500)
         val requiredExposure = currentExposure.toDouble() * currentIso / targetIso
         return requiredExposure > maxExposure.toDouble()
     }
 
     private fun applySmartIsoExposure(b: CaptureRequest.Builder) {
-        if (!manualSensor) return
+        if (!smartIsoSupported) return
         val er = chars.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE) ?: return
+        val maxExposure = smartIsoMaxExposure()
+        if (maxExposure < er.lower) return
         val currentIso = liveIso.takeIf { it > 0 } ?: 100
         val currentExposure = liveExpNs.takeIf { it > 0L } ?: 33_333_333L
-        // For still-photo Smart ISO, allow the exposure to reach 1/20 s
-        // whenever the sensor exposure-time range supports it.
-        val maxExposure = min(50_000_000L, er.upper)
-        val targetIso = currentIso.coerceAtMost(500).coerceIn(isoRange.lower, min(500, isoRange.upper).coerceAtLeast(isoRange.lower))
-        // Lock the still to a metered ISO no higher than 500; use shutter time up to 1/20 s.
-        val targetExposure = (currentExposure.toDouble() * currentIso / targetIso).toLong().coerceIn(er.lower, maxExposure)
+        // Keep ISO at or below 500 and trade shutter time for sensitivity, stopping at 1/20 s.
+        val targetIso = currentIso.coerceAtMost(500).coerceIn(isoRange.lower, 500)
+        val targetExposure = (currentExposure.toDouble() * currentIso / targetIso)
+            .toLong().coerceIn(er.lower, maxExposure)
         b.set(CaptureRequest.CONTROL_AE_MODE, CameraMetadata.CONTROL_AE_MODE_OFF)
+        b.set(CaptureRequest.CONTROL_AE_LOCK, false)
         b.set(CaptureRequest.SENSOR_EXPOSURE_TIME, targetExposure)
-        b.set(CaptureRequest.SENSOR_FRAME_DURATION, targetExposure.coerceAtLeast(er.lower))
+        b.set(CaptureRequest.SENSOR_FRAME_DURATION, targetExposure.coerceAtLeast(er.lower).coerceAtMost(maxExposure))
         b.set(CaptureRequest.SENSOR_SENSITIVITY, targetIso)
         b.set(CaptureRequest.FLASH_MODE, CameraMetadata.FLASH_MODE_OFF)
     }
