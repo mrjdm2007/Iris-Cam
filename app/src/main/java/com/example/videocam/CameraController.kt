@@ -712,10 +712,8 @@ class CameraController(
                     fullFrame = !cropIt, filterMatrix = matrix,
                     effectId = if (cfg.filterId > 0) cfg.filterId else 0,
                     effectStrength = cfg.filterIntensity / 100f,
-                    // Rotate the landscape camera texture into the portrait encoder surface.
-                    // The output is physically portrait, so no MP4 rotation metadata is needed.
-                    portraitOutput = cfg.portrait && !cropIt,
-                    portraitRotationDegrees = orientationHint()
+                    // Preserve incoming texture orientation; portrait is centre-cropped, not rotated.
+                    portraitOutput = cfg.portrait && !cropIt
                 )
             }
         } catch (e: Exception) {
