@@ -166,58 +166,66 @@ class CropRenderer(
         aPos = GLES20.glGetAttribLocation(program, "aPos")
         aTc = GLES20.glGetAttribLocation(program, "aTc")
 
-        // The camera picture comes in upright as if the phone were held in portrait; turn it to landscape
-        // and let the output bounds cut the top and bottom. yh > 1 means the picture is taller than the frame.
-        val yh = if (portraitOutput) {
-            (outW * srcW.toFloat() / srcH) / outH
+        // Fit the rotated camera image to the recorder surface without stretching it.
+        // Camera buffers are landscape (srcW x srcH); portrait output rotates that image
+        // into srcH x srcW before the centre-crop is calculated.
+        val sourceAspect = if (portraitOutput) {
+            srcH.toFloat() / srcW.coerceAtLeast(1)
         } else {
-            (outW * srcH.toFloat() / srcW) / outH
+            srcW.toFloat() / srcH.coerceAtLeast(1)
         }
-        // The SurfaceTexture transform already includes the camera's buffer-space
-        // orientation. Use the matching quarter-turn for the portrait output mapping.
-        // The previous 270-degree branch left filtered portrait clips rotated counter-clockwise.
+        val targetAspect = outW.toFloat() / outH.coerceAtLeast(1)
+        // Scale the quad beyond the output bounds on the axis that must be cropped.
+        // Keeping the other axis at 1 preserves the source proportions exactly.
+        val cropX = maxOf(1f, sourceAspect / targetAspect)
+        val cropY = maxOf(1f, targetAspect / sourceAspect)
         val q = if (portraitOutput && portraitRotationDegrees == 90) {
             floatArrayOf(
-                -1f, -yh, 1f, 0f,
-                 1f, -yh, 1f, 1f,
-                -1f,  yh, 0f, 0f,
-                 1f,  yh, 0f, 1f
+                -cropX, -cropY, 1f, 0f,
+                 cropX, -cropY, 1f, 1f,
+                -cropX,  cropY, 0f, 0f,
+                 cropX,  cropY, 0f, 1f
             )
         } else if (portraitOutput) {
             floatArrayOf(
-                -1f, -yh, 0f, 1f,
-                 1f, -yh, 0f, 0f,
-                -1f,  yh, 1f, 1f,
-                 1f,  yh, 1f, 0f
-            )
-        } else if (fullFrame && rotation == Surface.ROTATION_0) {
-            floatArrayOf(
-                -1f, -yh, 0f, 0f,
-                 1f, -yh, 1f, 0f,
-                -1f,  yh, 0f, 1f,
-                 1f,  yh, 1f, 1f
-            )
-        } else if (fullFrame && rotation == Surface.ROTATION_180) {
-            floatArrayOf(
-                -1f, -yh, 1f, 1f,
-                 1f, -yh, 0f, 1f,
-                -1f,  yh, 1f, 0f,
-                 1f,  yh, 0f, 0f
-            )
-        } else if (rotation == Surface.ROTATION_270) {
-            floatArrayOf(
-                -1f, -yh, 1f, 0f,
-                 1f, -yh, 1f, 1f,
-                -1f,  yh, 0f, 0f,
-                 1f,  yh, 0f, 1f
+                -cropX, -cropY, 0f, 1f,
+                 cropX, -cropY, 0f, 0f,
+                -cropX,  cropY, 1f, 1f,
+                 cropX,  cropY, 1f, 0f
             )
         } else {
-            floatArrayOf(
-                -1f, -yh, 0f, 1f,
-                 1f, -yh, 0f, 0f,
-                -1f,  yh, 1f, 1f,
-                 1f,  yh, 1f, 0f
-            )
+            val yh = (outW * srcH.toFloat() / srcW.coerceAtLeast(1)) / outH.coerceAtLeast(1)
+            val xh = maxOf(1f, 1f / yh)
+            val y = maxOf(1f, yh)
+            if (fullFrame && rotation == Surface.ROTATION_0) {
+                floatArrayOf(
+                    -xh, -y, 0f, 0f,
+                     xh, -y, 1f, 0f,
+                    -xh,  y, 0f, 1f,
+                     xh,  y, 1f, 1f
+                )
+            } else if (fullFrame && rotation == Surface.ROTATION_180) {
+                floatArrayOf(
+                    -xh, -y, 1f, 1f,
+                     xh, -y, 0f, 1f,
+                    -xh,  y, 1f, 0f,
+                     xh,  y, 0f, 0f
+                )
+            } else if (rotation == Surface.ROTATION_270) {
+                floatArrayOf(
+                    -xh, -y, 1f, 0f,
+                     xh, -y, 1f, 1f,
+                    -xh,  y, 0f, 0f,
+                     xh,  y, 0f, 1f
+                )
+            } else {
+                floatArrayOf(
+                    -xh, -y, 0f, 1f,
+                     xh, -y, 0f, 0f,
+                    -xh,  y, 1f, 1f,
+                     xh,  y, 1f, 0f
+                )
+            }
         }
         verts = ByteBuffer.allocateDirect(q.size * 4).order(ByteOrder.nativeOrder()).asFloatBuffer()
         verts.put(q).position(0)
