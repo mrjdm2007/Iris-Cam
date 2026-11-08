@@ -1514,7 +1514,7 @@ class CameraController(
     }
 
     /** Normal exposure plus an approximately 4x darker exposure for the two-frame Ultra HDR mode. */
-    private class HdrPlan(val e0: Long, val s0: Int, val e1: Long, val s1: Int, val factor: Float)
+    private class HdrPlan(val exp: LongArray, val iso: IntArray)
 
     private fun hdrPlan(): HdrPlan? {
         val er = chars.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE) ?: return null
@@ -1527,16 +1527,24 @@ class CameraController(
             e0 = liveExpNs
             s0 = liveIso
         }
-        if (e0 <= 0L || s0 <= 0) return null
+        if (!manualSensor || e0 <= 0L || s0 <= 0) return null
         e0 = e0.coerceIn(er.lower, er.upper)
         s0 = s0.coerceIn(isoRange.lower, isoRange.upper)
-        val want = 4.0
-        val e1 = max(er.lower.toDouble(), e0 / want).toLong().coerceAtLeast(1L)
-        val usedT = e0.toDouble() / e1
-        val s1 = max(isoRange.lower.toDouble(), s0 / (want / usedT)).toInt().coerceAtLeast(1)
-        val total = usedT * (s0.toDouble() / s1)
-        if (total < 1.8) return null
-        return HdrPlan(e0, s0, e1, s1, total.toFloat())
+
+        // Verified four-frame bracket: -3 EV, 0 EV, +1 EV, +3 EV.
+        // Prefer short shutter times and adjust ISO to reach each target exposure.
+        val targets = doubleArrayOf(0.125, 1.0, 2.0, 8.0).map { e0.toDouble() * s0 * it }
+        val preferredTimes = longArrayOf(e0 / 8L, e0, (e0.toDouble() * 2.0).toLong(), (e0.toDouble() * 8.0).toLong())
+        val exposures = LongArray(4)
+        val sensitivities = IntArray(4)
+        for (i in 0..3) {
+            val preferred = preferredTimes[i].coerceIn(er.lower, er.upper)
+            val iso = (targets[i] / preferred).roundToInt().coerceIn(isoRange.lower, isoRange.upper)
+            val exposure = (targets[i] / iso).toLong().coerceIn(er.lower, er.upper)
+            exposures[i] = exposure
+            sensitivities[i] = iso
+        }
+        return HdrPlan(exposures, sensitivities)
     }
 
     private fun setHdrManual(b: CaptureRequest.Builder, e: Long, iso: Int) {
