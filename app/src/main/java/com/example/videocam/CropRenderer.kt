@@ -179,11 +179,18 @@ class CropRenderer(
         // Keeping the other axis at 1 preserves the source proportions exactly.
         val cropX = maxOf(1f, sourceAspect / targetAspect)
         val cropY = maxOf(1f, targetAspect / sourceAspect)
-        // Portrait camera streams can already arrive with their orientation represented
-        // by the SurfaceTexture transform. Do not apply a second 90-degree texture rotation
-        // here. Keep the texture axes in their incoming order; fit/crop is handled by the
-        // quad geometry above and the SurfaceTexture matrix is applied once in draw().
-        val q = if (portraitOutput) {
+        // The portrait encoder surface is physically portrait-sized. Rotate the
+        // landscape camera buffer into it in the direction required by the camera/display
+        // orientation; SurfaceTexture's matrix supplies its buffer crop/flip, not this
+        // camera-to-portrait quarter-turn.
+        val q = if (portraitOutput && portraitRotationDegrees == 90) {
+            floatArrayOf(
+                -cropX, -cropY, 1f, 0f,
+                 cropX, -cropY, 1f, 1f,
+                -cropX,  cropY, 0f, 0f,
+                 cropX,  cropY, 0f, 1f
+            )
+        } else if (portraitOutput) {
             floatArrayOf(
                 -cropX, -cropY, 0f, 1f,
                  cropX, -cropY, 0f, 0f,
