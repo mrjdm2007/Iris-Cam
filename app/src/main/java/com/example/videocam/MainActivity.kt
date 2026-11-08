@@ -653,7 +653,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
             val sizeText = size?.let { "%.1f MP · %d × %d".format(it.width * it.height / 1e6, it.width, it.height) } ?: "Unavailable"
             add("PHOTO SIZE", sizeText) { pickPhotoRes() }
             add("CAPTURE FORMAT", when {
-                cam.effMode() == 2 -> "Ultra HDR · 2-frame bracket"
+                cam.effMode() == 2 -> "Ultra HDR · 4-frame bracket"
                 cfg.photoFormat == 3 && cam.ultraHdrAvailable -> "Native Ultra HDR JPEG_R"
                 cam.effMode() == 1 -> "RAW develop"
                 else -> "Standard JPEG"
@@ -728,7 +728,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
         cfg.flat = false
         cfgDirty = true
         if (cfg.mode == 0) streamChanged() else applyLive()
-        toast(if (id == 30) "Chromatic Aberration selected · applied to photos and recorded video" else "${Look.FILTER_NAMES[id]} selected")
+        toast("${Look.FILTER_NAMES[id]} selected")
     }
 
     private fun toggleExposureControls() {
@@ -1613,7 +1613,6 @@ class MainActivity : Activity(), CameraController.Callbacks {
             "Effects · Film Grain" to 16,
             "Effects · Anamorphic Flare" to 17,
             "Colour · Zeiss Colours (inspired)" to 18,
-            "Effects · Chromatic Aberration" to 30
         )
         val items = presets.map { (label, id) ->
             val title = (if (cfg.filterId == id) "✓ " else "") + label
@@ -1730,7 +1729,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
         val sz = runCatching { cam.captureSize() }.getOrNull()
         val mp = if (sz != null) "%.1f MP".format(sz.width * sz.height / 1e6) else "?"
         val mode = when (cam.effMode()) {
-            2 -> "Ultra HDR (2-frame bracket)"
+            2 -> "Ultra HDR (4-frame bracket)"
             1 -> "RAW develop"
             else -> if (cfg.photoFormat == 3 && cam.ultraHdrAvailable && cfg.filterId == 0 && !cfg.flat) {
                 "Ultra HDR (native JPEG_R)"
@@ -1809,6 +1808,12 @@ class MainActivity : Activity(), CameraController.Callbacks {
             zoomLinked = !zoomLinked
             refreshUi()
             toast(if (zoomLinked) "Dolly Zoom enabled: set zoom A/B and focus A/B, then run the zoom rack" else "Dolly Zoom disabled")
+        },
+        "Chromatic aberration correction: ${if (cfg.chromaticAberrationCorrection) "On" else "Off"}" to {
+            cfg.chromaticAberrationCorrection = !cfg.chromaticAberrationCorrection
+            cfgDirty = true
+            applyLive()
+            toast("Chromatic aberration ISP correction ${if (cfg.chromaticAberrationCorrection) "enabled" else "disabled"}")
         },
         "Haptic feedback: ${if (cfg.haptics) "On" else "Off"}" to {
             cfg.haptics = !cfg.haptics
@@ -2141,7 +2146,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
         val modes = buildList {
             add("Phone JPEG (+ lens colour trim)" to 0)
             add("RAW develop — true colour (lenses with RAW)" to 1)
-            add("Ultra HDR — 2-frame bracket (needs manual exposure on the lens)" to 2)
+            add("Ultra HDR — 4-frame bracket (needs manual exposure on the lens)" to 2)
             if (cam.ultraHdrAvailable) add("Ultra HDR — native JPEG_R with HDR gain map" to 3)
         }
         choose("Capture mode", modes.map { it.first }) {
