@@ -174,7 +174,7 @@ object Look {
         "Hasselblad Natural Colour (inspired)", "Hasselblad Portrait (inspired)", "Hasselblad Vivid (inspired)",
         "Fujifilm Classic Chrome (inspired)", "Fujifilm Velvia (inspired)", "Fujifilm Astia (inspired)",
         "Fujifilm Pro Neg (inspired)", "Fujifilm Nostalgic Neg (inspired)", "Sony S-Cinetone (inspired)",
-        "Panasonic Lumix Cinelike D (inspired)", "Nikon Natural Colour (inspired)", "Chromatic Aberration"
+        "Panasonic Lumix Cinelike D (inspired)", "Nikon Natural Colour (inspired)"
     )
 
     private fun filterMatrix(id: Int): ColorMatrix {
@@ -318,7 +318,6 @@ object Look {
                 noise.recycle()
                 out
             }
-            30 -> applyChromaticAberration(base, strength)
             17 -> {
                 val sw = (base.width / 32).coerceAtLeast(1)
                 val sh = (base.height / 32).coerceAtLeast(1)
