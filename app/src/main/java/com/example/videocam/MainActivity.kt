@@ -3277,7 +3277,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
         override fun page(): ByteArray = assets.open("monitor.html").use { it.readBytes() }
 
         override fun stateJson(): String {
-            val manual = cfg.manualExposure
+            val manual = manualExposureActive()
             val o = JSONObject()
             o.put("rec", cam.recording)
             val s = if (cam.recording) (SystemClock.elapsedRealtime() - recStart) / 1000 else 0L
