@@ -1714,6 +1714,14 @@ class MainActivity : Activity(), CameraController.Callbacks {
     }
 
     private fun photoImageItems(): List<Pair<String, () -> Unit>> = listOf(
+        "Subtle portrait blur: ${if (cfg.portraitBlur) "On" else "Off"} · photo only" to {
+            if (idle()) {
+                cfg.portraitBlur = !cfg.portraitBlur
+                cfgDirty = true
+                store.save("last", cfg)
+                toast(if (cfg.portraitBlur) "Very mild background blur enabled for photos" else "Portrait blur disabled")
+            }
+        },
         "Contrast by lens: ${runCatching { cam.cameraLabel(cfg.cameraId) }.getOrDefault(cfg.cameraId)} · ${(cfg.photoContrastByLens[cfg.cameraId] ?: cfg.photoContrast).coerceIn(0, 100)}%" to { showLensContrastPicker() },
         "Fast moving objects: ${if (cfg.fastMovingObjects) "On" else "Off"} · Main lens only" to {
             if (cfg.cameraId != "0") {
@@ -1755,8 +1763,9 @@ class MainActivity : Activity(), CameraController.Callbacks {
         val sz = runCatching { cam.captureSize() }.getOrNull()
         val mp = if (sz != null) "%.1fMP".format(sz.width * sz.height / 1e6) else "--"
         val m = when {
+            cfg.portraitBlur -> "PORTRAIT JPEG"
             cam.effMode() == 2 -> "ULTRA HDR"
-            cfg.photoFormat == 3 && cam.ultraHdrAvailable && cfg.filterId == 0 && !cfg.flat && !cfg.upscale -> "ULTRA HDR"
+            cfg.photoFormat == 3 && cam.ultraHdrAvailable && cfg.filterId == 0 && !cfg.flat && !cfg.upscale && !cfg.portraitBlur -> "ULTRA HDR"
             cfg.scene == 1 -> "NIGHT"
             cfg.scene == 2 -> "ASTRO"
             cfg.scene == 3 -> "HDR"
