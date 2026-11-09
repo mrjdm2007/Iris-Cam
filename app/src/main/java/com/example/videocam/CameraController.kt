@@ -86,6 +86,7 @@ class CameraController(
         fun onStateChanged()
         fun onZoomChanged(z: Float)
         fun onBusy(busy: Boolean)
+        fun onPhotoCaptured()
         fun onPhotoSaved(uri: Uri?)
         fun onLongExposure(sec: Int)
     }
@@ -1821,7 +1822,10 @@ class CameraController(
         }
         sh.started = true
         shot = null
-        handler.post { endLong() }
+        handler.post {
+            endLong()
+            ui.onPhotoCaptured()
+        }
         if (sh.format != ImageFormat.RAW_SENSOR) {
             // the picture is safely in memory: let the shutter be used again while it is written to storage
             busy = false
