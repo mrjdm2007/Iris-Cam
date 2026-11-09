@@ -126,6 +126,7 @@ class CameraController(
         var result: TotalCaptureResult? = null
         val jpegs = ArrayList<ByteArray>()
         var started = false
+        var detectedFaceCount: Int = 0
     }
 
     private class ScenePlan(val expNs: Long, val iso: Int, val frames: Int)
@@ -239,6 +240,9 @@ class CameraController(
         private set
     @Volatile
     var liveIso = 0
+        private set
+    @Volatile
+    var liveFaceCount = 0
         private set
     @Volatile
     var liveShutterDenom = 0
@@ -1139,7 +1143,7 @@ class CameraController(
         }
 
         // ----- face detection for face-priority AF -----
-        if (cfg.faceAf && faceAfSupported) {
+        if ((cfg.faceAf || cfg.portraitPhotoModeEnabled) && faceAfSupported) {
             b.set(CaptureRequest.STATISTICS_FACE_DETECT_MODE, CameraMetadata.STATISTICS_FACE_DETECT_MODE_SIMPLE)
         }
 
@@ -1162,7 +1166,8 @@ class CameraController(
                 }
             }
             liveFocus = res.get(CaptureResult.LENS_FOCUS_DISTANCE) ?: -1f
-            if (!(cfg.faceAf && faceAfSupported)) return
+            liveFaceCount = res.get(CaptureResult.STATISTICS_FACES)?.size ?: 0
+            if (!((cfg.faceAf || cfg.portraitPhotoModeEnabled) && faceAfSupported)) return
             val now = SystemClock.elapsedRealtime()
             if (now - last < 400) return
             last = now
@@ -1429,7 +1434,7 @@ class CameraController(
                 b.set(CaptureRequest.TONEMAP_CURVE, TonemapCurve(pts, pts, pts))
             }
         }
-        if (!capture && cfg.faceAf && faceAfSupported) {
+        if ((!capture && (cfg.faceAf || cfg.portraitPhotoModeEnabled) || (capture && cfg.portraitPhotoModeEnabled)) && faceAfSupported) {
             b.set(CaptureRequest.STATISTICS_FACE_DETECT_MODE, CameraMetadata.STATISTICS_FACE_DETECT_MODE_SIMPLE)
         }
         if (capture) {
@@ -1590,14 +1595,15 @@ class CameraController(
         val fastMain = cfg.fastMovingObjects && cfg.cameraId == "0"
         val maxFrame = chars.get(CameraCharacteristics.SENSOR_INFO_MAX_FRAME_DURATION) ?: er.upper
         val exposureLimit = min(er.upper, maxFrame)
-        val smartIsoActive = cfg.photoExposureMode == 1 && !allowHighIso && !fastMain
-        // Smart ISO is allowed to lengthen the shutter as far as 1/20 s, but never beyond it.
+        val smartIsoActive = cfg.photoExposureMode == 1 && !fastMain
+        val smartIsoHighAllowed = allowHighIso || smartIsoNeedsHigh()
+        // Smart ISO never lets the shutter fall below 1/33 s. Higher ISO is used when needed.
         val maxExposure = when {
             fastMain -> min(8_000_000L, exposureLimit)
-            smartIsoActive -> min(50_000_000L, exposureLimit)
+            smartIsoActive -> min(30_303_030L, exposureLimit)
             else -> exposureLimit
         }
-        val isoCeiling = if (smartIsoActive) min(500, isoRange.upper).coerceAtLeast(isoRange.lower) else isoRange.upper
+        val isoCeiling = if (smartIsoActive && !smartIsoHighAllowed) min(500, isoRange.upper).coerceAtLeast(isoRange.lower) else isoRange.upper
         val preferredTimes = longArrayOf(e0 / 8L, e0, (e0.toDouble() * 2.0).toLong(), (e0.toDouble() * 8.0).toLong()).map { it.coerceIn(er.lower, maxExposure) }
         val exposures = LongArray(4)
         val sensitivities = IntArray(4)
@@ -1628,17 +1634,17 @@ class CameraController(
         val er = chars.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)
             ?: return 0L
         val maxFrame = chars.get(CameraCharacteristics.SENSOR_INFO_MAX_FRAME_DURATION) ?: er.upper
-        return min(50_000_000L, min(er.upper, maxFrame))
+        return min(30_303_030L, min(er.upper, maxFrame))
     }
 
-    /** True when the metered scene needs more than ISO 500 even at the 1/20 s limit. */
+    /** True when the scene needs ISO above 500 even at the 1/33 s shutter limit. */
     fun smartIsoNeedsHigh(): Boolean {
         if (!smartIsoSupported || photoManualExposure() || cfg.photoExposureMode != 1 || cfg.fastMovingObjects) return false
         val maxExposure = smartIsoMaxExposure()
         val currentIso = liveIso.takeIf { it > 0 } ?: return false
         val currentExposure = liveExpNs.takeIf { it > 0L } ?: return false
-        val targetIso = currentIso.coerceAtMost(500).coerceIn(isoRange.lower, 500)
-        val requiredExposure = currentExposure.toDouble() * currentIso / targetIso
+        val baseIso = currentIso.coerceAtMost(500).coerceIn(isoRange.lower, 500)
+        val requiredExposure = currentExposure.toDouble() * currentIso / baseIso
         return requiredExposure > maxExposure.toDouble()
     }
 
@@ -1649,10 +1655,16 @@ class CameraController(
         if (maxExposure < er.lower) return
         val currentIso = liveIso.takeIf { it > 0 } ?: 100
         val currentExposure = liveExpNs.takeIf { it > 0L } ?: 33_333_333L
-        // Keep ISO at or below 500 and trade shutter time for sensitivity, stopping at 1/20 s.
-        val targetIso = currentIso.coerceAtMost(500).coerceIn(isoRange.lower, 500)
-        val targetExposure = (currentExposure.toDouble() * currentIso / targetIso)
-            .toLong().coerceIn(er.lower, maxExposure)
+        val baseIso = currentIso.coerceAtMost(500).coerceIn(isoRange.lower, 500)
+        val requiredExposure = currentExposure.toDouble() * currentIso / baseIso
+        val targetExposure = requiredExposure.toLong().coerceIn(er.lower, maxExposure)
+        // At 1/33 s, raise ISO only as far as the metered scene requires.
+        val targetIso = if (requiredExposure > maxExposure.toDouble()) {
+            (currentExposure.toDouble() * currentIso / maxExposure).roundToInt()
+                .coerceIn(isoRange.lower, isoRange.upper)
+        } else {
+            baseIso
+        }
         b.set(CaptureRequest.CONTROL_AE_MODE, CameraMetadata.CONTROL_AE_MODE_OFF)
         b.set(CaptureRequest.CONTROL_AE_LOCK, false)
         b.set(CaptureRequest.SENSOR_EXPOSURE_TIME, targetExposure)
@@ -1723,7 +1735,7 @@ class CameraController(
                 if (bracket == null && plan == null && !photoManualExposure() && cfg.flashMode == 0) {
                     if (cfg.fastMovingObjects && cfg.cameraId == "0") {
                         applyFastMotionExposure(b)
-                    } else if (cfg.photoExposureMode == 1 && !allowHighIso) {
+                    } else if (cfg.photoExposureMode == 1) {
                         applySmartIsoExposure(b)
                     }
                 }
@@ -1766,6 +1778,7 @@ class CameraController(
         override fun onCaptureCompleted(s: CameraCaptureSession, r: CaptureRequest, res: TotalCaptureResult) {
             synchronized(lock) {
                 shot?.result = res
+                shot?.detectedFaceCount = res.get(CaptureResult.STATISTICS_FACES)?.size ?: 0
                 maybeProcess()
             }
         }
@@ -1863,7 +1876,7 @@ class CameraController(
             out = contrasted
         }
         if (sh.portraitPhotoMode) {
-            val blurred = runCatching { PhotoPortraitBlur.apply(out, sh.portraitBlurPercent) }.getOrNull()
+            val blurred = runCatching { PhotoPortraitBlur.apply(out, sh.portraitBlurPercent, sh.detectedFaceCount) }.getOrNull()
             if (blurred != null) { out.recycle(); out = blurred }
             else handler.post { ui.onMessage("Portrait Photo Mode could not detect a clear subject; saved without blur.") }
         }
