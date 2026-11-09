@@ -1246,13 +1246,9 @@ class CameraController(
         if (l.isEmpty()) return Size(4000, 3000)
         l.firstOrNull { it.width == cfg.photoW && it.height == cfg.photoH }?.let { return it }
         if (effMode() == 1 || captureFormat() == ImageFormat.JPEG_R) return l.first()
-        // Default to a fast ~8 MP 4:3 capture and save at that exact pixel size.
-        val target = min(8_000_000L, lensSafeArea)
-        val ok = l.filter { it.width.toLong() * it.height <= target }
-        return ok.firstOrNull { it.width * 3 == it.height * 4 }
-            ?: ok.firstOrNull()
-            ?: l.minByOrNull { kotlin.math.abs(it.width.toLong() * it.height - 8_000_000L) }
-            ?: l.last()
+        // Default to the largest JPEG size reported by the currently selected lens.
+        // Explicit user-selected dimensions above continue to take precedence.
+        return l.first()
     }
 
     private fun previewSizeForPhoto(cap: Size): Size {
