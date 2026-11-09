@@ -745,7 +745,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
         if (cfg.mode != 1 || !idle()) return
         val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(18), dp(8), dp(18), dp(8)) }
         val note = TextView(this).apply {
-            text = "Photo-only. Portrait blur and Bokeh Enhancement automatically activate together when one or more faces are detected. Portrait blur defaults to 50%. Both effects stay off when no face is detected. The bokeh strength, glow and shape settings below are retained."
+            text = "Photo-only. When one or two faces are detected, tap the green prompt to enable Portrait Mode. Confirmation lasts five minutes; effects turn off when the face leaves and reactivate if they return during that period. Three or more faces never activate portrait mode. Default blur is 50%."
             setTextColor(0xFFBDB8C7.toInt()); textSize = 12f; setPadding(0, 0, 0, dp(10))
         }
         box.addView(note)
@@ -774,7 +774,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
             setPadding(dp(18), dp(8), dp(18), dp(8))
         }
         val note = TextView(this).apply {
-            text = "Photo-only. Bokeh Enhancement automatically activates with portrait blur when a face is detected. It uses the existing strength, glow and aperture settings, and remains off when no face is detected. It enhances existing background highlights rather than creating optical bokeh from nothing."
+            text = "Photo-only. Bokeh Enhancement follows the confirmed one/two-face Portrait Mode window. It uses the selected strength, glow and aperture settings, and enhances existing background highlights rather than creating optical bokeh from nothing. Default strength is 25%."
             setTextColor(0xFFBDB8C7.toInt()); textSize = 12f; setPadding(0, 0, 0, dp(10))
         }
         box.addView(note)
@@ -1128,11 +1128,20 @@ class MainActivity : Activity(), CameraController.Callbacks {
         }
         root.addView(smartIsoWarning, lp(WRAP, WRAP, Gravity.TOP or Gravity.START, dp(14), dp(94), 0, 0))
         facePortraitStatus = TextView(this).apply {
-            text = "Face detected, portrait mode at 50% active."
+            text = "Face detected — Tap to enable Portrait Mode."
             setTextColor(Color.rgb(76, 220, 120))
             textSize = 12f
             setShadowLayer(3f, 0f, 0f, Color.BLACK)
             gravity = Gravity.CENTER
+            setPadding(dp(10), dp(6), dp(10), dp(6))
+            isClickable = true
+            isFocusable = true
+            setOnClickListener {
+                if (cfg.mode == 1 && cam.liveFaceCount in 1..2 && !cam.hasValidAutoPortraitConfirmation()) {
+                    cam.confirmAutoPortraitForFiveMinutes()
+                    updateSmartIsoWarning()
+                }
+            }
             visibility = View.GONE
         }
         root.addView(facePortraitStatus, lp(WRAP, WRAP, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL, dp(16), 0, dp(16), dp(28)))
@@ -2227,10 +2236,14 @@ class MainActivity : Activity(), CameraController.Callbacks {
     private fun updateSmartIsoWarning() {
         val show = cfg.mode == 1 && cfg.photoExposureMode == 1 && cam.smartIsoNeedsHigh()
         smartIsoWarning.visibility = if (show) View.VISIBLE else View.GONE
-        val faceOnlyAuto = cfg.mode == 1 && cam.liveFaceCount > 0
-        val activeBlurPercent = if (cfg.portraitBlurPercent == 40) 80 else cfg.portraitBlurPercent
-        facePortraitStatus.text = "Face detected, portrait mode at ${activeBlurPercent}% active."
-        facePortraitStatus.visibility = if (faceOnlyAuto) View.VISIBLE else View.GONE
+        val eligibleFaceCount = cam.liveFaceCount in 1..2
+        val confirmed = cam.hasValidAutoPortraitConfirmation()
+        facePortraitStatus.text = if (confirmed) {
+            "Face detected, portrait mode at 50% active."
+        } else {
+            "Face detected — Tap to enable Portrait Mode."
+        }
+        facePortraitStatus.visibility = if (cfg.mode == 1 && eligibleFaceCount) View.VISIBLE else View.GONE
     }
 
     private fun refreshReadouts() {
