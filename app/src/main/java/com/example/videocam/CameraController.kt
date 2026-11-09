@@ -113,6 +113,8 @@ class CameraController(
         val backgroundHueShift: Int,
         val backgroundSaturation: Int,
         val backgroundTemperature: Int,
+        val portraitPhotoMode: Boolean,
+        val portraitBlurPercent: Int,
         val hdrFactor: Float = 1f
     ) {
         var image: Image? = null // RAW only
@@ -1728,6 +1730,7 @@ class CameraController(
                 cfg.bw, cfg.flat && !cfg.bw, cfg.photoLook, bracket != null, false, cfg.glow, cfg.blue,
                 cfg.filterId, cfg.photoFilterIntensity, (cfg.photoContrastByLens[cfg.cameraId] ?: cfg.photoContrast).coerceIn(0, 100),
                 cfg.backgroundColorShiftEnabled, cfg.backgroundHueShift, cfg.backgroundSaturation, cfg.backgroundTemperature,
+                cfg.portraitPhotoModeEnabled, cfg.portraitBlurPercent,
                 if (bracket != null) 8f else 1f
             )
             synchronized(lock) { shot = sh }
@@ -1841,6 +1844,11 @@ class CameraController(
             out.recycle()
             out = contrasted
         }
+        if (sh.portraitPhotoMode) {
+            val blurred = runCatching { PhotoPortraitBlur.apply(out, sh.portraitBlurPercent) }.getOrNull()
+            if (blurred != null) { out.recycle(); out = blurred }
+            else handler.post { ui.onMessage("Portrait Photo Mode could not detect a clear subject; saved without blur.") }
+        }
         if (sh.backgroundColorShift) {
             val shifted = runCatching {
                 PhotoBackgroundColorShift.apply(out, sh.backgroundHueShift, sh.backgroundSaturation, sh.backgroundTemperature)
@@ -1902,7 +1910,7 @@ class CameraController(
                 out.recycle()
             } else {
                 val bytes = sh.jpegs[0]
-                saved = if ((sh.filterId > 0 && sh.filterIntensity > 0) || sh.contrast > 0 || sh.flat || sh.bw || sh.photoLook != 0 || sh.backgroundColorShift) {
+                saved = if ((sh.filterId > 0 && sh.filterIntensity > 0) || sh.contrast > 0 || sh.flat || sh.bw || sh.photoLook != 0 || sh.backgroundColorShift || sh.portraitPhotoMode) {
                     val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
                     val out = finishLook(rotateBy(bmp, sh.rotDeg), sh)
                     val u = saveBitmap(out, "$base.jpg", sh.quality)
