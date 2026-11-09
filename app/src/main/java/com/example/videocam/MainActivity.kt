@@ -657,6 +657,8 @@ class MainActivity : Activity(), CameraController.Callbacks {
             val size = runCatching { cam.captureSize() }.getOrNull()
             val sizeText = size?.let { "%.1f MP · %d × %d".format(it.width * it.height / 1e6, it.width, it.height) } ?: "Unavailable"
             add("PHOTO SIZE", sizeText) { pickPhotoRes() }
+            val portraitDetail = if (cfg.portraitPhotoModeEnabled) "ON · Background blur ${cfg.portraitBlurPercent}%" else "OFF · Subtle subject separation (default blur 15%)"
+            add("PORTRAIT PHOTO MODE", portraitDetail) { showPortraitPhotoModeDialog() }
             add("CAPTURE FORMAT", when {
                 cam.effMode() == 2 -> "Ultra HDR · 4-frame bracket"
                 cfg.photoFormat == 3 && cam.ultraHdrAvailable -> "Native Ultra HDR JPEG_R"
@@ -730,6 +732,32 @@ class MainActivity : Activity(), CameraController.Callbacks {
             })
         }, LinearLayout.LayoutParams(MATCH, WRAP))
         MaterialAlertDialogBuilder(this).setTitle("LOOKS").setView(box).setNegativeButton("Done", null).show()
+    }
+
+    private fun showPortraitPhotoModeDialog() {
+        if (cfg.mode != 1 || !idle()) return
+        val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(18), dp(8), dp(18), dp(8)) }
+        val note = TextView(this).apply {
+            text = "Photo-only. ML subject segmentation keeps the foreground sharp while the background is softened. Default blur is 15%."
+            setTextColor(0xFFBDB8C7.toInt()); textSize = 12f; setPadding(0, 0, 0, dp(10))
+        }
+        box.addView(note)
+        val enabled = CheckBox(this).apply { text = "Enable Portrait Photo Mode"; setTextColor(0xFFF3F0E8.toInt()); isChecked = cfg.portraitPhotoModeEnabled }
+        box.addView(enabled)
+        val amountLabel = TextView(this).apply { text = "BACKGROUND BLUR · undefined%"; setTextColor(0xFFF3F0E8.toInt()); textSize = 12f; setPadding(0, dp(10), 0, 0) }
+        box.addView(amountLabel)
+        val amount = SeekBar(this).apply { max = 100; progress = cfg.portraitBlurPercent.coerceIn(0,100) }
+        box.addView(amount, LinearLayout.LayoutParams(MATCH, WRAP))
+        enabled.setOnCheckedChangeListener { _, checked -> cfg.portraitPhotoModeEnabled = checked; cfgDirty = true; amount.isEnabled = checked }
+        amount.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, value: Int, fromUser: Boolean) {
+                cfg.portraitBlurPercent = value; cfgDirty = true; amountLabel.text = "BACKGROUND BLUR · $value%"
+            }
+            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+        })
+        amount.isEnabled = enabled.isChecked
+        MaterialAlertDialogBuilder(this).setTitle("PORTRAIT PHOTO MODE").setView(box).setNegativeButton("Done", null).show()
     }
 
     private fun showBackgroundColorShiftDialog() {
