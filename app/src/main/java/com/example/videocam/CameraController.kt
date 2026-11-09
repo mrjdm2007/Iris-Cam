@@ -1677,7 +1677,7 @@ class CameraController(
             if (cfg.photoFormat == 3 && ultraHdrAvailable && fmt != ImageFormat.JPEG_R) {
                 handler.post { ui.onMessage("Photo processing is active; using standard JPEG for this shot instead of native Ultra HDR.") }
             }
-            if (effMode() == 2 && cfg.backgroundColorShiftEnabled) {
+            if (effMode() == 2 && (cfg.backgroundColorShiftEnabled || cfg.portraitPhotoModeEnabled)) {
                 handler.post { ui.onMessage("Background Colour Shift is enabled; using a normal JPEG for this shot instead of the 4-frame HDR bracket.") }
             }
             val plan = scenePlan()
@@ -1686,8 +1686,8 @@ class CameraController(
                 finishBusy()
                 return
             }
-            val bracket = if (effMode() == 2 && !cfg.backgroundColorShiftEnabled) hdrPlan(allowHighIso) else null
-            if (effMode() == 2 && !cfg.backgroundColorShiftEnabled && bracket == null) {
+            val bracket = if (effMode() == 2 && !cfg.backgroundColorShiftEnabled && !cfg.portraitPhotoModeEnabled) hdrPlan(allowHighIso) else null
+            if (effMode() == 2 && !cfg.backgroundColorShiftEnabled && !cfg.portraitPhotoModeEnabled && bracket == null) {
                 handler.post { ui.onMessage("Not enough exposure range for Ultra HDR here, saving a normal JPEG") }
             }
             if (bracket != null && (cfg.filterId > 0 || cfg.flat || cfg.bw || cfg.photoLook != 0)) {
