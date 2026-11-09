@@ -659,8 +659,8 @@ class MainActivity : Activity(), CameraController.Callbacks {
             val size = runCatching { cam.captureSize() }.getOrNull()
             val sizeText = size?.let { "%.1f MP · %d × %d".format(it.width * it.height / 1e6, it.width, it.height) } ?: "Unavailable"
             add("PHOTO SIZE", sizeText) { pickPhotoRes() }
-            val effectivePortraitBlur = if (cfg.portraitBlurPercent == 40) 80 else cfg.portraitBlurPercent
-            val portraitDetail = if (cfg.portraitPhotoModeEnabled) "ON · Face-triggered blur ${effectivePortraitBlur}%" else "OFF · Auto activates at 80% when a face is detected"
+            val effectivePortraitBlur = if (cfg.portraitBlurPercent == 40) 50 else cfg.portraitBlurPercent
+            val portraitDetail = if (cfg.portraitPhotoModeEnabled) "ON · Face-triggered blur ${effectivePortraitBlur}%" else "OFF · Auto activates at 50% when a face is detected"
             add("PORTRAIT PHOTO MODE", portraitDetail) { showPortraitPhotoModeDialog() }
             add("CAPTURE FORMAT", when {
                 cam.effMode() == 2 -> "Ultra HDR · 4-frame bracket"
@@ -745,7 +745,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
         if (cfg.mode != 1 || !idle()) return
         val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(18), dp(8), dp(18), dp(8)) }
         val note = TextView(this).apply {
-            text = "Photo-only. Portrait blur and Bokeh Enhancement automatically activate together when one or more faces are detected. Portrait blur defaults to 80%. Both effects stay off when no face is detected. The bokeh strength, glow and shape settings below are retained."
+            text = "Photo-only. Portrait blur and Bokeh Enhancement automatically activate together when one or more faces are detected. Portrait blur defaults to 50%. Both effects stay off when no face is detected. The bokeh strength, glow and shape settings below are retained."
             setTextColor(0xFFBDB8C7.toInt()); textSize = 12f; setPadding(0, 0, 0, dp(10))
         }
         box.addView(note)
@@ -1128,7 +1128,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
         }
         root.addView(smartIsoWarning, lp(WRAP, WRAP, Gravity.TOP or Gravity.START, dp(14), dp(94), 0, 0))
         facePortraitStatus = TextView(this).apply {
-            text = "Face detected, portrait mode at 80% active."
+            text = "Face detected, portrait mode at 50% active."
             setTextColor(Color.rgb(76, 220, 120))
             textSize = 12f
             setShadowLayer(3f, 0f, 0f, Color.BLACK)
