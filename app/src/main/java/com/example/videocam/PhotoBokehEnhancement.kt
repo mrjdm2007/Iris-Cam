@@ -1,6 +1,7 @@
 package com.example.videocam
 
 import android.graphics.Bitmap
+import android.graphics.BlurMaskFilter
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
@@ -75,7 +76,6 @@ object PhotoBokehEnhancement {
             val baseRadius = 2.5f + strength.coerceIn(0, 100) * 0.075f
             val glowAmount = glow.coerceIn(0, 100) / 100f
             val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
-            val edge = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 0.8f + strength / 100f }
             val glowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
             val bounds = RectF()
             candidates.forEach { point ->
@@ -93,13 +93,15 @@ object PhotoBokehEnhancement {
                 }
                 val path = shapePath(shape, x, y, radius)
                 fill.color = Color.argb(34 + (strength * 0.42f).roundToInt(), Color.red(color), Color.green(color), Color.blue(color))
-                edge.color = Color.argb(105 + (strength * 1.2f).roundToInt().coerceAtMost(120), Color.red(color), Color.green(color), Color.blue(color))
+                // Feather the highlight itself; do not draw a separate hard outline.
+                fill.maskFilter = BlurMaskFilter(max(1f, radius * 0.32f), BlurMaskFilter.Blur.NORMAL)
                 if (shape.coerceIn(0, 3) == 1) {
                     bounds.set(x - radius * 1.35f, y - radius * 0.78f, x + radius * 1.35f, y + radius * 0.78f)
-                    canvas.drawOval(bounds, fill); canvas.drawOval(bounds, edge)
+                    canvas.drawOval(bounds, fill)
                 } else {
-                    canvas.drawPath(path, fill); canvas.drawPath(path, edge)
+                    canvas.drawPath(path, fill)
                 }
+                fill.maskFilter = null
             }
             return if (small === source) output else Bitmap.createScaledBitmap(output, source.width, source.height, true).also { output.recycle() }
         } finally {
