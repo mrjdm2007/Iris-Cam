@@ -83,9 +83,9 @@ object PhotoBokehEnhancement {
                 val x = point.x.toFloat(); val y = point.y.toFloat()
                 val color = Color.rgb(Color.red(point.color), Color.green(point.color), Color.blue(point.color))
                 if (glowAmount > 0f) {
-                    val gr = radius * (1.8f + glowAmount * 1.7f)
+                    val gr = radius * (1.15f + glowAmount * 0.75f)
                     glowPaint.shader = RadialGradient(x, y, gr,
-                        intArrayOf(Color.argb((75 * glowAmount).roundToInt(), Color.red(color), Color.green(color), Color.blue(color)),
+                        intArrayOf(Color.argb((24 * glowAmount).roundToInt(), Color.red(color), Color.green(color), Color.blue(color)),
                             Color.argb(0, Color.red(color), Color.green(color), Color.blue(color))),
                         null, Shader.TileMode.CLAMP)
                     canvas.drawCircle(x, y, gr, glowPaint)
@@ -94,7 +94,7 @@ object PhotoBokehEnhancement {
                 val path = shapePath(shape, x, y, radius)
                 fill.color = Color.argb(34 + (strength * 0.42f).roundToInt(), Color.red(color), Color.green(color), Color.blue(color))
                 // Feather the highlight itself; do not draw a separate hard outline.
-                fill.maskFilter = BlurMaskFilter(max(1f, radius * 0.32f), BlurMaskFilter.Blur.NORMAL)
+                fill.maskFilter = BlurMaskFilter(max(0.6f, radius * 0.14f), BlurMaskFilter.Blur.NORMAL)
                 if (shape.coerceIn(0, 3) == 1) {
                     bounds.set(x - radius * 1.35f, y - radius * 0.78f, x + radius * 1.35f, y + radius * 0.78f)
                     canvas.drawOval(bounds, fill)
