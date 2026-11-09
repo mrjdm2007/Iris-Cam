@@ -77,6 +77,8 @@ data class Config(
     var flashMode: Int = 0,          // 0 off, 1 on, 2 auto
     var photoNrOff: Boolean = false,
     var backgroundColorShiftEnabled: Boolean = false,
+    var portraitPhotoModeEnabled: Boolean = false,
+    var portraitBlurPercent: Int = 15,
     var backgroundHueShift: Int = 24,          // -180..180 degrees
     var backgroundSaturation: Int = 115,       // 0..200 percent
     var backgroundTemperature: Int = 4,       // -100..100, cool to warm
@@ -137,6 +139,8 @@ data class Config(
         flashMode = o.flashMode
         photoNrOff = o.photoNrOff
         backgroundColorShiftEnabled = o.backgroundColorShiftEnabled
+        portraitPhotoModeEnabled = o.portraitPhotoModeEnabled
+        portraitBlurPercent = o.portraitBlurPercent
         backgroundHueShift = o.backgroundHueShift
         backgroundSaturation = o.backgroundSaturation
         backgroundTemperature = o.backgroundTemperature
@@ -198,6 +202,8 @@ data class Config(
         .put("flashMode", flashMode)
         .put("photoNrOff", photoNrOff)
         .put("backgroundColorShiftEnabled", backgroundColorShiftEnabled)
+        .put("portraitPhotoModeEnabled", portraitPhotoModeEnabled)
+        .put("portraitBlurPercent", portraitBlurPercent.coerceIn(0, 100))
         .put("backgroundHueShift", backgroundHueShift.coerceIn(-180, 180))
         .put("backgroundSaturation", backgroundSaturation.coerceIn(0, 200))
         .put("backgroundTemperature", backgroundTemperature.coerceIn(-100, 100))
@@ -296,6 +302,8 @@ data class Config(
                 flashMode = o.optInt("flashMode", d.flashMode),
                 photoNrOff = o.optBoolean("photoNrOff", d.photoNrOff),
                 backgroundColorShiftEnabled = o.optBoolean("backgroundColorShiftEnabled", d.backgroundColorShiftEnabled),
+                portraitPhotoModeEnabled = o.optBoolean("portraitPhotoModeEnabled", d.portraitPhotoModeEnabled),
+                portraitBlurPercent = o.optInt("portraitBlurPercent", d.portraitBlurPercent).coerceIn(0, 100),
                 backgroundHueShift = o.optInt("backgroundHueShift", d.backgroundHueShift).coerceIn(-180, 180),
                 backgroundSaturation = o.optInt("backgroundSaturation", d.backgroundSaturation).coerceIn(0, 200),
                 backgroundTemperature = o.optInt("backgroundTemperature", d.backgroundTemperature).coerceIn(-100, 100),
