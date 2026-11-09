@@ -115,6 +115,10 @@ class CameraController(
         val backgroundTemperature: Int,
         val portraitPhotoMode: Boolean,
         val portraitBlurPercent: Int,
+        val bokehEnhancement: Boolean,
+        val bokehStrength: Int,
+        val bokehGlow: Int,
+        val bokehShape: Int,
         val hdrFactor: Float = 1f
     ) {
         var image: Image? = null // RAW only
@@ -1224,7 +1228,8 @@ class CameraController(
         // JPEG_R must be saved byte-for-byte to preserve its gain map. If a pixel filter
         // is selected, use ordinary JPEG so the requested look is actually rendered.
         cfg.photoFormat == 3 && ultraHdrAvailable &&
-            cfg.filterId == 0 && !cfg.flat && !cfg.backgroundColorShiftEnabled -> ImageFormat.JPEG_R
+            cfg.filterId == 0 && !cfg.flat && !cfg.backgroundColorShiftEnabled &&
+            !cfg.portraitPhotoModeEnabled && !cfg.bokehEnhancementEnabled -> ImageFormat.JPEG_R
         else -> ImageFormat.JPEG
     }
 
@@ -1677,8 +1682,8 @@ class CameraController(
             if (cfg.photoFormat == 3 && ultraHdrAvailable && fmt != ImageFormat.JPEG_R) {
                 handler.post { ui.onMessage("Photo processing is active; using standard JPEG for this shot instead of native Ultra HDR.") }
             }
-            if (effMode() == 2 && (cfg.backgroundColorShiftEnabled || cfg.portraitPhotoModeEnabled)) {
-                handler.post { ui.onMessage("Background Colour Shift is enabled; using a normal JPEG for this shot instead of the 4-frame HDR bracket.") }
+            if (effMode() == 2 && (cfg.backgroundColorShiftEnabled || cfg.portraitPhotoModeEnabled || cfg.bokehEnhancementEnabled)) {
+                handler.post { ui.onMessage("Photo effects are enabled; using a normal JPEG for this shot instead of the 4-frame HDR bracket.") }
             }
             val plan = scenePlan()
             if (cfg.scene in 1..2 && plan == null) {
@@ -1686,8 +1691,9 @@ class CameraController(
                 finishBusy()
                 return
             }
-            val bracket = if (effMode() == 2 && !cfg.backgroundColorShiftEnabled && !cfg.portraitPhotoModeEnabled) hdrPlan(allowHighIso) else null
-            if (effMode() == 2 && !cfg.backgroundColorShiftEnabled && !cfg.portraitPhotoModeEnabled && bracket == null) {
+            val photoEffectsActive = cfg.backgroundColorShiftEnabled || cfg.portraitPhotoModeEnabled || cfg.bokehEnhancementEnabled
+            val bracket = if (effMode() == 2 && !photoEffectsActive) hdrPlan(allowHighIso) else null
+            if (effMode() == 2 && !photoEffectsActive && bracket == null) {
                 handler.post { ui.onMessage("Not enough exposure range for Ultra HDR here, saving a normal JPEG") }
             }
             if (bracket != null && (cfg.filterId > 0 || cfg.flat || cfg.bw || cfg.photoLook != 0)) {
@@ -1731,6 +1737,7 @@ class CameraController(
                 cfg.filterId, cfg.photoFilterIntensity, (cfg.photoContrastByLens[cfg.cameraId] ?: cfg.photoContrast).coerceIn(0, 100),
                 cfg.backgroundColorShiftEnabled, cfg.backgroundHueShift, cfg.backgroundSaturation, cfg.backgroundTemperature,
                 cfg.portraitPhotoModeEnabled, cfg.portraitBlurPercent,
+                cfg.bokehEnhancementEnabled, cfg.bokehStrength, cfg.bokehGlow, cfg.bokehShape,
                 if (bracket != null) 8f else 1f
             )
             synchronized(lock) { shot = sh }
@@ -1860,6 +1867,11 @@ class CameraController(
                 handler.post { ui.onMessage("Background Colour Shift could not identify a clear subject; saved the photo without the effect.") }
             }
         }
+        if (sh.bokehEnhancement) {
+            val enhanced = runCatching { PhotoBokehEnhancement.apply(out, sh.bokehStrength, sh.bokehGlow, sh.bokehShape) }.getOrNull()
+            if (enhanced != null) { out.recycle(); out = enhanced }
+            else handler.post { ui.onMessage("Bokeh Enhancement found no suitable background highlights; saved the photo unchanged.") }
+        }
         return out
     }
 
@@ -1910,7 +1922,7 @@ class CameraController(
                 out.recycle()
             } else {
                 val bytes = sh.jpegs[0]
-                saved = if ((sh.filterId > 0 && sh.filterIntensity > 0) || sh.contrast > 0 || sh.flat || sh.bw || sh.photoLook != 0 || sh.backgroundColorShift || sh.portraitPhotoMode) {
+                saved = if ((sh.filterId > 0 && sh.filterIntensity > 0) || sh.contrast > 0 || sh.flat || sh.bw || sh.photoLook != 0 || sh.backgroundColorShift || sh.portraitPhotoMode || sh.bokehEnhancement) {
                     val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
                     val out = finishLook(rotateBy(bmp, sh.rotDeg), sh)
                     val u = saveBitmap(out, "$base.jpg", sh.quality)
