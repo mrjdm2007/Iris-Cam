@@ -2227,7 +2227,8 @@ class MainActivity : Activity(), CameraController.Callbacks {
         val show = cfg.mode == 1 && cfg.photoExposureMode == 1 && cam.smartIsoNeedsHigh()
         smartIsoWarning.visibility = if (show) View.VISIBLE else View.GONE
         val faceOnlyAuto = cfg.mode == 1 && cam.liveFaceCount > 0
-        facePortraitStatus.text = "Face detected, portrait mode at ${cfg.portraitBlurPercent}% active."
+        val activeBlurPercent = if (cfg.portraitBlurPercent == 40) 80 else cfg.portraitBlurPercent
+        facePortraitStatus.text = "Face detected, portrait mode at ${activeBlurPercent}% active."
         facePortraitStatus.visibility = if (faceOnlyAuto) View.VISIBLE else View.GONE
     }
 
