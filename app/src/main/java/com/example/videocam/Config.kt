@@ -78,7 +78,7 @@ data class Config(
     var photoNrOff: Boolean = false,
     var backgroundColorShiftEnabled: Boolean = false,
     var portraitPhotoModeEnabled: Boolean = true,
-    var portraitBlurPercent: Int = 60,
+    var portraitBlurPercent: Int = 40,
     var bokehEnhancementEnabled: Boolean = true,
     var bokehStrength: Int = 50,
     var bokehGlow: Int = 50,
@@ -105,7 +105,7 @@ data class Config(
     var chromaticAberrationCorrection: Boolean = true, // request ISP lateral colour-fringe correction
     var lensKeys: Boolean = false,   // show the 0.5x / 1x / 2.7x shortcut buttons
     var haptics: Boolean = true,     // subtle shutter and manual slider feedback
-    var ver: Int = 9
+    var ver: Int = 10
 ) {
     fun copyFrom(o: Config) {
         cameraId = o.cameraId
@@ -316,7 +316,7 @@ data class Config(
                 photoNrOff = o.optBoolean("photoNrOff", d.photoNrOff),
                 backgroundColorShiftEnabled = o.optBoolean("backgroundColorShiftEnabled", d.backgroundColorShiftEnabled),
                 portraitPhotoModeEnabled = if (oldVersion < 7) true else o.optBoolean("portraitPhotoModeEnabled", d.portraitPhotoModeEnabled),
-                portraitBlurPercent = (o.optInt("portraitBlurPercent", d.portraitBlurPercent).let { if (it == 15) 60 else it }).coerceIn(0, 100),
+                portraitBlurPercent = (o.optInt("portraitBlurPercent", d.portraitBlurPercent).let { stored -> if (oldVersion < 10 && stored == 60) 40 else if (oldVersion < 7 && stored == 15) 40 else stored }).coerceIn(0, 100),
                 bokehEnhancementEnabled = if (oldVersion < 7) true else o.optBoolean("bokehEnhancementEnabled", d.bokehEnhancementEnabled),
                 bokehStrength = (o.optInt("bokehStrength", d.bokehStrength).let { stored -> if (oldVersion < 9 && stored == 40) 50 else stored }).coerceIn(0, 100),
                 bokehGlow = (o.optInt("bokehGlow", d.bokehGlow).let { stored -> if (oldVersion < 9 && stored == 40) 50 else stored }).coerceIn(0, 100),
@@ -343,7 +343,7 @@ data class Config(
                 chromaticAberrationCorrection = o.optBoolean("chromaticAberrationCorrection", d.chromaticAberrationCorrection),
                 lensKeys = o.optBoolean("lensKeys", d.lensKeys),
                 haptics = o.optBoolean("haptics", d.haptics),
-                ver = maxOf(9, o.optInt("ver", d.ver))
+                ver = maxOf(10, o.optInt("ver", d.ver))
             )
         }
     }
