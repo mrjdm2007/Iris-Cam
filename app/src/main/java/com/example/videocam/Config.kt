@@ -80,8 +80,8 @@ data class Config(
     var portraitPhotoModeEnabled: Boolean = true,
     var portraitBlurPercent: Int = 60,
     var bokehEnhancementEnabled: Boolean = true,
-    var bokehStrength: Int = 70,
-    var bokehGlow: Int = 70,
+    var bokehStrength: Int = 40,
+    var bokehGlow: Int = 40,
     var bokehShape: Int = 0,
     var backgroundHueShift: Int = 0,           // neutral hue for grayscale background
     var backgroundSaturation: Int = 0,         // default monochrome background
@@ -105,7 +105,7 @@ data class Config(
     var chromaticAberrationCorrection: Boolean = true, // request ISP lateral colour-fringe correction
     var lensKeys: Boolean = false,   // show the 0.5x / 1x / 2.7x shortcut buttons
     var haptics: Boolean = true,     // subtle shutter and manual slider feedback
-    var ver: Int = 6
+    var ver: Int = 8
 ) {
     fun copyFrom(o: Config) {
         cameraId = o.cameraId
@@ -318,8 +318,8 @@ data class Config(
                 portraitPhotoModeEnabled = if (oldVersion < 7) true else o.optBoolean("portraitPhotoModeEnabled", d.portraitPhotoModeEnabled),
                 portraitBlurPercent = (o.optInt("portraitBlurPercent", d.portraitBlurPercent).let { if (it == 15) 60 else it }).coerceIn(0, 100),
                 bokehEnhancementEnabled = if (oldVersion < 7) true else o.optBoolean("bokehEnhancementEnabled", d.bokehEnhancementEnabled),
-                bokehStrength = (if (oldVersion < 7 && o.optInt("bokehStrength", 55) == 55) 70 else o.optInt("bokehStrength", d.bokehStrength)).coerceIn(0, 100),
-                bokehGlow = (if (oldVersion < 7 && o.optInt("bokehGlow", 35) == 35) 70 else o.optInt("bokehGlow", d.bokehGlow)).coerceIn(0, 100),
+                bokehStrength = (o.optInt("bokehStrength", d.bokehStrength).let { stored -> if (oldVersion < 8 && (stored == 70 || (oldVersion < 7 && stored == 55))) 40 else stored }).coerceIn(0, 100),
+                bokehGlow = (o.optInt("bokehGlow", d.bokehGlow).let { stored -> if (oldVersion < 8 && (stored == 70 || (oldVersion < 7 && stored == 35))) 40 else stored }).coerceIn(0, 100),
                 bokehShape = o.optInt("bokehShape", d.bokehShape).coerceIn(0, 3),
                 backgroundHueShift = (o.optInt("backgroundHueShift", d.backgroundHueShift).let { if (it == 24) 0 else it }).coerceIn(-180, 180),
                 backgroundSaturation = (o.optInt("backgroundSaturation", d.backgroundSaturation).let { if (it == 115) 0 else it }).coerceIn(0, 200),
@@ -343,7 +343,7 @@ data class Config(
                 chromaticAberrationCorrection = o.optBoolean("chromaticAberrationCorrection", d.chromaticAberrationCorrection),
                 lensKeys = o.optBoolean("lensKeys", d.lensKeys),
                 haptics = o.optBoolean("haptics", d.haptics),
-                ver = maxOf(7, o.optInt("ver", d.ver))
+                ver = maxOf(8, o.optInt("ver", d.ver))
             )
         }
     }
