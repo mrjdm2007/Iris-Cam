@@ -168,6 +168,9 @@ class CameraController(
     private var lastPreview = Size(1920, 1080)
     private var reader: ImageReader? = null
     private var shot: Shot? = null
+    @Volatile private var lastCaptureStartedAt = 0L
+    val captureCooldownActive: Boolean
+        get() = SystemClock.elapsedRealtime() - lastCaptureStartedAt < 2_000L
     private var warnedLens: String? = null
     private val procExec = Executors.newSingleThreadExecutor()
     private val subjectSegmenter by lazy<SubjectSegmenter> {
@@ -1511,8 +1514,16 @@ class CameraController(
         }
         val s = session ?: return
         if (reader == null) return
+        val now = SystemClock.elapsedRealtime()
+        val sinceLastShot = now - lastCaptureStartedAt
+        if (lastCaptureStartedAt != 0L && sinceLastShot < 2_000L) {
+            ui.onMessage("Please wait ${(2_000L - sinceLastShot + 999L) / 1_000L} second before the next photo.")
+            return
+        }
+        lastCaptureStartedAt = now
         busy = true
         ui.onBusy(true)
+        handler.postDelayed({ if (!busy) ui.onBusy(false) }, 2_000L)
         val useFlash = flashAvail && cfg.flashMode != 0 && cfg.photoExposureMode == 0 && cfg.scene == 0 && effMode() != 2
         if (useFlash) {
             try {
