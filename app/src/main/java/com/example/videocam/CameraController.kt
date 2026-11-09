@@ -1778,7 +1778,7 @@ class CameraController(
         override fun onCaptureCompleted(s: CameraCaptureSession, r: CaptureRequest, res: TotalCaptureResult) {
             synchronized(lock) {
                 shot?.result = res
-                shot?.detectedFaceCount = res.get(CaptureResult.STATISTICS_FACES)?.size ?: 0
+                shot?.let { it.detectedFaceCount = max(it.detectedFaceCount, res.get(CaptureResult.STATISTICS_FACES)?.size ?: 0) }
                 maybeProcess()
             }
         }
@@ -1830,7 +1830,9 @@ class CameraController(
         if (sh.started) return
         if (sh.format == ImageFormat.RAW_SENSOR) {
             if (sh.image == null || sh.result == null) return
-        } else if (sh.jpegs.size < sh.expected) {
+        } else if (sh.jpegs.size < sh.expected || sh.result == null) {
+            // Wait for the capture result as well as the JPEG so the face count is final
+            // before deciding whether to run portrait and bokeh processing.
             return
         }
         sh.started = true
