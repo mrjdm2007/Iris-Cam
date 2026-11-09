@@ -1126,7 +1126,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
             setShadowLayer(3f, 0f, 0f, Color.BLACK)
             visibility = View.GONE
         }
-        root.addView(smartIsoWarning, lp(WRAP, WRAP, Gravity.TOP or Gravity.START, dp(14), dp(94), 0, 0))
+        drag("smartIsoWarning", smartIsoWarning, WRAP, WRAP, Gravity.TOP or Gravity.START, dp(14), dp(94))
         facePortraitStatus = TextView(this).apply {
             text = "Face detected — Tap to enable Portrait Mode."
             setTextColor(Color.rgb(76, 220, 120))
@@ -1144,7 +1144,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
             }
             visibility = View.GONE
         }
-        root.addView(facePortraitStatus, lp(WRAP, WRAP, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL, dp(16), 0, dp(16), dp(28)))
+        drag("facePortraitStatus", facePortraitStatus, WRAP, WRAP, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL, dp(16), 0, dp(16), dp(28))
         lockText = TextView(this).apply {
             setTextColor(AMBER)
             textSize = 13f
@@ -1665,6 +1665,8 @@ class MainActivity : Activity(), CameraController.Callbacks {
             setFrameLp("rec", dp(64), dp(64), Gravity.CENTER_HORIZONTAL or Gravity.BOTTOM, 0, 0, 0, dp(18))
             setFrameLp("thumb", dp(52), dp(52), Gravity.START or Gravity.BOTTOM, dp(20), 0, 0, dp(24))
             setFrameLp("mode", WRAP, WRAP, Gravity.END or Gravity.BOTTOM, 0, 0, dp(14), dp(32))
+            setFrameLp("smartIsoWarning", WRAP, WRAP, Gravity.TOP or Gravity.START, dp(14), dp(118), 0, 0)
+            setFrameLp("facePortraitStatus", WRAP, WRAP, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL, dp(16), 0, dp(16), dp(28))
         } else {
             // Landscape reference: tools are pinned below the top bar on the left.
             listOf("tool2x", "toolPeak", "toolFalse", "toolRotate", "toolTimer", "toolTorch")
@@ -1682,6 +1684,8 @@ class MainActivity : Activity(), CameraController.Callbacks {
             setFrameLp("rec", dp(64), dp(64), Gravity.END or Gravity.BOTTOM, 0, 0, dp(160), dp(16))
             setFrameLp("thumb", dp(52), dp(52), Gravity.END or Gravity.BOTTOM, 0, 0, dp(84), dp(22))
             setFrameLp("mode", WRAP, WRAP, Gravity.END or Gravity.BOTTOM, 0, 0, sx(0.264f), dp(88))
+            setFrameLp("smartIsoWarning", WRAP, WRAP, Gravity.TOP or Gravity.START, dp(14), dp(72), 0, 0)
+            setFrameLp("facePortraitStatus", WRAP, WRAP, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL, dp(16), 0, dp(16), dp(28))
         }
 
         // The three primary exposure values have fixed, equal widths in both orientations.
@@ -1733,11 +1737,9 @@ class MainActivity : Activity(), CameraController.Callbacks {
         }
 
         (warn.layoutParams as FrameLayout.LayoutParams).topMargin = dp(if (p) 96 else 50)
-        (smartIsoWarning.layoutParams as FrameLayout.LayoutParams).topMargin = dp(if (p) 118 else 72)
         (lockText.layoutParams as FrameLayout.LayoutParams).topMargin = dp(if (p) 140 else 94)
         (falseLegend.layoutParams as FrameLayout.LayoutParams).topMargin = dp(if (p) 96 else 48)
         warn.requestLayout()
-        smartIsoWarning.requestLayout()
         lockText.requestLayout()
         falseLegend.requestLayout()
         (timecode.layoutParams as LinearLayout.LayoutParams).width = dp(if (p) 84 else 112)
