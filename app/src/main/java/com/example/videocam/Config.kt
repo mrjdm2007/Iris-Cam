@@ -80,7 +80,7 @@ data class Config(
     var portraitPhotoModeEnabled: Boolean = false,
     var portraitBlurPercent: Int = 50,
     var bokehEnhancementEnabled: Boolean = false,
-    var bokehStrength: Int = 50,
+    var bokehStrength: Int = 25,
     var bokehGlow: Int = 50,
     var bokehShape: Int = 0,
     var backgroundHueShift: Int = 0,           // neutral hue for grayscale background
@@ -105,7 +105,7 @@ data class Config(
     var chromaticAberrationCorrection: Boolean = true, // request ISP lateral colour-fringe correction
     var lensKeys: Boolean = false,   // show the 0.5x / 1x / 2.7x shortcut buttons
     var haptics: Boolean = true,     // subtle shutter and manual slider feedback
-    var ver: Int = 12
+    var ver: Int = 13
 ) {
     fun copyFrom(o: Config) {
         cameraId = o.cameraId
@@ -318,7 +318,7 @@ data class Config(
                 portraitPhotoModeEnabled = if (oldVersion < 11) false else o.optBoolean("portraitPhotoModeEnabled", d.portraitPhotoModeEnabled),
                 portraitBlurPercent = if (oldVersion < 12) 50 else o.optInt("portraitBlurPercent", d.portraitBlurPercent).coerceIn(0, 100),
                 bokehEnhancementEnabled = if (oldVersion < 11) false else o.optBoolean("bokehEnhancementEnabled", d.bokehEnhancementEnabled),
-                bokehStrength = (o.optInt("bokehStrength", d.bokehStrength).let { stored -> if (oldVersion < 9 && stored == 40) 50 else stored }).coerceIn(0, 100),
+                bokehStrength = if (oldVersion < 13) 25 else o.optInt("bokehStrength", d.bokehStrength).coerceIn(0, 100),
                 bokehGlow = (o.optInt("bokehGlow", d.bokehGlow).let { stored -> if (oldVersion < 9 && stored == 40) 50 else stored }).coerceIn(0, 100),
                 bokehShape = o.optInt("bokehShape", d.bokehShape).coerceIn(0, 3),
                 backgroundHueShift = (o.optInt("backgroundHueShift", d.backgroundHueShift).let { if (it == 24) 0 else it }).coerceIn(-180, 180),
