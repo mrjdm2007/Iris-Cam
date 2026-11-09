@@ -1143,7 +1143,7 @@ class CameraController(
         }
 
         // ----- face detection for face-priority AF -----
-        if ((cfg.faceAf || cfg.portraitPhotoModeEnabled) && faceAfSupported) {
+        if ((cfg.faceAf || cfg.mode == 1) && faceAfSupported) {
             b.set(CaptureRequest.STATISTICS_FACE_DETECT_MODE, CameraMetadata.STATISTICS_FACE_DETECT_MODE_SIMPLE)
         }
 
@@ -1434,7 +1434,7 @@ class CameraController(
                 b.set(CaptureRequest.TONEMAP_CURVE, TonemapCurve(pts, pts, pts))
             }
         }
-        if ((!capture && (cfg.faceAf || cfg.portraitPhotoModeEnabled) || (capture && cfg.portraitPhotoModeEnabled)) && faceAfSupported) {
+        if ((cfg.faceAf || cfg.mode == 1) && faceAfSupported) {
             b.set(CaptureRequest.STATISTICS_FACE_DETECT_MODE, CameraMetadata.STATISTICS_FACE_DETECT_MODE_SIMPLE)
         }
         if (capture) {
@@ -1875,8 +1875,10 @@ class CameraController(
             out.recycle()
             out = contrasted
         }
-        if (sh.portraitPhotoMode) {
-            val blurred = runCatching { PhotoPortraitBlur.apply(out, sh.portraitBlurPercent, sh.detectedFaceCount) }.getOrNull()
+        // Face-triggered portrait processing is independent of the saved default switch.
+        // A detected face activates a fixed 80% blur; face-free frames receive no portrait effect.
+        if (sh.detectedFaceCount > 0) {
+            val blurred = runCatching { PhotoPortraitBlur.apply(out, 80, sh.detectedFaceCount) }.getOrNull()
             if (blurred != null) { out.recycle(); out = blurred }
             else handler.post { ui.onMessage("Portrait Photo Mode could not detect a clear subject; saved without blur.") }
         }
@@ -1891,7 +1893,9 @@ class CameraController(
                 handler.post { ui.onMessage("Background Colour Shift could not identify a clear subject; saved the photo without the effect.") }
             }
         }
-        if (sh.bokehEnhancement) {
+        // Keep the user's current bokeh strength, glow and aperture shape, but only
+        // run the enhancement for a frame in which Camera2 detected at least one face.
+        if (sh.detectedFaceCount > 0) {
             val enhanced = runCatching { PhotoBokehEnhancement.apply(out, sh.bokehStrength, sh.bokehGlow, sh.bokehShape) }.getOrNull()
             if (enhanced != null) { out.recycle(); out = enhanced }
             else handler.post { ui.onMessage("Bokeh Enhancement found no suitable background highlights; saved the photo unchanged.") }
@@ -1904,10 +1908,25 @@ class CameraController(
         try {
             val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
             val base = "IMG_${stamp}_L${sh.lens}"
-            if (Build.VERSION.SDK_INT >= 34 && sh.format == ImageFormat.JPEG_R) {
-                // Preserve the camera-generated Ultra HDR gain map byte-for-byte. Re-encoding
-                // through Bitmap/JPEG would destroy the HDR metadata and reduce highlight range.
+            if (Build.VERSION.SDK_INT >= 34 && sh.format == ImageFormat.JPEG_R && sh.detectedFaceCount == 0) {
+                // Preserve native Ultra HDR unchanged when no face is detected.
                 saved = saveBytes(sh.jpegs.first(), "$base.jpg")
+            } else if (Build.VERSION.SDK_INT >= 34 && sh.format == ImageFormat.JPEG_R && sh.detectedFaceCount > 0) {
+                // A face-triggered effect requires pixel processing, so this shot is saved as JPEG.
+                val bytes = sh.jpegs.first()
+                val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                    ?: throw IllegalStateException("Couldn't decode the Ultra HDR photo for face effects")
+                val out = finishLook(rotateBy(bmp, sh.rotDeg), sh)
+                saved = saveBitmap(out, "$base.jpg", sh.quality)
+                out.recycle()
+            } else if (sh.hdr && sh.jpegs.size >= 4 && sh.detectedFaceCount > 0) {
+                // When a face is present, apply both automatic portrait effects to the base exposure.
+                val baseBytes = uprightJpeg(sh.jpegs[1], sh.rotDeg)
+                val bmp = BitmapFactory.decodeByteArray(baseBytes, 0, baseBytes.size)
+                    ?: throw IllegalStateException("Couldn't decode the HDR base exposure for face effects")
+                val out = finishLook(bmp, sh)
+                saved = saveBitmap(out, "$base.jpg", sh.quality)
+                out.recycle()
             } else if (sh.hdr && sh.jpegs.size >= 4) {
                 // Four-frame order: -3 EV, 0 EV, +1 EV, +3 EV.
                 // Rotate each frame to upright pixels before analysing and building the gain map.
@@ -1946,7 +1965,7 @@ class CameraController(
                 out.recycle()
             } else {
                 val bytes = sh.jpegs[0]
-                saved = if ((sh.filterId > 0 && sh.filterIntensity > 0) || sh.contrast > 0 || sh.flat || sh.bw || sh.photoLook != 0 || sh.backgroundColorShift || sh.portraitPhotoMode || sh.bokehEnhancement) {
+                saved = if ((sh.filterId > 0 && sh.filterIntensity > 0) || sh.contrast > 0 || sh.flat || sh.bw || sh.photoLook != 0 || sh.backgroundColorShift || sh.portraitPhotoMode || sh.bokehEnhancement || sh.detectedFaceCount > 0) {
                     val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
                     val out = finishLook(rotateBy(bmp, sh.rotDeg), sh)
                     val u = saveBitmap(out, "$base.jpg", sh.quality)
