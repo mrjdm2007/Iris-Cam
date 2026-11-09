@@ -1878,7 +1878,7 @@ class CameraController(
         // Face-triggered portrait processing is independent of the saved default switch.
         // A detected face activates a fixed 80% blur; face-free frames receive no portrait effect.
         if (sh.detectedFaceCount > 0) {
-            val blurred = runCatching { PhotoPortraitBlur.apply(out, 80, sh.detectedFaceCount) }.getOrNull()
+            val blurred = runCatching { PhotoPortraitBlur.apply(out, sh.portraitBlurPercent, sh.detectedFaceCount) }.getOrNull()
             if (blurred != null) { out.recycle(); out = blurred }
             else handler.post { ui.onMessage("Portrait Photo Mode could not detect a clear subject; saved without blur.") }
         }
