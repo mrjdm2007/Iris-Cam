@@ -114,6 +114,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
     private lateinit var peakView: ImageView
     private lateinit var falseLegend: TextView
     private lateinit var grid: GridOverlayView
+    private lateinit var previewBlink: View
     private lateinit var slider: VerticalSlider
     private lateinit var zoomSlider: ZoomSlider
     private lateinit var expSlider: ZoomSlider
@@ -1044,6 +1045,16 @@ class MainActivity : Activity(), CameraController.Callbacks {
         root.addView(peakView, lp(MATCH, MATCH, Gravity.CENTER))
         grid = GridOverlayView(this)
         root.addView(grid, lp(MATCH, MATCH, Gravity.CENTER))
+        // Brief dark dip confirms the instant the captured image is fully received.
+        // This layer matches the preview bounds and stays underneath all controls.
+        previewBlink = View(this).apply {
+            setBackgroundColor(Color.BLACK)
+            alpha = 0f
+            visibility = View.GONE
+            isClickable = false
+            isFocusable = false
+        }
+        root.addView(previewBlink, lp(MATCH, MATCH, Gravity.CENTER))
 
         falseLegend = TextView(this).apply {
             text = "FALSE COLOUR   purple <2%   blue shadows   green mid-grey   pink skin   yellow 90%+   red clipped"
@@ -3644,6 +3655,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
         falseView.layoutParams = lp(vw, vh, Gravity.CENTER)
         peakView.layoutParams = lp(vw, vh, Gravity.CENTER)
         grid.layoutParams = lp(vw, vh, Gravity.CENTER)
+        previewBlink.layoutParams = lp(vw, vh, Gravity.CENTER)
         cam.refreshTransform()
     }
 
@@ -3663,6 +3675,18 @@ class MainActivity : Activity(), CameraController.Callbacks {
     override fun onBusy(busy: Boolean) {
         setRecLook(false)
         refreshUi()
+    }
+
+    override fun onPhotoCaptured() {
+        if (!::previewBlink.isInitialized || cfg.mode != 1) return
+        previewBlink.animate().cancel()
+        previewBlink.visibility = View.VISIBLE
+        previewBlink.alpha = 0.62f
+        previewBlink.animate()
+            .alpha(0f)
+            .setDuration(130L)
+            .withEndAction { previewBlink.visibility = View.GONE }
+            .start()
     }
 
     override fun onPhotoSaved(uri: Uri?) {
