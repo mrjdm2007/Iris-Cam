@@ -120,6 +120,7 @@ class CameraController(
         val bokehStrength: Int,
         val bokehGlow: Int,
         val bokehShape: Int,
+        val autoPortraitConfirmed: Boolean,
         val hdrFactor: Float = 1f
     ) {
         var image: Image? = null // RAW only
@@ -174,6 +175,16 @@ class CameraController(
     @Volatile private var lastCaptureStartedAt = 0L
     val captureCooldownActive: Boolean
         get() = SystemClock.elapsedRealtime() - lastCaptureStartedAt < 2_000L
+
+    @Volatile
+    private var autoPortraitConsentUntilMs = 0L
+
+    fun confirmAutoPortraitForFiveMinutes() {
+        autoPortraitConsentUntilMs = SystemClock.elapsedRealtime() + 5 * 60 * 1000L
+    }
+
+    fun hasValidAutoPortraitConfirmation(): Boolean =
+        SystemClock.elapsedRealtime() < autoPortraitConsentUntilMs
     private var warnedLens: String? = null
     private val procExec = Executors.newSingleThreadExecutor()
     private val subjectSegmenter by lazy<SubjectSegmenter> {
@@ -1759,6 +1770,7 @@ class CameraController(
                 cfg.backgroundColorShiftEnabled, cfg.backgroundHueShift, cfg.backgroundSaturation, cfg.backgroundTemperature,
                 cfg.portraitPhotoModeEnabled, cfg.portraitBlurPercent,
                 cfg.bokehEnhancementEnabled, cfg.bokehStrength, cfg.bokehGlow, cfg.bokehShape,
+                hasValidAutoPortraitConfirmation(),
                 if (bracket != null) 8f else 1f
             )
             synchronized(lock) { shot = sh }
@@ -1854,6 +1866,9 @@ class CameraController(
         procExec.execute { processShot(sh) }
     }
 
+    private fun autoPortraitSubject(sh: Shot): Boolean =
+        sh.autoPortraitConfirmed && sh.detectedFaceCount in 1..2
+
     /** Apply the optional flat profile and/or selected filter; Natural otherwise stays untouched. */
     private fun finishLook(bmp: Bitmap, sh: Shot): Bitmap {
         var out = Look.apply(bmp, sh.bw, sh.flat)
@@ -1881,9 +1896,8 @@ class CameraController(
             out.recycle()
             out = contrasted
         }
-        // Face-triggered portrait processing is independent of the saved default switch.
-        // A detected face activates portrait blur at the configured default of 50%; face-free frames receive no effect.
-        if (sh.detectedFaceCount > 0) {
+        // Portrait processing requires the user's five-minute confirmation and exactly one or two faces.
+        if (autoPortraitSubject(sh)) {
             val blurPercent = if (sh.portraitBlurPercent == 40) 50 else sh.portraitBlurPercent
             val blurred = runCatching { PhotoPortraitBlur.apply(out, blurPercent, sh.detectedFaceCount) }.getOrNull()
             if (blurred != null) { out.recycle(); out = blurred }
@@ -1900,9 +1914,8 @@ class CameraController(
                 handler.post { ui.onMessage("Background Colour Shift could not identify a clear subject; saved the photo without the effect.") }
             }
         }
-        // Keep the user's current bokeh strength, glow and aperture shape, but only
-        // run the enhancement for a frame in which Camera2 detected at least one face.
-        if (sh.detectedFaceCount > 0) {
+        // Bokeh follows the same confirmation and one/two-face gate as portrait blur.
+        if (autoPortraitSubject(sh)) {
             val enhanced = runCatching { PhotoBokehEnhancement.apply(out, sh.bokehStrength, sh.bokehGlow, sh.bokehShape) }.getOrNull()
             if (enhanced != null) { out.recycle(); out = enhanced }
             else handler.post { ui.onMessage("Bokeh Enhancement found no suitable background highlights; saved the photo unchanged.") }
@@ -1915,19 +1928,19 @@ class CameraController(
         try {
             val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
             val base = "IMG_${stamp}_L${sh.lens}"
-            if (Build.VERSION.SDK_INT >= 34 && sh.format == ImageFormat.JPEG_R && sh.detectedFaceCount == 0) {
-                // Preserve native Ultra HDR unchanged when no face is detected.
+            if (Build.VERSION.SDK_INT >= 34 && sh.format == ImageFormat.JPEG_R && !autoPortraitSubject(sh)) {
+                // Preserve native Ultra HDR when portrait confirmation is absent or the scene is not one/two faces.
                 saved = saveBytes(sh.jpegs.first(), "$base.jpg")
-            } else if (Build.VERSION.SDK_INT >= 34 && sh.format == ImageFormat.JPEG_R && sh.detectedFaceCount > 0) {
-                // A face-triggered effect requires pixel processing, so this shot is saved as JPEG.
+            } else if (Build.VERSION.SDK_INT >= 34 && sh.format == ImageFormat.JPEG_R && autoPortraitSubject(sh)) {
+                // Confirmed portrait effects require pixel processing, so this shot is saved as JPEG.
                 val bytes = sh.jpegs.first()
                 val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
                     ?: throw IllegalStateException("Couldn't decode the Ultra HDR photo for face effects")
                 val out = finishLook(rotateBy(bmp, sh.rotDeg), sh)
                 saved = saveBitmap(out, "$base.jpg", sh.quality)
                 out.recycle()
-            } else if (sh.hdr && sh.jpegs.size >= 4 && sh.detectedFaceCount > 0) {
-                // When a face is present, apply both automatic portrait effects to the base exposure.
+            } else if (sh.hdr && sh.jpegs.size >= 4 && autoPortraitSubject(sh)) {
+                // Apply confirmed portrait effects to the HDR base exposure only for one or two faces.
                 val baseBytes = uprightJpeg(sh.jpegs[1], sh.rotDeg)
                 val bmp = BitmapFactory.decodeByteArray(baseBytes, 0, baseBytes.size)
                     ?: throw IllegalStateException("Couldn't decode the HDR base exposure for face effects")
@@ -1972,7 +1985,7 @@ class CameraController(
                 out.recycle()
             } else {
                 val bytes = sh.jpegs[0]
-                saved = if ((sh.filterId > 0 && sh.filterIntensity > 0) || sh.contrast > 0 || sh.flat || sh.bw || sh.photoLook != 0 || sh.backgroundColorShift || sh.portraitPhotoMode || sh.bokehEnhancement || sh.detectedFaceCount > 0) {
+                saved = if ((sh.filterId > 0 && sh.filterIntensity > 0) || sh.contrast > 0 || sh.flat || sh.bw || sh.photoLook != 0 || sh.backgroundColorShift || sh.portraitPhotoMode || sh.bokehEnhancement || autoPortraitSubject(sh)) {
                     val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
                     val out = finishLook(rotateBy(bmp, sh.rotDeg), sh)
                     val u = saveBitmap(out, "$base.jpg", sh.quality)
