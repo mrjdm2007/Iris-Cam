@@ -711,6 +711,10 @@ class MainActivity : Activity(), CameraController.Callbacks {
             box.addView(panelAction("BACKGROUND COLOUR SHIFT", shiftDetail) {
                 showBackgroundColorShiftDialog()
             }, LinearLayout.LayoutParams(MATCH, WRAP).apply { setMargins(0, dp(8), 0, dp(8)) })
+            val bokehDetail = if (cfg.bokehEnhancementEnabled) "ON · Strength ${cfg.bokehStrength}% · Glow ${cfg.bokehGlow}%" else "OFF · Enhance existing background light highlights"
+            box.addView(panelAction("BOKEH ENHANCEMENT", bokehDetail) {
+                showBokehEnhancementDialog()
+            }, LinearLayout.LayoutParams(MATCH, WRAP).apply { setMargins(0, 0, 0, dp(8)) })
         }
         box.addView(currentLut)
         val label = TextView(this).apply { text = "INTENSITY · " + intensity + "%"; setTextColor(0xFFF3F0E8.toInt()); textSize = 12f }
@@ -758,6 +762,67 @@ class MainActivity : Activity(), CameraController.Callbacks {
         })
         amount.isEnabled = enabled.isChecked
         MaterialAlertDialogBuilder(this).setTitle("PORTRAIT PHOTO MODE").setView(box).setNegativeButton("Done", null).show()
+    }
+
+    private fun showBokehEnhancementDialog() {
+        if (cfg.mode != 1 || !idle()) return
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(8), dp(18), dp(8))
+        }
+        val note = TextView(this).apply {
+            text = "Photo-only. Enhances isolated bright highlights in the background using lightweight image processing and the existing on-device subject mask. It cannot create natural optical bokeh where no highlights exist."
+            setTextColor(0xFFBDB8C7.toInt()); textSize = 12f; setPadding(0, 0, 0, dp(10))
+        }
+        box.addView(note)
+        val enabled = CheckBox(this).apply {
+            text = "Enable Bokeh Enhancement"
+            setTextColor(0xFFF3F0E8.toInt())
+            isChecked = cfg.bokehEnhancementEnabled
+        }
+        box.addView(enabled)
+        fun addSlider(title: String, initial: Int, onChange: (Int) -> Unit): SeekBar {
+            val label = TextView(this).apply {
+                text = "$title · $initial%"
+                setTextColor(0xFFF3F0E8.toInt()); textSize = 12f; setPadding(0, dp(10), 0, 0)
+            }
+            box.addView(label)
+            val seek = SeekBar(this).apply { max = 100; progress = initial }
+            seek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(seekBar: SeekBar?, value: Int, fromUser: Boolean) {
+                    label.text = "$title · $value%"
+                    if (fromUser) onChange(value)
+                }
+                override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+                override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+            })
+            box.addView(seek, LinearLayout.LayoutParams(MATCH, WRAP))
+            return seek
+        }
+        val strength = addSlider("BOKEH STRENGTH", cfg.bokehStrength) { cfg.bokehStrength = it; cfgDirty = true }
+        val glow = addSlider("GLOW", cfg.bokehGlow) { cfg.bokehGlow = it; cfgDirty = true }
+        val shapeNames = listOf("Circular", "Oval", "Polygon", "Swirl")
+        val shape = TextView(this).apply {
+            text = "BOKEH SHAPE · ${shapeNames[cfg.bokehShape.coerceIn(0, 3)]}"
+            setTextColor(0xFFF3F0E8.toInt()); textSize = 12f; setPadding(0, dp(12), 0, dp(6))
+        }
+        box.addView(shape)
+        box.addView(panelAction("CHOOSE SHAPE", "Select the highlight aperture style") {
+            choose("Bokeh shape", shapeNames) {
+                cfg.bokehShape = it
+                cfgDirty = true
+                shape.text = "BOKEH SHAPE · ${shapeNames[it]}"
+            }
+        })
+        enabled.setOnCheckedChangeListener { _, checked ->
+            cfg.bokehEnhancementEnabled = checked
+            cfgDirty = true
+            strength.isEnabled = checked
+            glow.isEnabled = checked
+        }
+        strength.isEnabled = enabled.isChecked
+        glow.isEnabled = enabled.isChecked
+        MaterialAlertDialogBuilder(this).setTitle("BOKEH ENHANCEMENT").setView(box).setNegativeButton("Done", null).show()
     }
 
     private fun showBackgroundColorShiftDialog() {
