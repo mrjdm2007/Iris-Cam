@@ -78,10 +78,10 @@ data class Config(
     var photoNrOff: Boolean = false,
     var backgroundColorShiftEnabled: Boolean = false,
     var portraitPhotoModeEnabled: Boolean = false,
-    var portraitBlurPercent: Int = 15,
-    var backgroundHueShift: Int = 24,          // -180..180 degrees
-    var backgroundSaturation: Int = 115,       // 0..200 percent
-    var backgroundTemperature: Int = 4,       // -100..100, cool to warm
+    var portraitBlurPercent: Int = 60,
+    var backgroundHueShift: Int = 0,           // neutral hue for grayscale background
+    var backgroundSaturation: Int = 0,         // default monochrome background
+    var backgroundTemperature: Int = 0,        // neutral temperature
     var portrait: Boolean = false,
     var scene: Int = 0,              // photo scene: 0 normal, 1 night, 2 astro, 3 multi-frame HDR fusion
     var hdrFrames: Int = 4,          // four-frame Ultra HDR bracket
@@ -303,10 +303,10 @@ data class Config(
                 photoNrOff = o.optBoolean("photoNrOff", d.photoNrOff),
                 backgroundColorShiftEnabled = o.optBoolean("backgroundColorShiftEnabled", d.backgroundColorShiftEnabled),
                 portraitPhotoModeEnabled = o.optBoolean("portraitPhotoModeEnabled", d.portraitPhotoModeEnabled),
-                portraitBlurPercent = o.optInt("portraitBlurPercent", d.portraitBlurPercent).coerceIn(0, 100),
-                backgroundHueShift = o.optInt("backgroundHueShift", d.backgroundHueShift).coerceIn(-180, 180),
-                backgroundSaturation = o.optInt("backgroundSaturation", d.backgroundSaturation).coerceIn(0, 200),
-                backgroundTemperature = o.optInt("backgroundTemperature", d.backgroundTemperature).coerceIn(-100, 100),
+                portraitBlurPercent = (o.optInt("portraitBlurPercent", d.portraitBlurPercent).let { if (it == 15) 60 else it }).coerceIn(0, 100),
+                backgroundHueShift = (o.optInt("backgroundHueShift", d.backgroundHueShift).let { if (it == 24) 0 else it }).coerceIn(-180, 180),
+                backgroundSaturation = (o.optInt("backgroundSaturation", d.backgroundSaturation).let { if (it == 115) 0 else it }).coerceIn(0, 200),
+                backgroundTemperature = (o.optInt("backgroundTemperature", d.backgroundTemperature).let { if (it == 4) 0 else it }).coerceIn(-100, 100),
                 portrait = o.optBoolean("portrait", d.portrait),
                 scene = o.optInt("scene", d.scene),
                 hdrFrames = 4,
