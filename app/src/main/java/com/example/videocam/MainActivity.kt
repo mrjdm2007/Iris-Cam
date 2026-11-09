@@ -659,7 +659,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
             val size = runCatching { cam.captureSize() }.getOrNull()
             val sizeText = size?.let { "%.1f MP · %d × %d".format(it.width * it.height / 1e6, it.width, it.height) } ?: "Unavailable"
             add("PHOTO SIZE", sizeText) { pickPhotoRes() }
-            val portraitDetail = if (cfg.portraitPhotoModeEnabled) "ON · Background blur ${cfg.portraitBlurPercent}%" else "OFF · Subtle subject separation (default blur 15%)"
+            val portraitDetail = if (cfg.portraitPhotoModeEnabled) "ON · Face-triggered blur ${cfg.portraitBlurPercent}%" else "OFF · Auto activates at 80% when a face is detected"
             add("PORTRAIT PHOTO MODE", portraitDetail) { showPortraitPhotoModeDialog() }
             add("CAPTURE FORMAT", when {
                 cam.effMode() == 2 -> "Ultra HDR · 4-frame bracket"
@@ -713,7 +713,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
             box.addView(panelAction("BACKGROUND COLOUR SHIFT", shiftDetail) {
                 showBackgroundColorShiftDialog()
             }, LinearLayout.LayoutParams(MATCH, WRAP).apply { setMargins(0, dp(8), 0, dp(8)) })
-            val bokehDetail = if (cfg.bokehEnhancementEnabled) "ON · Strength ${cfg.bokehStrength}% · Glow ${cfg.bokehGlow}%" else "OFF · Enhance existing background light highlights"
+            val bokehDetail = if (cfg.bokehEnhancementEnabled) "ON · Face-only · Strength ${cfg.bokehStrength}% · Glow ${cfg.bokehGlow}%" else "OFF · Auto activates with portrait mode when a face is detected"
             box.addView(panelAction("BOKEH ENHANCEMENT", bokehDetail) {
                 showBokehEnhancementDialog()
             }, LinearLayout.LayoutParams(MATCH, WRAP).apply { setMargins(0, 0, 0, dp(8)) })
@@ -744,11 +744,11 @@ class MainActivity : Activity(), CameraController.Callbacks {
         if (cfg.mode != 1 || !idle()) return
         val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(18), dp(8), dp(18), dp(8)) }
         val note = TextView(this).apply {
-            text = "Photo-only. Automatic scene-aware blur: one face 80%, face in a wide scene 40%, groups 35%, and no detected face 0%. Set the slider to 40% to keep Auto; any other value is a manual override."
+            text = "Photo-only. Portrait blur and Bokeh Enhancement automatically activate together when one or more faces are detected. Portrait blur defaults to 80%. Both effects stay off when no face is detected. The bokeh strength, glow and shape settings below are retained."
             setTextColor(0xFFBDB8C7.toInt()); textSize = 12f; setPadding(0, 0, 0, dp(10))
         }
         box.addView(note)
-        val enabled = CheckBox(this).apply { text = "Enable Portrait Photo Mode"; setTextColor(0xFFF3F0E8.toInt()); isChecked = cfg.portraitPhotoModeEnabled }
+        val enabled = CheckBox(this).apply { text = "Default Portrait Photo Mode"; setTextColor(0xFFF3F0E8.toInt()); isChecked = cfg.portraitPhotoModeEnabled }
         box.addView(enabled)
         val amountLabel = TextView(this).apply { text = if (cfg.portraitBlurPercent == 40) "BACKGROUND BLUR · AUTO" else "BACKGROUND BLUR · MANUAL ${cfg.portraitBlurPercent}%"; setTextColor(0xFFF3F0E8.toInt()); textSize = 12f; setPadding(0, dp(10), 0, 0) }
         box.addView(amountLabel)
@@ -773,12 +773,12 @@ class MainActivity : Activity(), CameraController.Callbacks {
             setPadding(dp(18), dp(8), dp(18), dp(8))
         }
         val note = TextView(this).apply {
-            text = "Photo-only. Enhances isolated bright highlights in the background using lightweight image processing and the existing on-device subject mask. It cannot create natural optical bokeh where no highlights exist."
+            text = "Photo-only. Bokeh Enhancement automatically activates with portrait blur when a face is detected. It uses the existing strength, glow and aperture settings, and remains off when no face is detected. It enhances existing background highlights rather than creating optical bokeh from nothing."
             setTextColor(0xFFBDB8C7.toInt()); textSize = 12f; setPadding(0, 0, 0, dp(10))
         }
         box.addView(note)
         val enabled = CheckBox(this).apply {
-            text = "Enable Bokeh Enhancement"
+            text = "Default Bokeh Enhancement"
             setTextColor(0xFFF3F0E8.toInt())
             isChecked = cfg.bokehEnhancementEnabled
         }
@@ -2226,8 +2226,8 @@ class MainActivity : Activity(), CameraController.Callbacks {
     private fun updateSmartIsoWarning() {
         val show = cfg.mode == 1 && cfg.photoExposureMode == 1 && cam.smartIsoNeedsHigh()
         smartIsoWarning.visibility = if (show) View.VISIBLE else View.GONE
-        val faceOnlyAuto = cfg.mode == 1 && cfg.portraitPhotoModeEnabled &&
-            cfg.portraitBlurPercent == 40 && cam.liveFaceCount == 1
+        val faceOnlyAuto = cfg.mode == 1 && cam.liveFaceCount > 0
+        facePortraitStatus.text = "Face detected, portrait mode at ${cfg.portraitBlurPercent}% active."
         facePortraitStatus.visibility = if (faceOnlyAuto) View.VISIBLE else View.GONE
     }
 
