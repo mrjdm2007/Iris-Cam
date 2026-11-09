@@ -18,9 +18,11 @@ object PhotoPortraitBlur {
         SubjectSegmentation.getClient(SubjectSegmenterOptions.Builder().enableForegroundConfidenceMask().build())
     }
 
-    fun apply(source: Bitmap, percent: Int): Bitmap? {
-        val amount = percent.coerceIn(0, 100)
-        if (amount == 0 || source.width < 2 || source.height < 2) return source.copy(Bitmap.Config.ARGB_8888, true)
+    fun apply(source: Bitmap, percent: Int, detectedFaceCount: Int = 0): Bitmap? {
+        val manual = percent.coerceIn(0, 100) != 40
+        if (source.width < 2 || source.height < 2) return source.copy(Bitmap.Config.ARGB_8888, true)
+        if (manual && percent.coerceIn(0, 100) == 0) return source.copy(Bitmap.Config.ARGB_8888, true)
+        if (!manual && detectedFaceCount <= 0) return source.copy(Bitmap.Config.ARGB_8888, true)
         val scale = min(1f, 1024f / max(source.width, source.height))
         val sw = max(1, (source.width * scale).roundToInt())
         val sh = max(1, (source.height * scale).roundToInt())
@@ -31,8 +33,18 @@ object PhotoPortraitBlur {
             val mask = FloatArray(sw * sh)
             if (buf.remaining() < mask.size) return null
             buf.get(mask)
+            val foregroundRatio = mask.count { it >= 0.5f }.toFloat() / mask.size.coerceAtLeast(1)
+            // Slider position 40% means Auto. A single face with a small foreground
+            // footprint is treated as a person in a wide landscape composition.
+            val amount = if (manual) percent.coerceIn(0, 100) else when {
+                detectedFaceCount >= 2 -> 35
+                detectedFaceCount == 1 && foregroundRatio < 0.20f -> 40
+                detectedFaceCount == 1 -> 80
+                else -> 0
+            }
+            if (amount == 0) return source.copy(Bitmap.Config.ARGB_8888, true)
 
-            // 15% maps to a low-radius scale-down/up blur; the slider scales this radius linearly.
+            // The slider scales the low-radius scale-down/up blur linearly.
             val downsample = (100 - (amount * 0.72f)).roundToInt().coerceIn(12, 100)
             val bw = max(1, source.width * downsample / 100)
             val bh = max(1, source.height * downsample / 100)
