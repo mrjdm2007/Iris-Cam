@@ -1456,7 +1456,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
         if (cfg.mode == 1) {
             recBtn.background = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
-                val saving = ::cam.isInitialized && (cam.busy || cam.jobs > 0 || longLeft >= 0)
+                val saving = ::cam.isInitialized && (cam.busy || cam.captureCooldownActive || longLeft >= 0)
                 setColor(if (saving) 0xFF9E9E9E.toInt() else Color.WHITE)
                 setStroke(dp(4), if (saving) 0xFFD0BCFF.toInt() else 0xFF424242.toInt())
             }
