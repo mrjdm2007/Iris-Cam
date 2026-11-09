@@ -1920,10 +1920,10 @@ class MainActivity : Activity(), CameraController.Callbacks {
             .setMessage("Saved separately for this lens. 0% leaves the image unchanged.")
             .setView(box)
             .setPositiveButton("Done", null)
-            .setNeutralButton("Reset to 40%") { _, _ ->
-                cfg.photoContrastByLens[lensId] = 40
+            .setNeutralButton("Reset to 10%") { _, _ ->
+                cfg.photoContrastByLens[lensId] = 10
                 cfgDirty = true
-                toast("$lensName photo contrast reset to 40%")
+                toast("$lensName photo contrast reset to 10%")
             }
             .show()
     }
