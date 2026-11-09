@@ -1882,7 +1882,7 @@ class CameraController(
             out = contrasted
         }
         // Face-triggered portrait processing is independent of the saved default switch.
-        // A detected face activates a fixed 80% blur; face-free frames receive no portrait effect.
+        // A detected face activates portrait blur at the configured default of 80%; face-free frames receive no effect.
         if (sh.detectedFaceCount > 0) {
             val blurred = runCatching { PhotoPortraitBlur.apply(out, sh.portraitBlurPercent, sh.detectedFaceCount) }.getOrNull()
             if (blurred != null) { out.recycle(); out = blurred }
