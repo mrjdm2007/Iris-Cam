@@ -659,7 +659,8 @@ class MainActivity : Activity(), CameraController.Callbacks {
             val size = runCatching { cam.captureSize() }.getOrNull()
             val sizeText = size?.let { "%.1f MP · %d × %d".format(it.width * it.height / 1e6, it.width, it.height) } ?: "Unavailable"
             add("PHOTO SIZE", sizeText) { pickPhotoRes() }
-            val portraitDetail = if (cfg.portraitPhotoModeEnabled) "ON · Face-triggered blur ${cfg.portraitBlurPercent}%" else "OFF · Auto activates at 80% when a face is detected"
+            val effectivePortraitBlur = if (cfg.portraitBlurPercent == 40) 80 else cfg.portraitBlurPercent
+            val portraitDetail = if (cfg.portraitPhotoModeEnabled) "ON · Face-triggered blur ${effectivePortraitBlur}%" else "OFF · Auto activates at 80% when a face is detected"
             add("PORTRAIT PHOTO MODE", portraitDetail) { showPortraitPhotoModeDialog() }
             add("CAPTURE FORMAT", when {
                 cam.effMode() == 2 -> "Ultra HDR · 4-frame bracket"
