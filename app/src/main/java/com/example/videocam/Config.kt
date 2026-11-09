@@ -77,9 +77,9 @@ data class Config(
     var flashMode: Int = 0,          // 0 off, 1 on, 2 auto
     var photoNrOff: Boolean = false,
     var backgroundColorShiftEnabled: Boolean = false,
-    var portraitPhotoModeEnabled: Boolean = true,
-    var portraitBlurPercent: Int = 40,
-    var bokehEnhancementEnabled: Boolean = true,
+    var portraitPhotoModeEnabled: Boolean = false,
+    var portraitBlurPercent: Int = 80,
+    var bokehEnhancementEnabled: Boolean = false,
     var bokehStrength: Int = 50,
     var bokehGlow: Int = 50,
     var bokehShape: Int = 0,
@@ -105,7 +105,7 @@ data class Config(
     var chromaticAberrationCorrection: Boolean = true, // request ISP lateral colour-fringe correction
     var lensKeys: Boolean = false,   // show the 0.5x / 1x / 2.7x shortcut buttons
     var haptics: Boolean = true,     // subtle shutter and manual slider feedback
-    var ver: Int = 10
+    var ver: Int = 11
 ) {
     fun copyFrom(o: Config) {
         cameraId = o.cameraId
@@ -315,9 +315,9 @@ data class Config(
                 flashMode = o.optInt("flashMode", d.flashMode),
                 photoNrOff = o.optBoolean("photoNrOff", d.photoNrOff),
                 backgroundColorShiftEnabled = o.optBoolean("backgroundColorShiftEnabled", d.backgroundColorShiftEnabled),
-                portraitPhotoModeEnabled = if (oldVersion < 7) true else o.optBoolean("portraitPhotoModeEnabled", d.portraitPhotoModeEnabled),
-                portraitBlurPercent = (o.optInt("portraitBlurPercent", d.portraitBlurPercent).let { stored -> if (oldVersion < 10 && stored == 60) 40 else if (oldVersion < 7 && stored == 15) 40 else stored }).coerceIn(0, 100),
-                bokehEnhancementEnabled = if (oldVersion < 7) true else o.optBoolean("bokehEnhancementEnabled", d.bokehEnhancementEnabled),
+                portraitPhotoModeEnabled = if (oldVersion < 11) false else o.optBoolean("portraitPhotoModeEnabled", d.portraitPhotoModeEnabled),
+                portraitBlurPercent = if (oldVersion < 11) 80 else o.optInt("portraitBlurPercent", d.portraitBlurPercent).coerceIn(0, 100),
+                bokehEnhancementEnabled = if (oldVersion < 11) false else o.optBoolean("bokehEnhancementEnabled", d.bokehEnhancementEnabled),
                 bokehStrength = (o.optInt("bokehStrength", d.bokehStrength).let { stored -> if (oldVersion < 9 && stored == 40) 50 else stored }).coerceIn(0, 100),
                 bokehGlow = (o.optInt("bokehGlow", d.bokehGlow).let { stored -> if (oldVersion < 9 && stored == 40) 50 else stored }).coerceIn(0, 100),
                 bokehShape = o.optInt("bokehShape", d.bokehShape).coerceIn(0, 3),
