@@ -121,6 +121,8 @@ class MainActivity : Activity(), CameraController.Callbacks {
     private lateinit var timecode: TextView
     private lateinit var statusText: TextView
     private lateinit var warn: TextView
+    private lateinit var smartIsoWarning: TextView
+    private lateinit var facePortraitStatus: TextView
     private lateinit var lockText: TextView
     private lateinit var countdownText: TextView
     private lateinit var meter: ProgressBar
@@ -221,7 +223,6 @@ class MainActivity : Activity(), CameraController.Callbacks {
     private var expSliderManual: Boolean? = null
     private var cfgDirty = false
     // Temporary permission to exceed ISO 500; expires automatically.
-    private var highIsoAllowedUntil = 0L
     private var lastSliderHapticMs = 0L
     private var countdown = 0
     private var askedPerms = false
@@ -743,20 +744,20 @@ class MainActivity : Activity(), CameraController.Callbacks {
         if (cfg.mode != 1 || !idle()) return
         val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(18), dp(8), dp(18), dp(8)) }
         val note = TextView(this).apply {
-            text = "Photo-only. ML subject segmentation keeps the foreground sharp while the background is softened. Default blur is 60%."
+            text = "Photo-only. Automatic scene-aware blur: one face 80%, face in a wide scene 40%, groups 35%, and no detected face 0%. Set the slider to 40% to keep Auto; any other value is a manual override."
             setTextColor(0xFFBDB8C7.toInt()); textSize = 12f; setPadding(0, 0, 0, dp(10))
         }
         box.addView(note)
         val enabled = CheckBox(this).apply { text = "Enable Portrait Photo Mode"; setTextColor(0xFFF3F0E8.toInt()); isChecked = cfg.portraitPhotoModeEnabled }
         box.addView(enabled)
-        val amountLabel = TextView(this).apply { text = "BACKGROUND BLUR · ${cfg.portraitBlurPercent}%"; setTextColor(0xFFF3F0E8.toInt()); textSize = 12f; setPadding(0, dp(10), 0, 0) }
+        val amountLabel = TextView(this).apply { text = if (cfg.portraitBlurPercent == 40) "BACKGROUND BLUR · AUTO" else "BACKGROUND BLUR · MANUAL ${cfg.portraitBlurPercent}%"; setTextColor(0xFFF3F0E8.toInt()); textSize = 12f; setPadding(0, dp(10), 0, 0) }
         box.addView(amountLabel)
         val amount = SeekBar(this).apply { max = 100; progress = cfg.portraitBlurPercent.coerceIn(0,100) }
         box.addView(amount, LinearLayout.LayoutParams(MATCH, WRAP))
         enabled.setOnCheckedChangeListener { _, checked -> cfg.portraitPhotoModeEnabled = checked; cfgDirty = true; amount.isEnabled = checked }
         amount.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar?, value: Int, fromUser: Boolean) {
-                cfg.portraitBlurPercent = value; cfgDirty = true; amountLabel.text = "BACKGROUND BLUR · $value%"
+                cfg.portraitBlurPercent = value; cfgDirty = true; amountLabel.text = if (value == 40) "BACKGROUND BLUR · AUTO" else "BACKGROUND BLUR · MANUAL $value%"
             }
             override fun onStartTrackingTouch(seekBar: SeekBar?) {}
             override fun onStopTrackingTouch(seekBar: SeekBar?) {}
@@ -1117,6 +1118,23 @@ class MainActivity : Activity(), CameraController.Callbacks {
             visibility = View.GONE
         }
         root.addView(warn, lp(WRAP, WRAP, Gravity.TOP or Gravity.START, dp(14), dp(50), 0, 0))
+        smartIsoWarning = TextView(this).apply {
+            text = "Surroundings too dark, increasing ISO above 500."
+            setTextColor(RED)
+            textSize = 11f
+            setShadowLayer(3f, 0f, 0f, Color.BLACK)
+            visibility = View.GONE
+        }
+        root.addView(smartIsoWarning, lp(WRAP, WRAP, Gravity.TOP or Gravity.START, dp(14), dp(94), 0, 0))
+        facePortraitStatus = TextView(this).apply {
+            text = "Face detected, portrait mode at 80% active."
+            setTextColor(Color.rgb(76, 220, 120))
+            textSize = 12f
+            setShadowLayer(3f, 0f, 0f, Color.BLACK)
+            gravity = Gravity.CENTER
+            visibility = View.GONE
+        }
+        root.addView(facePortraitStatus, lp(WRAP, WRAP, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL, dp(16), 0, dp(16), dp(28)))
         lockText = TextView(this).apply {
             setTextColor(AMBER)
             textSize = 13f
@@ -1198,7 +1216,6 @@ class MainActivity : Activity(), CameraController.Callbacks {
                         toast("Smart mode needs manual sensor exposure support on this lens")
                     } else {
                         cfg.photoExposureMode = selected
-                        highIsoAllowedUntil = 0L
                         cfgDirty = true
                         cam.clearAeLock()
                         applyLive()
@@ -2201,6 +2218,15 @@ class MainActivity : Activity(), CameraController.Callbacks {
 
         syncExpSlider()
         refreshReadouts()
+        updateSmartIsoWarning()
+    }
+
+    private fun updateSmartIsoWarning() {
+        val show = cfg.mode == 1 && cfg.photoExposureMode == 1 && cam.smartIsoNeedsHigh()
+        smartIsoWarning.visibility = if (show) View.VISIBLE else View.GONE
+        val faceOnlyAuto = cfg.mode == 1 && cfg.portraitPhotoModeEnabled &&
+            cfg.portraitBlurPercent == 40 && cam.liveFaceCount == 1
+        facePortraitStatus.visibility = if (faceOnlyAuto) View.VISIBLE else View.GONE
     }
 
     private fun refreshReadouts() {
@@ -2827,7 +2853,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
             return
         }
         if (!cam.smartIsoSupported) {
-            toast("Smart mode can't enforce ISO 500 on this lens. Switch to AUTO or choose a supported lens.")
+            toast("Smart mode isn't supported on this lens. Switch to AUTO or choose a supported lens.")
             refreshUi()
             return
         }
@@ -2836,54 +2862,9 @@ class MainActivity : Activity(), CameraController.Callbacks {
             cam.takePhoto(false)
             return
         }
-        if (highIsoAllowedUntil > SystemClock.elapsedRealtime()) {
-            cam.takePhoto(true)
-            return
-        }
-        highIsoAllowedUntil = 0L
-        if (!cam.smartIsoNeedsHigh()) {
-            cam.takePhoto(false)
-            return
-        }
-        val durations = listOf("1 min", "3 min", "5 min", "10 min", "30 min", "Disable")
-        val durationMs = listOf(60_000L, 180_000L, 300_000L, 600_000L, 1_800_000L, 0L)
-        val content = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(24), dp(8), dp(24), dp(4))
-        }
-        val explanation = TextView(this).apply {
-            text = "The scene needs more exposure than 1/20 s at ISO 500. Allow higher ISO?"
-            setTextColor(Color.WHITE)
-            textSize = 14f
-        }
-        val picker = Spinner(this).apply {
-            adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, durations)
-                .also { it.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item) }
-            setSelection(0)
-        }
-        content.addView(explanation)
-        content.addView(picker)
-        MaterialAlertDialogBuilder(this)
-            .setTitle("Smart exposure limit")
-            .setView(content)
-            .setNegativeButton("Keep ISO ≤500") { _, _ -> cam.takePhoto(false) }
-            .setPositiveButton("Continue") { _, _ ->
-                when (val duration = durationMs[picker.selectedItemPosition.coerceIn(durations.indices)]) {
-                    0L -> {
-                        cfg.photoExposureMode = 0
-                        highIsoAllowedUntil = 0L
-                        cfgDirty = true
-                        toast("Photo exposure switched to AUTO")
-                        cam.takePhoto(false)
-                        refreshUi()
-                    }
-                    else -> {
-                        highIsoAllowedUntil = SystemClock.elapsedRealtime() + duration
-                        cam.takePhoto(true)
-                    }
-                }
-            }
-            .show()
+        updateSmartIsoWarning()
+        // The capture controller raises ISO automatically after reaching 1/33 s.
+        cam.takePhoto(false)
     }
 
     private fun fire() {
@@ -3238,6 +3219,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
                 slider.setFraction((cam.liveFocus / cam.minFocusDiopters).coerceIn(0f, 1f))
             }
             refreshReadouts()
+            updateSmartIsoWarning()
             if (falseOn && !cam.recording) sampleFalseColor()
             if (cfg.peak > 0) samplePeaking()
             if (n % 8 == 1) updateWarnings()
