@@ -1167,7 +1167,7 @@ class CameraController(
             }
             liveFocus = res.get(CaptureResult.LENS_FOCUS_DISTANCE) ?: -1f
             liveFaceCount = res.get(CaptureResult.STATISTICS_FACES)?.size ?: 0
-            if (!((cfg.faceAf || cfg.portraitPhotoModeEnabled) && faceAfSupported)) return
+            if (!(cfg.faceAf && faceAfSupported)) return
             val now = SystemClock.elapsedRealtime()
             if (now - last < 400) return
             last = now
