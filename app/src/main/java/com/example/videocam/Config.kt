@@ -79,6 +79,10 @@ data class Config(
     var backgroundColorShiftEnabled: Boolean = false,
     var portraitPhotoModeEnabled: Boolean = false,
     var portraitBlurPercent: Int = 60,
+    var bokehEnhancementEnabled: Boolean = false,
+    var bokehStrength: Int = 55,
+    var bokehGlow: Int = 35,
+    var bokehShape: Int = 0,
     var backgroundHueShift: Int = 0,           // neutral hue for grayscale background
     var backgroundSaturation: Int = 0,         // default monochrome background
     var backgroundTemperature: Int = 0,        // neutral temperature
@@ -141,6 +145,10 @@ data class Config(
         backgroundColorShiftEnabled = o.backgroundColorShiftEnabled
         portraitPhotoModeEnabled = o.portraitPhotoModeEnabled
         portraitBlurPercent = o.portraitBlurPercent
+        bokehEnhancementEnabled = o.bokehEnhancementEnabled
+        bokehStrength = o.bokehStrength
+        bokehGlow = o.bokehGlow
+        bokehShape = o.bokehShape
         backgroundHueShift = o.backgroundHueShift
         backgroundSaturation = o.backgroundSaturation
         backgroundTemperature = o.backgroundTemperature
@@ -204,6 +212,10 @@ data class Config(
         .put("backgroundColorShiftEnabled", backgroundColorShiftEnabled)
         .put("portraitPhotoModeEnabled", portraitPhotoModeEnabled)
         .put("portraitBlurPercent", portraitBlurPercent.coerceIn(0, 100))
+        .put("bokehEnhancementEnabled", bokehEnhancementEnabled)
+        .put("bokehStrength", bokehStrength.coerceIn(0, 100))
+        .put("bokehGlow", bokehGlow.coerceIn(0, 100))
+        .put("bokehShape", bokehShape.coerceIn(0, 3))
         .put("backgroundHueShift", backgroundHueShift.coerceIn(-180, 180))
         .put("backgroundSaturation", backgroundSaturation.coerceIn(0, 200))
         .put("backgroundTemperature", backgroundTemperature.coerceIn(-100, 100))
@@ -304,6 +316,10 @@ data class Config(
                 backgroundColorShiftEnabled = o.optBoolean("backgroundColorShiftEnabled", d.backgroundColorShiftEnabled),
                 portraitPhotoModeEnabled = o.optBoolean("portraitPhotoModeEnabled", d.portraitPhotoModeEnabled),
                 portraitBlurPercent = (o.optInt("portraitBlurPercent", d.portraitBlurPercent).let { if (it == 15) 60 else it }).coerceIn(0, 100),
+                bokehEnhancementEnabled = o.optBoolean("bokehEnhancementEnabled", d.bokehEnhancementEnabled),
+                bokehStrength = o.optInt("bokehStrength", d.bokehStrength).coerceIn(0, 100),
+                bokehGlow = o.optInt("bokehGlow", d.bokehGlow).coerceIn(0, 100),
+                bokehShape = o.optInt("bokehShape", d.bokehShape).coerceIn(0, 3),
                 backgroundHueShift = (o.optInt("backgroundHueShift", d.backgroundHueShift).let { if (it == 24) 0 else it }).coerceIn(-180, 180),
                 backgroundSaturation = (o.optInt("backgroundSaturation", d.backgroundSaturation).let { if (it == 115) 0 else it }).coerceIn(0, 200),
                 backgroundTemperature = (o.optInt("backgroundTemperature", d.backgroundTemperature).let { if (it == 4) 0 else it }).coerceIn(-100, 100),
