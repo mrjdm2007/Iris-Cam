@@ -1723,9 +1723,11 @@ class MainActivity : Activity(), CameraController.Callbacks {
         }
 
         (warn.layoutParams as FrameLayout.LayoutParams).topMargin = dp(if (p) 96 else 50)
-        (lockText.layoutParams as FrameLayout.LayoutParams).topMargin = dp(if (p) 118 else 72)
+        (smartIsoWarning.layoutParams as FrameLayout.LayoutParams).topMargin = dp(if (p) 118 else 72)
+        (lockText.layoutParams as FrameLayout.LayoutParams).topMargin = dp(if (p) 140 else 94)
         (falseLegend.layoutParams as FrameLayout.LayoutParams).topMargin = dp(if (p) 96 else 48)
         warn.requestLayout()
+        smartIsoWarning.requestLayout()
         lockText.requestLayout()
         falseLegend.requestLayout()
         (timecode.layoutParams as LinearLayout.LayoutParams).width = dp(if (p) 84 else 112)
