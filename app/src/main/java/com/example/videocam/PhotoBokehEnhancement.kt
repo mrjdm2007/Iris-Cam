@@ -71,10 +71,62 @@ object PhotoBokehEnhancement {
                 if (candidates.size >= 70) break
             }
             if (candidates.isEmpty()) return null
-            val overlay = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-            val canvas = Canvas(overlay)
             val baseRadius = 2.5f + strength.coerceIn(0, 100) * 0.075f
             val glowAmount = glow.coerceIn(0, 100) / 100f
+            val pointData = FloatArray(candidates.size * 7)
+            val pointAlpha = (34 + (strength * 0.42f).roundToInt()).coerceIn(0, 255) / 255f
+            candidates.forEachIndexed { index, point ->
+                val radius = baseRadius * (0.72f + (point.brightness - 205).coerceIn(0, 50) / 125f)
+                val color = point.color
+                val offset = index * 7
+                pointData[offset] = point.x.toFloat()
+                pointData[offset + 1] = point.y.toFloat()
+                pointData[offset + 2] = radius
+                pointData[offset + 3] = Color.red(color) / 255f
+                pointData[offset + 4] = Color.green(color) / 255f
+                pointData[offset + 5] = Color.blue(color) / 255f
+                pointData[offset + 6] = pointAlpha
+            }
+            val gpuOutput = runCatching {
+                PhotoGpuProcessor.renderBokeh(small, pointData, shape, glowAmount)
+            }.getOrNull()
+            val output = gpuOutput ?: run {
+                val overlay = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+                val canvas = Canvas(overlay)
+                val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+                val glowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+                val bounds = RectF()
+                candidates.forEach { point ->
+                    val radius = baseRadius * (0.72f + (point.brightness - 205).coerceIn(0, 50) / 125f)
+                    val x = point.x.toFloat(); val y = point.y.toFloat()
+                    val color = Color.rgb(Color.red(point.color), Color.green(point.color), Color.blue(point.color))
+                    if (glowAmount > 0f) {
+                        val gr = radius * (1.15f + glowAmount * 0.75f)
+                        glowPaint.shader = RadialGradient(x, y, gr,
+                            intArrayOf(Color.argb((24 * glowAmount).roundToInt(), Color.red(color), Color.green(color), Color.blue(color)),
+                                Color.argb(0, Color.red(color), Color.green(color), Color.blue(color))),
+                            null, Shader.TileMode.CLAMP)
+                        canvas.drawCircle(x, y, gr, glowPaint)
+                        glowPaint.shader = null
+                    }
+                    val path = shapePath(shape, x, y, radius)
+                    fill.color = Color.argb(34 + (strength * 0.42f).roundToInt(), Color.red(color), Color.green(color), Color.blue(color))
+                    fill.maskFilter = BlurMaskFilter(max(0.6f, radius * 0.14f), BlurMaskFilter.Blur.NORMAL)
+                    if (shape.coerceIn(0, 3) == 1) {
+                        bounds.set(x - radius * 1.35f, y - radius * 0.78f, x + radius * 1.35f, y + radius * 0.78f)
+                        canvas.drawOval(bounds, fill)
+                    } else {
+                        canvas.drawPath(path, fill)
+                    }
+                    fill.maskFilter = null
+                }
+                val composite = PhotoGpuProcessor.compositeOverlay(small, overlay)
+                    ?: small.copy(Bitmap.Config.ARGB_8888, true).also {
+                        Canvas(it).drawBitmap(overlay, 0f, 0f, Paint(Paint.FILTER_BITMAP_FLAG))
+                    }
+                overlay.recycle()
+                composite
+            }
             val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
             val glowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
             val bounds = RectF()
@@ -103,13 +155,7 @@ object PhotoBokehEnhancement {
                 }
                 fill.maskFilter = null
             }
-            val gpuComposite = runCatching {
-                PhotoGpuProcessor.compositeOverlay(small, overlay)
-            }.getOrNull()
-            val output = gpuComposite ?: small.copy(Bitmap.Config.ARGB_8888, true).also {
-                Canvas(it).drawBitmap(overlay, 0f, 0f, Paint(Paint.FILTER_BITMAP_FLAG))
-            }
-            overlay.recycle()
+
             return if (small === source) output else Bitmap.createScaledBitmap(output, source.width, source.height, true).also { output.recycle() }
         } finally {
             if (small !== source) small.recycle()

@@ -23,10 +23,15 @@ internal object PhotoGpuProcessor {
     private const val VERTEX_SHADER = """
         attribute vec2 aPosition;
         attribute vec2 aTexCoord;
+        attribute vec4 aPointColor;
+        attribute float aPointSize;
         varying vec2 vTexCoord;
+        varying vec4 vPointColor;
         void main() {
             gl_Position = vec4(aPosition, 0.0, 1.0);
             vTexCoord = aTexCoord;
+            vPointColor = aPointColor;
+            gl_PointSize = aPointSize;
         }
     """
 
@@ -49,6 +54,10 @@ internal object PhotoGpuProcessor {
         uniform float uRadius;
         uniform float uDenoise;
         uniform float uSharpen;
+        uniform int uPointPass;
+        uniform int uBokehShape;
+        uniform float uBokehGlow;
+
 
         vec3 rgbToHsv(vec3 c) {
             vec4 K = vec4(0.0, -1.0 / 3.0, 2.0 / 3.0, -1.0);
@@ -64,10 +73,32 @@ internal object PhotoGpuProcessor {
         }
         void main() {
             vec4 original = texture2D(uSource, vTexCoord);
-            float confidence = texture2D(uMask, vTexCoord).r;
-            float t = clamp((confidence - 0.16) / 0.68, 0.0, 1.0);
-            float foreground = t * t * (3.0 - 2.0 * t);
-            if (uMode == 0) {
+            if (uPointPass == 1) {
+                vec2 p = (gl_PointCoord - vec2(0.5)) * 2.0;
+                float radial;
+                if (uBokehShape == 1) {
+                    radial = length(vec2(p.x * 0.78, p.y * 1.22));
+                } else if (uBokehShape == 2) {
+                    vec2 ap = abs(p);
+                    radial = max(ap.x, ap.y) + 0.4142 * min(ap.x, ap.y);
+                } else if (uBokehShape == 3) {
+                    radial = length(p) / (0.82 + 0.16 * cos(atan(p.y, p.x) * 8.0));
+                } else {
+                    radial = length(p);
+                }
+                float inner = 1.0 / (1.0 + uBokehGlow * 0.75);
+                float core = 1.0 - smoothstep(inner * 0.72, inner, radial);
+                float halo = exp(-radial * radial * 5.0) * uBokehGlow * 0.22;
+                float alpha = max(core * vPointColor.a, halo * vPointColor.a * 1.8);
+                if (alpha < 0.003) discard;
+                gl_FragColor = vec4(vPointColor.rgb, alpha);
+            } else if (uMode == 6) {
+                gl_FragColor = original;
+            } else {
+                float confidence = texture2D(uMask, vTexCoord).r;
+                float t = clamp((confidence - 0.16) / 0.68, 0.0, 1.0);
+                float foreground = t * t * (3.0 - 2.0 * t);
+                if (uMode == 0) {
                 vec3 softened = texture2D(uBlur, vTexCoord).rgb;
                 gl_FragColor = vec4(mix(softened, original.rgb, foreground), original.a);
             } else if (uMode == 1) {
@@ -118,6 +149,7 @@ internal object PhotoGpuProcessor {
                 vec4 c = original;
                 vec4 graded = vec4(dot(uM0, c), dot(uM1, c), dot(uM2, c), dot(uM3, c)) + uOffset;
                 gl_FragColor = clamp(graded, 0.0, 1.0);
+                }
             }
         }
     """
@@ -170,6 +202,14 @@ internal object PhotoGpuProcessor {
             sharpenStrength = sharpen.coerceIn(0f, 0.6f))
     }
 
+    /** Draw bokeh point sprites and their glow directly into the photo framebuffer. */
+    fun renderBokeh(source: Bitmap, points: FloatArray, shape: Int, glow: Float): Bitmap? {
+        if (source.isRecycled || points.isEmpty() || points.size % 7 != 0) return null
+        return render(source, null, FloatArray(1), 1, 1, 6, 0f, 1f, 0f,
+            pointData = points, bokehShape = shape.coerceIn(0, 3),
+            bokehGlow = glow.coerceIn(0f, 1f))
+    }
+
     private fun render(
         source: Bitmap,
         blurred: Bitmap?,
@@ -183,7 +223,10 @@ internal object PhotoGpuProcessor {
         matrixValues: FloatArray? = null,
         radiusPixels: Float = 1f,
         denoiseStrength: Float = 0f,
-        sharpenStrength: Float = 0f
+        sharpenStrength: Float = 0f,
+        pointData: FloatArray? = null,
+        bokehShape: Int = 0,
+        bokehGlow: Float = 0f
     ): Bitmap? {
         if (source.isRecycled ||
             (mode == 0 && (blurred == null || blurred.isRecycled ||
@@ -296,6 +339,9 @@ internal object PhotoGpuProcessor {
             GLES20.glUniform1f(GLES20.glGetUniformLocation(program, "uRadius"), radiusPixels)
             GLES20.glUniform1f(GLES20.glGetUniformLocation(program, "uDenoise"), denoiseStrength)
             GLES20.glUniform1f(GLES20.glGetUniformLocation(program, "uSharpen"), sharpenStrength)
+            GLES20.glUniform1i(GLES20.glGetUniformLocation(program, "uPointPass"), 0)
+            GLES20.glUniform1i(GLES20.glGetUniformLocation(program, "uBokehShape"), bokehShape)
+            GLES20.glUniform1f(GLES20.glGetUniformLocation(program, "uBokehGlow"), bokehGlow)
             if (mode == 3 && matrixValues != null) {
                 GLES20.glUniform4fv(GLES20.glGetUniformLocation(program, "uM0"), 1, matrixValues, 0)
                 GLES20.glUniform4fv(GLES20.glGetUniformLocation(program, "uM1"), 1, matrixValues, 5)
@@ -319,6 +365,49 @@ internal object PhotoGpuProcessor {
             GLES20.glEnableVertexAttribArray(texCoord)
             GLES20.glVertexAttribPointer(texCoord, 2, GLES20.GL_FLOAT, false, 16, vertexBuffer)
             GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
+
+            if (mode == 6 && pointData != null && pointData.isNotEmpty()) {
+                val pointCount = pointData.size / 7
+                val pointBuffer = ByteBuffer.allocateDirect(pointData.size * 4)
+                    .order(ByteOrder.nativeOrder()).asFloatBuffer()
+                val maxPointSize = FloatArray(2)
+                GLES20.glGetFloatv(GLES20.GL_ALIASED_POINT_SIZE_RANGE, maxPointSize, 0)
+                val maxSize = maxPointSize[1].coerceAtLeast(2f)
+                for (i in 0 until pointCount) {
+                    val base = i * 7
+                    val px = pointData[base].coerceIn(0f, width.toFloat())
+                    val py = pointData[base + 1].coerceIn(0f, height.toFloat())
+                    val radius = pointData[base + 2].coerceIn(1f, width.coerceAtMost(height).toFloat())
+                    val diameter = (radius * 2f * (1f + bokehGlow * 0.75f)).coerceIn(2f, maxSize)
+                    pointBuffer.put(2f * px / width - 1f)
+                    pointBuffer.put(1f - 2f * py / height)
+                    pointBuffer.put(pointData[base + 3].coerceIn(0f, 1f))
+                    pointBuffer.put(pointData[base + 4].coerceIn(0f, 1f))
+                    pointBuffer.put(pointData[base + 5].coerceIn(0f, 1f))
+                    pointBuffer.put(pointData[base + 6].coerceIn(0f, 1f))
+                    pointBuffer.put(diameter)
+                }
+                pointBuffer.position(0)
+                GLES20.glEnable(GLES20.GL_BLEND)
+                GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA)
+                GLES20.glUniform1i(GLES20.glGetUniformLocation(program, "uPointPass"), 1)
+                GLES20.glDisableVertexAttribArray(texCoord)
+                GLES20.glEnableVertexAttribArray(position)
+                val pointColor = GLES20.glGetAttribLocation(program, "aPointColor")
+                val pointSize = GLES20.glGetAttribLocation(program, "aPointSize")
+                GLES20.glEnableVertexAttribArray(pointColor)
+                GLES20.glEnableVertexAttribArray(pointSize)
+                GLES20.glVertexAttribPointer(position, 2, GLES20.GL_FLOAT, false, 28, pointBuffer)
+                pointBuffer.position(2)
+                GLES20.glVertexAttribPointer(pointColor, 4, GLES20.GL_FLOAT, false, 28, pointBuffer)
+                pointBuffer.position(6)
+                GLES20.glVertexAttribPointer(pointSize, 1, GLES20.GL_FLOAT, false, 28, pointBuffer)
+                GLES20.glDrawArrays(GLES20.GL_POINTS, 0, pointCount)
+                GLES20.glDisable(GLES20.GL_BLEND)
+                GLES20.glDisableVertexAttribArray(pointColor)
+                GLES20.glDisableVertexAttribArray(pointSize)
+                GLES20.glUniform1i(GLES20.glGetUniformLocation(program, "uPointPass"), 0)
+            }
 
             val bytes = ByteBuffer.allocateDirect(width * height * 4).order(ByteOrder.nativeOrder())
             GLES20.glReadPixels(0, 0, width, height, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, bytes)
