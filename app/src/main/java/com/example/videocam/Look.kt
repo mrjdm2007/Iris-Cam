@@ -276,10 +276,13 @@ object Look {
         var base = src
         val matrix = intensityMatrix(id, intensity)
         if (id != 16) {
-            val graded = Bitmap.createBitmap(src.width, src.height, Bitmap.Config.ARGB_8888)
-            Canvas(graded).drawBitmap(src, 0f, 0f, Paint(Paint.FILTER_BITMAP_FLAG).apply {
-                colorFilter = ColorMatrixColorFilter(matrix)
-            })
+            val graded = PhotoGpuProcessor.applyColorMatrix(src, matrix.array) ?: run {
+                Bitmap.createBitmap(src.width, src.height, Bitmap.Config.ARGB_8888).also { bitmap ->
+                    Canvas(bitmap).drawBitmap(src, 0f, 0f, Paint(Paint.FILTER_BITMAP_FLAG).apply {
+                        colorFilter = ColorMatrixColorFilter(matrix)
+                    })
+                }
+            }
             base = graded
         }
         val result = when (id) {

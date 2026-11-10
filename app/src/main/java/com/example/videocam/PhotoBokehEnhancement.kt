@@ -71,8 +71,8 @@ object PhotoBokehEnhancement {
                 if (candidates.size >= 70) break
             }
             if (candidates.isEmpty()) return null
-            val output = small.copy(Bitmap.Config.ARGB_8888, true)
-            val canvas = Canvas(output)
+            val overlay = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(overlay)
             val baseRadius = 2.5f + strength.coerceIn(0, 100) * 0.075f
             val glowAmount = glow.coerceIn(0, 100) / 100f
             val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
@@ -103,6 +103,13 @@ object PhotoBokehEnhancement {
                 }
                 fill.maskFilter = null
             }
+            val gpuComposite = runCatching {
+                PhotoGpuProcessor.compositeOverlay(small, overlay)
+            }.getOrNull()
+            val output = gpuComposite ?: small.copy(Bitmap.Config.ARGB_8888, true).also {
+                Canvas(it).drawBitmap(overlay, 0f, 0f, Paint(Paint.FILTER_BITMAP_FLAG))
+            }
+            overlay.recycle()
             return if (small === source) output else Bitmap.createScaledBitmap(output, source.width, source.height, true).also { output.recycle() }
         } finally {
             if (small !== source) small.recycle()

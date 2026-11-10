@@ -1889,10 +1889,13 @@ class CameraController(
                 0f, 0f, factor, 0f, offset,
                 0f, 0f, 0f, 1f, 0f
             ))
-            val contrasted = Bitmap.createBitmap(out.width, out.height, Bitmap.Config.ARGB_8888)
-            Canvas(contrasted).drawBitmap(out, 0f, 0f, Paint(Paint.FILTER_BITMAP_FLAG).apply {
-                colorFilter = ColorMatrixColorFilter(matrix)
-            })
+            val contrasted = PhotoGpuProcessor.applyColorMatrix(out, matrix.array) ?: run {
+                Bitmap.createBitmap(out.width, out.height, Bitmap.Config.ARGB_8888).also { bitmap ->
+                    Canvas(bitmap).drawBitmap(out, 0f, 0f, Paint(Paint.FILTER_BITMAP_FLAG).apply {
+                        colorFilter = ColorMatrixColorFilter(matrix)
+                    })
+                }
+            }
             out.recycle()
             out = contrasted
         }
