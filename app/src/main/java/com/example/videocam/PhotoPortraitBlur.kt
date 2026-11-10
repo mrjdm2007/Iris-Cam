@@ -51,6 +51,17 @@ object PhotoPortraitBlur {
             val tiny = Bitmap.createScaledBitmap(source, bw, bh, true)
             val blur = Bitmap.createScaledBitmap(tiny, source.width, source.height, true)
             tiny.recycle()
+            // The subject mask is still produced by ML Kit; the full-resolution
+            // blend is delegated to GLES. Keep the established CPU blend as fallback.
+            if (foregroundRatio >= 0.01f) {
+                val gpu = runCatching {
+                    PhotoGpuProcessor.blendPortrait(source, blur, mask, sw, sh)
+                }.getOrNull()
+                if (gpu != null) {
+                    blur.recycle()
+                    return gpu
+                }
+            }
             val w = source.width; val h = source.height
             val output = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
             val srcRow = IntArray(w); val blurRow = IntArray(w); val outRow = IntArray(w)

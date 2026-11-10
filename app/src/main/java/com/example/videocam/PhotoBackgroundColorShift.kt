@@ -53,6 +53,18 @@ object PhotoBackgroundColorShift {
             if (maskView.remaining() < mask.size) return null
             maskView.get(mask)
 
+            // Run the full-resolution background grade in a fragment shader. The
+            // original CPU pixel path below remains the fallback for unsupported GPUs.
+            if (mask.count { it >= 0.5f }.toFloat() / mask.size.coerceAtLeast(1) >= 0.01f) {
+                val gpu = runCatching {
+                    PhotoGpuProcessor.shiftBackground(
+                        source, mask, segW, segH,
+                        hueShiftDegrees, saturationPercent, temperature
+                    )
+                }.getOrNull()
+                if (gpu != null) return gpu
+            }
+
             val width = source.width
             val height = source.height
             val output = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
