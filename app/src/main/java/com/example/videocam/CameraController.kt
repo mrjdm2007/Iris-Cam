@@ -1880,6 +1880,16 @@ class CameraController(
                 out = filtered
             }
         }
+        // Subtle GPU denoise and detail recovery for photos already using an effect pipeline.
+        if ((sh.filterId > 0 && sh.filterIntensity > 0) || sh.contrast > 0 ||
+            sh.flat || sh.bw || sh.photoLook != 0 || sh.backgroundColorShift ||
+            sh.portraitPhotoMode || sh.bokehEnhancement || autoPortraitSubject(sh)) {
+            val detailed = PhotoGpuProcessor.enhanceDetails(out, 0.08f, 0.12f)
+            if (detailed != null) {
+                out.recycle()
+                out = detailed
+            }
+        }
         if (sh.contrast > 0) {
             val factor = 1f + sh.contrast.coerceIn(0, 100) / 100f
             val offset = 127.5f * (1f - factor)

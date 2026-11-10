@@ -44,13 +44,16 @@ object PhotoPortraitBlur {
             }
             if (amount == 0) return source.copy(Bitmap.Config.ARGB_8888, true)
 
-            // The slider scales the low-radius scale-down/up blur linearly.
+            // Prefer a full-resolution GPU blur; retain the original CPU resize fallback.
             val downsample = (100 - (amount * 0.72f)).roundToInt().coerceIn(12, 100)
-            val bw = max(1, source.width * downsample / 100)
-            val bh = max(1, source.height * downsample / 100)
-            val tiny = Bitmap.createScaledBitmap(source, bw, bh, true)
-            val blur = Bitmap.createScaledBitmap(tiny, source.width, source.height, true)
-            tiny.recycle()
+            val radius = (1f + (100 - downsample) / 10f).coerceIn(1f, 9f)
+            val gpuBlur = runCatching { PhotoGpuProcessor.gaussianBlur(source, radius) }.getOrNull()
+            val blur = gpuBlur ?: run {
+                val bw = max(1, source.width * downsample / 100)
+                val bh = max(1, source.height * downsample / 100)
+                val tiny = Bitmap.createScaledBitmap(source, bw, bh, true)
+                Bitmap.createScaledBitmap(tiny, source.width, source.height, true).also { tiny.recycle() }
+            }
             // The subject mask is still produced by ML Kit; the full-resolution
             // blend is delegated to GLES. Keep the established CPU blend as fallback.
             if (foregroundRatio >= 0.01f) {

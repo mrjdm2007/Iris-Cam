@@ -45,6 +45,10 @@ internal object PhotoGpuProcessor {
         uniform vec4 uM2;
         uniform vec4 uM3;
         uniform vec4 uOffset;
+        uniform vec2 uTexel;
+        uniform float uRadius;
+        uniform float uDenoise;
+        uniform float uSharpen;
 
         vec3 rgbToHsv(vec3 c) {
             vec4 K = vec4(0.0, -1.0 / 3.0, 2.0 / 3.0, -1.0);
@@ -77,6 +81,39 @@ internal object PhotoGpuProcessor {
             } else if (uMode == 2) {
                 vec4 over = texture2D(uBlur, vTexCoord);
                 gl_FragColor = vec4(over.rgb + original.rgb * (1.0 - over.a), original.a);
+            } else if (uMode == 4) {
+                vec4 sum = vec4(0.0);
+                float total = 0.0;
+                float centerLuma = dot(original.rgb, vec3(0.299, 0.587, 0.114));
+                for (int y = -2; y <= 2; y++) {
+                    for (int x = -2; x <= 2; x++) {
+                        float wx = (x == 0) ? 6.0 : ((x == -1 || x == 1) ? 4.0 : 1.0);
+                        float wy = (y == 0) ? 6.0 : ((y == -1 || y == 1) ? 4.0 : 1.0);
+                        vec4 sampleColor = texture2D(uSource, vTexCoord + vec2(float(x), float(y)) * uTexel);
+                        float sampleLuma = dot(sampleColor.rgb, vec3(0.299, 0.587, 0.114));
+                        float edgeWeight = exp(-abs(sampleLuma - centerLuma) * 12.0);
+                        float weight = wx * wy * mix(1.0, edgeWeight, uDenoise);
+                        sum += sampleColor * weight;
+                        total += weight;
+                    }
+                }
+                vec4 softened = sum / max(total, 0.0001);
+                vec3 denoised = mix(original.rgb, softened.rgb, uDenoise);
+                vec3 sharpened = denoised + (original.rgb - softened.rgb) * uSharpen;
+                gl_FragColor = vec4(clamp(sharpened, 0.0, 1.0), original.a);
+            } else if (uMode == 5) {
+                vec4 sum = vec4(0.0);
+                float total = 0.0;
+                for (int y = -2; y <= 2; y++) {
+                    for (int x = -2; x <= 2; x++) {
+                        float wx = (x == 0) ? 6.0 : ((x == -1 || x == 1) ? 4.0 : 1.0);
+                        float wy = (y == 0) ? 6.0 : ((y == -1 || y == 1) ? 4.0 : 1.0);
+                        float weight = wx * wy;
+                        sum += texture2D(uSource, vTexCoord + vec2(float(x), float(y)) * uTexel * uRadius) * weight;
+                        total += weight;
+                    }
+                }
+                gl_FragColor = sum / total;
             } else {
                 vec4 c = original;
                 vec4 graded = vec4(dot(uM0, c), dot(uM1, c), dot(uM2, c), dot(uM3, c)) + uOffset;
@@ -118,6 +155,21 @@ internal object PhotoGpuProcessor {
         return render(source, null, FloatArray(1), 1, 1, 3, 0f, 1f, 0f, values)
     }
 
+    /** Full-resolution GPU portrait defocus. */
+    fun gaussianBlur(source: Bitmap, radiusPixels: Float): Bitmap? {
+        if (source.isRecycled || radiusPixels <= 0f) return null
+        return render(source, null, FloatArray(1), 1, 1, 5, 0f, 1f, 0f,
+            radiusPixels = radiusPixels.coerceIn(0.5f, 12f))
+    }
+
+    /** Edge-aware GPU smoothing with restrained detail recovery. */
+    fun enhanceDetails(source: Bitmap, denoise: Float = 0.08f, sharpen: Float = 0.12f): Bitmap? {
+        if (source.isRecycled) return null
+        return render(source, null, FloatArray(1), 1, 1, 4, 0f, 1f, 0f,
+            denoiseStrength = denoise.coerceIn(0f, 0.45f),
+            sharpenStrength = sharpen.coerceIn(0f, 0.6f))
+    }
+
     private fun render(
         source: Bitmap,
         blurred: Bitmap?,
@@ -128,7 +180,10 @@ internal object PhotoGpuProcessor {
         hue: Float,
         saturation: Float,
         warmth: Float,
-        matrixValues: FloatArray? = null
+        matrixValues: FloatArray? = null,
+        radiusPixels: Float = 1f,
+        denoiseStrength: Float = 0f,
+        sharpenStrength: Float = 0f
     ): Bitmap? {
         if (source.isRecycled ||
             (mode == 0 && (blurred == null || blurred.isRecycled ||
@@ -237,6 +292,10 @@ internal object PhotoGpuProcessor {
             GLES20.glUniform1f(GLES20.glGetUniformLocation(program, "uHue"), hue)
             GLES20.glUniform1f(GLES20.glGetUniformLocation(program, "uSaturation"), saturation)
             GLES20.glUniform1f(GLES20.glGetUniformLocation(program, "uWarmth"), warmth)
+            GLES20.glUniform2f(GLES20.glGetUniformLocation(program, "uTexel"), 1f / width, 1f / height)
+            GLES20.glUniform1f(GLES20.glGetUniformLocation(program, "uRadius"), radiusPixels)
+            GLES20.glUniform1f(GLES20.glGetUniformLocation(program, "uDenoise"), denoiseStrength)
+            GLES20.glUniform1f(GLES20.glGetUniformLocation(program, "uSharpen"), sharpenStrength)
             if (mode == 3 && matrixValues != null) {
                 GLES20.glUniform4fv(GLES20.glGetUniformLocation(program, "uM0"), 1, matrixValues, 0)
                 GLES20.glUniform4fv(GLES20.glGetUniformLocation(program, "uM1"), 1, matrixValues, 5)
