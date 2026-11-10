@@ -40,6 +40,11 @@ internal object PhotoGpuProcessor {
         uniform float uHue;
         uniform float uSaturation;
         uniform float uWarmth;
+        uniform vec4 uM0;
+        uniform vec4 uM1;
+        uniform vec4 uM2;
+        uniform vec4 uM3;
+        uniform vec4 uOffset;
 
         vec3 rgbToHsv(vec3 c) {
             vec4 K = vec4(0.0, -1.0 / 3.0, 2.0 / 3.0, -1.0);
@@ -61,7 +66,7 @@ internal object PhotoGpuProcessor {
             if (uMode == 0) {
                 vec3 softened = texture2D(uBlur, vTexCoord).rgb;
                 gl_FragColor = vec4(mix(softened, original.rgb, foreground), original.a);
-            } else {
+            } else if (uMode == 1) {
                 vec3 hsv = rgbToHsv(original.rgb);
                 hsv.x = fract(hsv.x + uHue);
                 hsv.y = clamp(hsv.y * uSaturation, 0.0, 1.0);
@@ -69,6 +74,13 @@ internal object PhotoGpuProcessor {
                 shifted.r = clamp(shifted.r + uWarmth, 0.0, 1.0);
                 shifted.b = clamp(shifted.b - uWarmth, 0.0, 1.0);
                 gl_FragColor = vec4(mix(shifted, original.rgb, foreground), original.a);
+            } else if (uMode == 2) {
+                vec4 over = texture2D(uBlur, vTexCoord);
+                gl_FragColor = vec4(over.rgb + original.rgb * (1.0 - over.a), original.a);
+            } else {
+                vec4 c = original;
+                vec4 graded = vec4(dot(uM0, c), dot(uM1, c), dot(uM2, c), dot(uM3, c)) + uOffset;
+                gl_FragColor = clamp(graded, 0.0, 1.0);
             }
         }
     """
@@ -98,6 +110,14 @@ internal object PhotoGpuProcessor {
         temperature.coerceIn(-100, 100) * 0.22f / 255f
     )
 
+    fun compositeOverlay(source: Bitmap, overlay: Bitmap): Bitmap? =
+        render(source, overlay, FloatArray(1), 1, 1, 2, 0f, 1f, 0f)
+
+    fun applyColorMatrix(source: Bitmap, values: FloatArray): Bitmap? {
+        if (values.size < 20) return null
+        return render(source, null, FloatArray(1), 1, 1, 3, 0f, 1f, 0f, values)
+    }
+
     private fun render(
         source: Bitmap,
         blurred: Bitmap?,
@@ -107,12 +127,16 @@ internal object PhotoGpuProcessor {
         mode: Int,
         hue: Float,
         saturation: Float,
-        warmth: Float
+        warmth: Float,
+        matrixValues: FloatArray? = null
     ): Bitmap? {
-        if (source.isRecycled || maskWidth < 1 || maskHeight < 1 ||
-            mask.size < maskWidth * maskHeight ||
+        if (source.isRecycled ||
             (mode == 0 && (blurred == null || blurred.isRecycled ||
-                blurred.width != source.width || blurred.height != source.height))
+                blurred.width != source.width || blurred.height != source.height)) ||
+            (mode == 2 && (blurred == null || blurred.isRecycled ||
+                blurred.width != source.width || blurred.height != source.height)) ||
+            (mode == 3 && (matrixValues == null || matrixValues.size < 20)) ||
+            (mode <= 1 && (maskWidth < 1 || maskHeight < 1 || mask.size < maskWidth * maskHeight))
         ) return null
 
         val width = source.width
@@ -162,13 +186,17 @@ internal object PhotoGpuProcessor {
             GLES20.glGetIntegerv(GLES20.GL_MAX_TEXTURE_SIZE, maxTexture, 0)
             if (width > maxTexture[0] || height > maxTexture[0]) return null
 
-            val maskPixels = IntArray(maskWidth * maskHeight)
-            for (i in maskPixels.indices) {
-                val v = (mask[i].coerceIn(0f, 1f) * 255f).toInt()
-                maskPixels[i] = Color.rgb(v, v, v)
+            if (mode <= 1) {
+                val maskPixels = IntArray(maskWidth * maskHeight)
+                for (i in maskPixels.indices) {
+                    val v = (mask[i].coerceIn(0f, 1f) * 255f).toInt()
+                    maskPixels[i] = Color.rgb(v, v, v)
+                }
+                maskBitmap = Bitmap.createBitmap(maskWidth, maskHeight, Bitmap.Config.ARGB_8888)
+                maskBitmap.setPixels(maskPixels, 0, maskWidth, 0, 0, maskWidth, maskHeight)
+            } else {
+                maskBitmap = Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
             }
-            maskBitmap = Bitmap.createBitmap(maskWidth, maskHeight, Bitmap.Config.ARGB_8888)
-            maskBitmap.setPixels(maskPixels, 0, maskWidth, 0, 0, maskWidth, maskHeight)
 
             program = linkProgram(VERTEX_SHADER, FRAGMENT_SHADER)
             if (program == 0) return null
@@ -209,6 +237,17 @@ internal object PhotoGpuProcessor {
             GLES20.glUniform1f(GLES20.glGetUniformLocation(program, "uHue"), hue)
             GLES20.glUniform1f(GLES20.glGetUniformLocation(program, "uSaturation"), saturation)
             GLES20.glUniform1f(GLES20.glGetUniformLocation(program, "uWarmth"), warmth)
+            if (mode == 3 && matrixValues != null) {
+                GLES20.glUniform4fv(GLES20.glGetUniformLocation(program, "uM0"), 1, matrixValues, 0)
+                GLES20.glUniform4fv(GLES20.glGetUniformLocation(program, "uM1"), 1, matrixValues, 5)
+                GLES20.glUniform4fv(GLES20.glGetUniformLocation(program, "uM2"), 1, matrixValues, 10)
+                GLES20.glUniform4fv(GLES20.glGetUniformLocation(program, "uM3"), 1, matrixValues, 15)
+                GLES20.glUniform4f(
+                    GLES20.glGetUniformLocation(program, "uOffset"),
+                    matrixValues[4] / 255f, matrixValues[9] / 255f,
+                    matrixValues[14] / 255f, matrixValues[19]
+                )
+            }
 
             val vertexBuffer = ByteBuffer.allocateDirect(quad.size * 4)
                 .order(ByteOrder.nativeOrder()).asFloatBuffer()
