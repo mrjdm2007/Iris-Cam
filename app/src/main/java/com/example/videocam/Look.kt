@@ -251,16 +251,15 @@ object Look {
 
     private fun intensityMatrix(id: Int, intensity: Int): ColorMatrix {
         val target = filterMatrix(id).array
-        // Newer inspired profiles should keep skin and saturated red objects controlled.
-        // Reduce chroma around the transformed luminance instead of cross-mixing red/green
-        // channels, which can skew reds and skin tones. Apply equally to preview, stills and video.
-        if (id in 18..30) {
+        // Strongly restrain the red channel in every look except Sony S-Cinetone (ID 27).
+        // Pull the transformed red output toward the image luminance, retaining 25% of
+        // its red-channel chroma. This is part of the shared matrix so preview, stills
+        // and the video renderer all receive the same correction.
+        if (id > 0 && id != 27) {
             val original = target.copyOf()
             for (i in 0..4) {
                 val luma = original[i] * 0.213f + original[5 + i] * 0.715f + original[10 + i] * 0.072f
-                target[i] = luma + (original[i] - luma) * 0.88f
-                target[5 + i] = luma + (original[5 + i] - luma) * 0.88f
-                target[10 + i] = luma + (original[10 + i] - luma) * 0.88f
+                target[i] = luma + (original[i] - luma) * 0.25f
             }
         }
         val identity = ColorMatrix().array
