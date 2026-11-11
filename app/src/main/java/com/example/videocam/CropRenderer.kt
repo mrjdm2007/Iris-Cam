@@ -135,8 +135,6 @@ class CropRenderer(
             "vec4 g=vec4(dot(uR,c),dot(uG,c),dot(uB,c),dot(uA,c))+uOffset;" +
             "float contrast=1.0+clamp(uContrast,0.0,1.0);" +
             "vec3 rgb=(g.rgb-vec3(0.5))*contrast+vec3(0.5);" +
-            "float redLuma=dot(rgb,vec3(0.2126,0.7152,0.0722));" +
-            "rgb.r=redLuma+(rgb.r-redLuma)*0.83;" +
             "if(uEffect==14){vec3 b=(texture2D(sTex,vTc+vec2(uTexel.x*3.0,0.0)).rgb+" +
             "texture2D(sTex,vTc-vec2(uTexel.x*3.0,0.0)).rgb+" +
             "texture2D(sTex,vTc+vec2(0.0,uTexel.y*3.0)).rgb+" +
@@ -156,6 +154,8 @@ class CropRenderer(
             "vec2 shift=radial*dot(radial,radial)*(0.0018*uStrength);" +
             "float rr=texture2D(sTex,vTc+shift).r;float bb=texture2D(sTex,vTc-shift).b;" +
             "rgb=vec3(rr,rgb.g,bb);}" +
+            "float redLuma=dot(rgb,vec3(0.2126,0.7152,0.0722));" +
+            "rgb.r=redLuma+(rgb.r-redLuma)*0.83;" +
             "gl_FragColor=vec4(clamp(rgb,0.0,1.0),c.a);}"
         program = link(compile(GLES20.GL_VERTEX_SHADER, vs), compile(GLES20.GL_FRAGMENT_SHADER, fs))
         uTex = GLES20.glGetUniformLocation(program, "uTex")
