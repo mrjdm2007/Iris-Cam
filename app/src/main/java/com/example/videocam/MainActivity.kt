@@ -689,7 +689,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
     private fun showLooksDialog() {
         val groups = listOf(
             "Natural" to listOf(0),
-            "Inspired" to listOf(18, 10, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29),
+            "Inspired" to listOf(18, 10, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30),
             "Cinematic" to listOf(2, 3, 4, 5, 6, 7, 8, 9, 13, 14, 15, 16, 17, 1)
         )
         val names = Look.FILTER_NAMES
@@ -1848,7 +1848,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
     }
 
     private fun videoImageItems(): List<Pair<String, () -> Unit>> = listOf(
-        "Contrast: ${cfg.videoContrast.coerceIn(0, 100)}%" to { showVideoContrastSlider() },
+        "Contrast by lens: ${runCatching { cam.cameraLabel(cfg.cameraId) }.getOrDefault(cfg.cameraId)} · ${(cfg.videoContrastByLens[cfg.cameraId] ?: cfg.videoContrast).coerceIn(0, 100)}%" to { showVideoLensContrastPicker() },
         "Stabilization: ${when (cfg.stab) { 2 -> "EIS + OIS"; 1 -> "EIS only"; else -> "Off" }}" to {
             choose("Video stabilization", listOf("Off", "EIS only", "EIS + OIS")) {
                 cfg.stab = it
@@ -1898,6 +1898,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
             "Effects · Film Grain" to 16,
             "Effects · Anamorphic Flare" to 17,
             "Colour · Zeiss Colours (inspired)" to 18,
+            "Cinema · RED Komodo Cinema (inspired)" to 30,
         )
         val items = presets.map { (label, id) ->
             val title = (if (cfg.filterId == id) "✓ " else "") + label
@@ -1914,7 +1915,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
                     // Rebuild it whenever the selected video look changes so the encoder
                     // receives the filtered renderer surface, not the raw recorder surface.
                     if (cfg.mode == 0) streamChanged() else applyLive()
-                    toast(if (id == 30) "Chromatic Aberration selected · applied to photos and recorded video" else "${Look.FILTER_NAMES[id]} selected")
+                    toast("${Look.FILTER_NAMES[id]} selected")
                 }
             }
         }
@@ -1928,15 +1929,16 @@ class MainActivity : Activity(), CameraController.Callbacks {
         })
     }
 
-    private fun showVideoContrastSlider() {
+    private fun showVideoContrastSlider(lensId: String = cfg.cameraId) {
         if (!idle()) return
-        val currentContrast = cfg.videoContrast.coerceIn(0, 100)
+        val lensName = runCatching { cam.cameraLabel(lensId) }.getOrDefault(lensId)
+        val currentContrast = (cfg.videoContrastByLens[lensId] ?: cfg.videoContrast).coerceIn(0, 100)
         val box = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(20), dp(12), dp(20), dp(8))
         }
         val label = TextView(this).apply {
-            text = "VIDEO CONTRAST · ${currentContrast}%"
+            text = "$lensName · VIDEO CONTRAST · ${currentContrast}%"
             setTextColor(0xFFF3F0E8.toInt())
             textSize = 12f
         }
@@ -1945,9 +1947,9 @@ class MainActivity : Activity(), CameraController.Callbacks {
             progress = currentContrast
             setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                 override fun onProgressChanged(bar: SeekBar?, value: Int, fromUser: Boolean) {
-                    label.text = "VIDEO CONTRAST · ${value}%"
+                    label.text = "$lensName · VIDEO CONTRAST · ${value}%"
                     if (fromUser) {
-                        cfg.videoContrast = value.coerceIn(0, 100)
+                        cfg.videoContrastByLens[lensId] = value.coerceIn(0, 100)
                         cfgDirty = true
                     }
                 }
@@ -1958,16 +1960,25 @@ class MainActivity : Activity(), CameraController.Callbacks {
         box.addView(label)
         box.addView(seek, LinearLayout.LayoutParams(MATCH, WRAP))
         MaterialAlertDialogBuilder(this)
-            .setTitle("Video contrast")
-            .setMessage("Saved separately from photo contrast. 0% leaves the image unchanged.")
+            .setTitle("Video contrast · $lensName")
+            .setMessage("Saved separately for this lens and independently from photo contrast. 0% leaves the image unchanged.")
             .setView(box)
             .setPositiveButton("Done", null)
             .setNeutralButton("Reset to 10%") { _, _ ->
-                cfg.videoContrast = 10
+                cfg.videoContrastByLens[lensId] = 10
                 cfgDirty = true
-                toast("Video contrast reset to 10%")
+                toast("$lensName video contrast reset to 10%")
             }
             .show()
+    }
+
+    private fun showVideoLensContrastPicker() {
+        val ids = cam.cameraIds
+        if (ids.isEmpty()) return
+        choose("Video contrast · choose lens", ids.map { id ->
+            val name = runCatching { cam.cameraLabel(id) }.getOrDefault(id)
+            "$name · ${(cfg.videoContrastByLens[id] ?: cfg.videoContrast).coerceIn(0, 100)}%"
+        }) { index -> showVideoContrastSlider(ids[index]) }
     }
 
     private fun showPhotoContrastSlider(lensId: String = cfg.cameraId) {

@@ -98,7 +98,8 @@ data class Config(
     var photoFilterIntensity: Int = 100, // default photo look strength, 0..100
     var photoContrast: Int = 10, // default contrast strength for every lens, 0..100
     var photoContrastByLens: MutableMap<String, Int> = mutableMapOf(), // per-camera photo contrast
-    var videoContrast: Int = 10, // independent video contrast strength, 0..100
+    var videoContrast: Int = 10, // legacy fallback for video contrast, 0..100
+    var videoContrastByLens: MutableMap<String, Int> = mutableMapOf(), // per-camera video contrast
     var smartIso: Boolean = true, // auto photo ISO cap at 500
     var fastMovingObjects: Boolean = false, // short-exposure photo mode; main lens only
     var photoLook: Int = 0,          // 0 natural, 1 golden hour, 2 dream glow
@@ -106,7 +107,7 @@ data class Config(
     var chromaticAberrationCorrection: Boolean = true, // request ISP lateral colour-fringe correction
     var lensKeys: Boolean = false,   // show the 0.5x / 1x / 2.7x shortcut buttons
     var haptics: Boolean = true,     // subtle shutter and manual slider feedback
-    var ver: Int = 13
+    var ver: Int = 14
 ) {
     fun copyFrom(o: Config) {
         cameraId = o.cameraId
@@ -166,6 +167,7 @@ data class Config(
         photoContrast = o.photoContrast
         photoContrastByLens = o.photoContrastByLens.toMutableMap()
         videoContrast = o.videoContrast
+        videoContrastByLens = o.videoContrastByLens.toMutableMap()
         smartIso = o.smartIso
         fastMovingObjects = o.fastMovingObjects
         photoLook = o.photoLook
@@ -234,6 +236,7 @@ data class Config(
         .put("photoContrast", photoContrast)
         .put("photoContrastByLens", JSONObject().apply { photoContrastByLens.forEach { (lens, value) -> put(lens, value.coerceIn(0, 100)) } })
         .put("videoContrast", videoContrast.coerceIn(0, 100))
+        .put("videoContrastByLens", JSONObject().apply { videoContrastByLens.forEach { (lens, value) -> put(lens, value.coerceIn(0, 100)) } })
         .put("smartIso", smartIso)
         .put("fastMovingObjects", fastMovingObjects)
         .put("photoLook", photoLook)
@@ -272,6 +275,15 @@ data class Config(
             val finalFilterId = if (migrateSonyDefault) 27 else selectedFilter
             val finalVideoIntensity = if (migrateSonyDefault) 100 else selectedIntensity
             val finalPhotoIntensity = if (migrateSonyDefault) 100 else selectedPhotoIntensity
+            val videoLensContrast = o.optJSONObject("videoContrastByLens")?.let { obj ->
+                mutableMapOf<String, Int>().apply {
+                    val keys = obj.keys()
+                    while (keys.hasNext()) {
+                        val key = keys.next()
+                        put(key, obj.optInt(key, o.optInt("videoContrast", d.videoContrast)).coerceIn(0, 100))
+                    }
+                }
+            } ?: mutableMapOf()
             val lensContrast = o.optJSONObject("photoContrastByLens")?.let { obj ->
                 mutableMapOf<String, Int>().apply {
                     val keys = obj.keys()
@@ -340,6 +352,7 @@ data class Config(
                 photoContrast = (if (oldVersion < 7 && o.optInt("photoContrast", 40) == 40) 10 else o.optInt("photoContrast", d.photoContrast)).coerceIn(0, 100),
                 photoContrastByLens = lensContrast,
                 videoContrast = o.optInt("videoContrast", d.videoContrast).coerceIn(0, 100),
+                videoContrastByLens = videoLensContrast,
                 smartIso = o.optBoolean("smartIso", d.smartIso),
                 fastMovingObjects = o.optBoolean("fastMovingObjects", d.fastMovingObjects),
                 photoLook = 0,
@@ -347,7 +360,7 @@ data class Config(
                 chromaticAberrationCorrection = o.optBoolean("chromaticAberrationCorrection", d.chromaticAberrationCorrection),
                 lensKeys = o.optBoolean("lensKeys", d.lensKeys),
                 haptics = o.optBoolean("haptics", d.haptics),
-                ver = maxOf(12, o.optInt("ver", d.ver))
+                ver = maxOf(14, o.optInt("ver", d.ver))
             )
         }
     }

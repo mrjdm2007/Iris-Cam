@@ -230,9 +230,9 @@ object Look {
             )) // Zeiss-inspired colour: restrained saturation, clean blues, natural reds
             19 -> basic(1.02f, 1.01f, 2f, 1f, 2f) // Hasselblad Natural Colour
             20 -> basic(0.92f, 0.98f, 5f, 2f, -3f) // Hasselblad Portrait
-            21 -> basic(1.18f, 1.06f, 3f, 2f, 5f) // Hasselblad Vivid
+            21 -> basic(1.06f, 1.04f, 2f, 1f, 3f) // Hasselblad Vivid, restrained saturation
             22 -> basic(0.75f, 1.04f, 5f, 3f, -2f) // Fujifilm Classic Chrome
-            23 -> basic(1.28f, 1.10f, 1f, 2f, 3f) // Fujifilm Velvia
+            23 -> basic(1.08f, 1.06f, 1f, 1f, 2f) // Fujifilm Velvia-inspired, restrained saturation
             24 -> basic(1.08f, 0.98f, 5f, 3f, -2f) // Fujifilm Astia
             25 -> basic(0.82f, 0.95f, 2f, 3f, 4f) // Fujifilm Pro Neg
             26 -> basic(1.03f, 0.97f, 8f, 4f, -6f) // Fujifilm Nostalgic Neg
@@ -251,15 +251,16 @@ object Look {
 
     private fun intensityMatrix(id: Int, intensity: Int): ColorMatrix {
         val target = filterMatrix(id).array
-        // Keep red-heavy looks from pushing reds and skin tones too far. This subtle
-        // red/green chroma cross-mix is shared by preview, stills and the video shader.
-        // Leave monochrome looks untouched.
-        if (id > 0 && id != 1 && id != 9) {
+        // Newer inspired profiles should keep skin and saturated red objects controlled.
+        // Reduce chroma around the transformed luminance instead of cross-mixing red/green
+        // channels, which can skew reds and skin tones. Apply equally to preview, stills and video.
+        if (id in 18..30) {
+            val original = target.copyOf()
             for (i in 0..4) {
-                val red = target[i]
-                val green = target[5 + i]
-                target[i] = red * 0.92f + green * 0.08f
-                target[5 + i] = green * 0.98f + red * 0.02f
+                val luma = original[i] * 0.213f + original[5 + i] * 0.715f + original[10 + i] * 0.072f
+                target[i] = luma + (original[i] - luma) * 0.88f
+                target[5 + i] = luma + (original[5 + i] - luma) * 0.88f
+                target[10 + i] = luma + (original[10 + i] - luma) * 0.88f
             }
         }
         val identity = ColorMatrix().array
