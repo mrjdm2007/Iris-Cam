@@ -249,17 +249,15 @@ object Look {
         }
     }
 
-    private fun intensityMatrix(id: Int, intensity: Int): ColorMatrix {
+    private fun intensityMatrix(id: Int, intensity: Int, reduceRedChroma: Boolean = true): ColorMatrix {
         val target = filterMatrix(id).array
-        // Strongly restrain the red channel in every look except Sony S-Cinetone (ID 27).
-        // Pull the transformed red output toward the image luminance, retaining 25% of
-        // its red-channel chroma. This is part of the shared matrix so preview, stills
-        // and the video renderer all receive the same correction.
-        if (id > 0 && id != 27) {
+        // Retain 83% of red-channel chroma (a 17% reduction) for every selected look,
+        // including Sony S-Cinetone. Natural (ID 0) remains neutral.
+        if (reduceRedChroma && id > 0) {
             val original = target.copyOf()
             for (i in 0..4) {
                 val luma = original[i] * 0.213f + original[5 + i] * 0.715f + original[10 + i] * 0.072f
-                target[i] = luma + (original[i] - luma) * 0.25f
+                target[i] = luma + (original[i] - luma) * 0.83f
             }
         }
         val identity = ColorMatrix().array
@@ -273,7 +271,9 @@ object Look {
 
     /** 4x5 Android ColorMatrix values consumed by the EGL video renderer. */
     fun videoFilterMatrix(id: Int, intensity: Int): FloatArray =
-        intensityMatrix(id, intensity).array.copyOf()
+        // Video applies the 17% red-chroma reduction in the final EGL shader stage,
+        // after video contrast, so contrast cannot undo the correction.
+        intensityMatrix(id, intensity, reduceRedChroma = false).array.copyOf()
 
     /** Render a selected look into a saved still. Effects are deliberately photo-only until a GPU video path exists. */
     fun applyPreset(src: Bitmap, id: Int, intensity: Int): Bitmap {
