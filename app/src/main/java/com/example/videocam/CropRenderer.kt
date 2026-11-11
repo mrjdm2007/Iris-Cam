@@ -37,6 +37,7 @@ class CropRenderer(
     private val filterMatrix: FloatArray? = null,
     private val effectId: Int = 0,
     private val effectStrength: Float = 1f,
+    private val contrastStrength: Float = 0.1f,
     private val portraitOutput: Boolean = false
 ) {
     private val thread = HandlerThread("crop-gl").apply { start() }
@@ -54,6 +55,7 @@ class CropRenderer(
     private var uOffset = 0
     private var uEffect = 0
     private var uStrength = 0
+    private var uContrast = 0
     private var uTexel = 0
     private var aPos = 0
     private var aTc = 0
@@ -128,10 +130,11 @@ class CropRenderer(
         val fs = "#extension GL_OES_EGL_image_external : require\n" +
             "precision highp float;varying vec2 vTc;uniform samplerExternalOES sTex;" +
             "uniform vec4 uR;uniform vec4 uG;uniform vec4 uB;uniform vec4 uA;uniform vec4 uOffset;" +
-            "uniform int uEffect;uniform float uStrength;uniform vec2 uTexel;" +
+            "uniform int uEffect;uniform float uStrength;uniform float uContrast;uniform vec2 uTexel;" +
             "void main(){vec4 c=texture2D(sTex,vTc);" +
             "vec4 g=vec4(dot(uR,c),dot(uG,c),dot(uB,c),dot(uA,c))+uOffset;" +
-            "vec3 rgb=g.rgb;" +
+            "float contrast=1.0+clamp(uContrast,0.0,1.0);" +
+            "vec3 rgb=(g.rgb-vec3(0.5))*contrast+vec3(0.5);" +
             "if(uEffect==14){vec3 b=(texture2D(sTex,vTc+vec2(uTexel.x*3.0,0.0)).rgb+" +
             "texture2D(sTex,vTc-vec2(uTexel.x*3.0,0.0)).rgb+" +
             "texture2D(sTex,vTc+vec2(0.0,uTexel.y*3.0)).rgb+" +
@@ -161,6 +164,7 @@ class CropRenderer(
         uOffset = GLES20.glGetUniformLocation(program, "uOffset")
         uEffect = GLES20.glGetUniformLocation(program, "uEffect")
         uStrength = GLES20.glGetUniformLocation(program, "uStrength")
+        uContrast = GLES20.glGetUniformLocation(program, "uContrast")
         uTexel = GLES20.glGetUniformLocation(program, "uTexel")
         aPos = GLES20.glGetAttribLocation(program, "aPos")
         aTc = GLES20.glGetAttribLocation(program, "aTc")
@@ -281,6 +285,7 @@ class CropRenderer(
             }
             GLES20.glUniform1i(uEffect, effectId)
             GLES20.glUniform1f(uStrength, effectStrength.coerceIn(0f, 1f))
+            GLES20.glUniform1f(uContrast, contrastStrength.coerceIn(0f, 1f))
             GLES20.glUniform2f(uTexel, 1f / srcW.coerceAtLeast(1), 1f / srcH.coerceAtLeast(1))
             GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
             GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, texId)

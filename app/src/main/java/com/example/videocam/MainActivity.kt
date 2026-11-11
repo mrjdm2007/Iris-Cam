@@ -1848,6 +1848,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
     }
 
     private fun videoImageItems(): List<Pair<String, () -> Unit>> = listOf(
+        "Contrast: ${cfg.videoContrast.coerceIn(0, 100)}%" to { showVideoContrastSlider() },
         "Stabilization: ${when (cfg.stab) { 2 -> "EIS + OIS"; 1 -> "EIS only"; else -> "Off" }}" to {
             choose("Video stabilization", listOf("Off", "EIS only", "EIS + OIS")) {
                 cfg.stab = it
@@ -1925,6 +1926,48 @@ class MainActivity : Activity(), CameraController.Callbacks {
                 if (cfg.mode == 0) streamChanged() else applyLive()
             }
         })
+    }
+
+    private fun showVideoContrastSlider() {
+        if (!idle()) return
+        val currentContrast = cfg.videoContrast.coerceIn(0, 100)
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(12), dp(20), dp(8))
+        }
+        val label = TextView(this).apply {
+            text = "VIDEO CONTRAST · ${currentContrast}%"
+            setTextColor(0xFFF3F0E8.toInt())
+            textSize = 12f
+        }
+        val seek = SeekBar(this).apply {
+            max = 100
+            progress = currentContrast
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(bar: SeekBar?, value: Int, fromUser: Boolean) {
+                    label.text = "VIDEO CONTRAST · ${value}%"
+                    if (fromUser) {
+                        cfg.videoContrast = value.coerceIn(0, 100)
+                        cfgDirty = true
+                    }
+                }
+                override fun onStartTrackingTouch(bar: SeekBar?) {}
+                override fun onStopTrackingTouch(bar: SeekBar?) {}
+            })
+        }
+        box.addView(label)
+        box.addView(seek, LinearLayout.LayoutParams(MATCH, WRAP))
+        MaterialAlertDialogBuilder(this)
+            .setTitle("Video contrast")
+            .setMessage("Saved separately from photo contrast. 0% leaves the image unchanged.")
+            .setView(box)
+            .setPositiveButton("Done", null)
+            .setNeutralButton("Reset to 10%") { _, _ ->
+                cfg.videoContrast = 10
+                cfgDirty = true
+                toast("Video contrast reset to 10%")
+            }
+            .show()
     }
 
     private fun showPhotoContrastSlider(lensId: String = cfg.cameraId) {

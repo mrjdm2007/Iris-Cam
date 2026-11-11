@@ -98,6 +98,7 @@ data class Config(
     var photoFilterIntensity: Int = 100, // default photo look strength, 0..100
     var photoContrast: Int = 10, // default contrast strength for every lens, 0..100
     var photoContrastByLens: MutableMap<String, Int> = mutableMapOf(), // per-camera photo contrast
+    var videoContrast: Int = 10, // independent video contrast strength, 0..100
     var smartIso: Boolean = true, // auto photo ISO cap at 500
     var fastMovingObjects: Boolean = false, // short-exposure photo mode; main lens only
     var photoLook: Int = 0,          // 0 natural, 1 golden hour, 2 dream glow
@@ -164,6 +165,7 @@ data class Config(
         photoFilterIntensity = o.photoFilterIntensity
         photoContrast = o.photoContrast
         photoContrastByLens = o.photoContrastByLens.toMutableMap()
+        videoContrast = o.videoContrast
         smartIso = o.smartIso
         fastMovingObjects = o.fastMovingObjects
         photoLook = o.photoLook
@@ -231,6 +233,7 @@ data class Config(
         .put("photoFilterIntensity", photoFilterIntensity)
         .put("photoContrast", photoContrast)
         .put("photoContrastByLens", JSONObject().apply { photoContrastByLens.forEach { (lens, value) -> put(lens, value.coerceIn(0, 100)) } })
+        .put("videoContrast", videoContrast.coerceIn(0, 100))
         .put("smartIso", smartIso)
         .put("fastMovingObjects", fastMovingObjects)
         .put("photoLook", photoLook)
@@ -336,6 +339,7 @@ data class Config(
                 photoFilterIntensity = finalPhotoIntensity,
                 photoContrast = (if (oldVersion < 7 && o.optInt("photoContrast", 40) == 40) 10 else o.optInt("photoContrast", d.photoContrast)).coerceIn(0, 100),
                 photoContrastByLens = lensContrast,
+                videoContrast = o.optInt("videoContrast", d.videoContrast).coerceIn(0, 100),
                 smartIso = o.optBoolean("smartIso", d.smartIso),
                 fastMovingObjects = o.optBoolean("fastMovingObjects", d.fastMovingObjects),
                 photoLook = 0,

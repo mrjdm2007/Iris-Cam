@@ -754,6 +754,7 @@ class CameraController(
                     fullFrame = !cropIt, filterMatrix = matrix,
                     effectId = if (cfg.filterId > 0) cfg.filterId else 0,
                     effectStrength = cfg.filterIntensity / 100f,
+                    contrastStrength = cfg.videoContrast / 100f,
                     // Preserve incoming texture orientation; portrait is centre-cropped, not rotated.
                     portraitOutput = cfg.portrait && !cropIt
                 )
