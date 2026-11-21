@@ -330,6 +330,16 @@ class MainActivity : Activity(), CameraController.Callbacks {
             cfgDirty = true
             store.save("last", cfg)
         }
+        // Config() already carries the latest schema version, so a brand-new install
+        // skips the version-1 migration above. Resolve the initial lens independently
+        // of schema migration; never overwrite an explicit saved lens selection.
+        if (cfg.cameraId.isBlank()) {
+            cfg.cameraId = cam.cameraIds.firstOrNull { it == "5" }
+                ?: cam.cameraIds.firstOrNull { it == "0" }
+                ?: cam.cameraIds.firstOrNull().orEmpty()
+            cfgDirty = true
+            store.save("last", cfg)
+        }
         // Preserve legacy RGB adjustments for the lens that was selected before per-lens storage.
         if (cfg.cameraId.isNotBlank() && cfg.cameraId !in cfg.rgbByLens) {
             cfg.rgbByLens[cfg.cameraId] = "${cfg.rgbRed},${cfg.rgbGreen},${cfg.rgbBlue}"
@@ -674,7 +684,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
         val groups = listOf(
             "Natural" to listOf(0),
             "Inspired" to listOf(27, 31, 29, 28),
-            "Cinematic" to listOf(2, 3, 4, 5, 6, 7, 8, 9)
+            "Cinematic" to listOf(2, 3, 4, 5, 6, 7, 8)
         )
         val names = Look.FILTER_NAMES
         val intensity = if (cfg.mode == 1) cfg.photoFilterIntensity else cfg.filterIntensity
@@ -1552,7 +1562,6 @@ class MainActivity : Activity(), CameraController.Callbacks {
             "Film Stocks · Fuji Eterna" to 5,
             "Cinema · Teal & Orange" to 6,
             "Cinema · Bleach Bypass" to 7,
-            "Cinema · Noir" to 9,
             "Vintage · Vintage Fade" to 8,
             "Leica · Leica Colour (inspired)" to 10,
             "Colour · Blue Cinematic" to 11,
@@ -1700,6 +1709,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
                     if (fromUser) {
                         cfg.photoContrastByLens[lensId] = value.coerceIn(0, 100)
                         cfgDirty = true
+                        if (lensId == cfg.cameraId && cfg.mode == 1) applyBwLook()
                     }
                 }
                 override fun onStartTrackingTouch(bar: SeekBar?) {}
@@ -1716,6 +1726,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
             .setNeutralButton("Reset to 40%") { _, _ ->
                 cfg.photoContrastByLens[lensId] = 40
                 cfgDirty = true
+                if (lensId == cfg.cameraId && cfg.mode == 1) applyBwLook()
                 toast("$lensName photo contrast reset to 40%")
             }
             .show()
@@ -3054,6 +3065,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
     private var appliedPreviewRgbGreen = Int.MIN_VALUE
     private var appliedPreviewRgbBlue = Int.MIN_VALUE
     private var appliedPreviewVideoContrast = Int.MIN_VALUE
+    private var appliedPreviewPhotoContrast = Int.MIN_VALUE
     private var previewFilterWarningShown = false
 
     private fun applyBwLook() {
@@ -3064,16 +3076,19 @@ class MainActivity : Activity(), CameraController.Callbacks {
         // use the strength belonging to the active mode, not always the video value.
         val intensity = if (cfg.mode == 1) cfg.photoFilterIntensity else cfg.filterIntensity
         val videoContrast = if (cfg.mode == 0) (cfg.videoContrastByLens[cfg.cameraId] ?: 0).coerceIn(0, 100) else 0
+        val photoContrast = if (cfg.mode == 1) (cfg.photoContrastByLens[cfg.cameraId] ?: 40).coerceIn(0, 100) else 0
+        val activeContrast = if (cfg.mode == 1) photoContrast else videoContrast
         if (appliedPreviewFilterId == cfg.filterId &&
             appliedPreviewFilterIntensity == intensity &&
             appliedPreviewRgbRed == cfg.rgbRed && appliedPreviewRgbGreen == cfg.rgbGreen &&
             appliedPreviewRgbBlue == cfg.rgbBlue &&
-            appliedPreviewVideoContrast == videoContrast) return
+            appliedPreviewVideoContrast == videoContrast &&
+            appliedPreviewPhotoContrast == photoContrast) return
         try {
             val hasRgb = cfg.rgbRed != 100 || cfg.rgbGreen != 100 || cfg.rgbBlue != 100
-            val hasVideoContrast = videoContrast > 0
-            val paint = if (cfg.filterId > 0 || hasRgb || hasVideoContrast) Paint().apply {
-                colorFilter = Look.previewFilter(cfg.filterId, intensity, cfg.rgbRed, cfg.rgbGreen, cfg.rgbBlue, videoContrast)
+            val hasContrast = activeContrast > 0
+            val paint = if (cfg.filterId > 0 || hasRgb || hasContrast) Paint().apply {
+                colorFilter = Look.previewFilter(cfg.filterId, intensity, cfg.rgbRed, cfg.rgbGreen, cfg.rgbBlue, activeContrast)
             } else null
             tv.setLayerPaint(paint)
             appliedPreviewFilterId = cfg.filterId
@@ -3082,6 +3097,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
             appliedPreviewRgbGreen = cfg.rgbGreen
             appliedPreviewRgbBlue = cfg.rgbBlue
             appliedPreviewVideoContrast = videoContrast
+            appliedPreviewPhotoContrast = photoContrast
         } catch (e: RuntimeException) {
             runCatching { tv.setLayerPaint(null) }
             appliedPreviewFilterId = cfg.filterId
@@ -3090,6 +3106,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
             appliedPreviewRgbGreen = cfg.rgbGreen
             appliedPreviewRgbBlue = cfg.rgbBlue
             appliedPreviewVideoContrast = videoContrast
+            appliedPreviewPhotoContrast = photoContrast
             if (!previewFilterWarningShown) {
                 previewFilterWarningShown = true
                 toast("Preview filter unavailable on this device; camera preview is continuing")
