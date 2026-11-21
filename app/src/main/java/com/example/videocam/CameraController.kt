@@ -726,7 +726,7 @@ class CameraController(
             // metadata: some playback/inspection paths ignore it for Surface-input recordings.
             val rgbActive = cfg.rgbRed != 100 || cfg.rgbGreen != 100 || cfg.rgbBlue != 100
             val videoContrast = (cfg.videoContrastByLens[cfg.cameraId] ?: cfg.videoContrast).coerceIn(0, 100)
-            val useGlRenderer = cropIt || cfg.filterId > 0 || rgbActive || videoContrast > 0
+            val useGlRenderer = cropIt || cfg.filterId > 0 || cfg.portrait || rgbActive || videoContrast > 0
             val recorderSize = if (cfg.portrait && useGlRenderer) Size(cfg.height, cfg.width) else os
             rec.setVideoSize(recorderSize.width, recorderSize.height)
             rec.setVideoEncoder(
@@ -762,8 +762,9 @@ class CameraController(
                     effectId = if (cfg.filterId > 0) cfg.filterId else 0,
                     effectStrength = cfg.filterIntensity / 100f,
                     contrastStrength = (cfg.videoContrastByLens[cfg.cameraId] ?: cfg.videoContrast) / 100f,
-                    // Preserve incoming texture orientation; portrait is centre-cropped, not rotated.
-                    portraitOutput = cfg.portrait && !cropIt
+                    // Portrait frames are physically rotated into portrait-sized encoder output.
+                    portraitOutput = cfg.portrait && !cropIt,
+                    portraitRotationDegrees = orientationHint()
                 )
             }
         } catch (e: Exception) {
