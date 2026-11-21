@@ -283,7 +283,12 @@ class MainActivity : Activity(), CameraController.Callbacks {
             cfg.upscale = false
             cfgDirty = true
         }
-        lastLandscapeRatio = cfg.ratio
+        val orientationPrefs = getSharedPreferences("videocam", MODE_PRIVATE)
+        lastLandscapeRatio = if (cfg.portrait) {
+            orientationPrefs.getInt("lastLandscapeRatio", cfg.ratio).coerceIn(0, Ratios.NAMES.lastIndex)
+        } else {
+            cfg.ratio.also { orientationPrefs.edit().putInt("lastLandscapeRatio", it).apply() }
+        }
         applyRequestedOrientation()
         buildUi()
         rebuildSamplers()
@@ -313,6 +318,21 @@ class MainActivity : Activity(), CameraController.Callbacks {
             cfg.upscale = false
             cfg.ver = 3
             store.save("last", cfg)
+        }
+        if (cfg.ver < 15) {
+            // Workflow 497 used 1080p as the default; move that untouched default to 720p.
+            if (cfg.previewP == 1080) cfg.previewP = 720
+            // Preserve the previous global RGB trim for the active lens during migration.
+            if (cfg.cameraId.isNotBlank() && cfg.cameraId !in cfg.rgbByLens) {
+                cfg.rgbByLens[cfg.cameraId] = "${cfg.rgbRed},${cfg.rgbGreen},${cfg.rgbBlue}"
+            }
+            cfg.ver = 15
+            cfgDirty = true
+            store.save("last", cfg)
+        }
+        if (cfg.cameraId.isNotBlank()) {
+            if (cfg.cameraId in cfg.rgbByLens) loadLensRgb(cfg.cameraId)
+            else saveActiveLensRgb()
         }
         slider.onChange = { f ->
             cam.cancelRack()
@@ -1933,13 +1953,97 @@ class MainActivity : Activity(), CameraController.Callbacks {
             }
         }
         val activeIntensity = if (cfg.mode == 1) cfg.photoFilterIntensity else cfg.filterIntensity
-        return items + ("Intensity: ${activeIntensity}%" to {
-            choose("Filter intensity", (0..100 step 10).map { "$it%" }) {
-                if (cfg.mode == 1) cfg.photoFilterIntensity = it * 10 else cfg.filterIntensity = it * 10
-                cfgDirty = true
+        return items + listOf(
+            ("Intensity: ${activeIntensity}%" to {
+                choose("Filter intensity", (0..100 step 10).map { "$it%" }) {
+                    if (cfg.mode == 1) cfg.photoFilterIntensity = it * 10 else cfg.filterIntensity = it * 10
+                    cfgDirty = true
+                    if (cfg.mode == 0) streamChanged() else applyLive()
+                }
+            }),
+            ("RGB channels · ${runCatching { cam.cameraLabel(cfg.cameraId) }.getOrDefault(cfg.cameraId)} · R ${cfg.rgbRed}% · G ${cfg.rgbGreen}% · B ${cfg.rgbBlue}%" to { showRgbSliders() })
+        )
+    }
+
+    /** Save the active RGB trim under the currently selected camera ID. */
+    private fun saveActiveLensRgb() {
+        if (cfg.cameraId.isBlank()) return
+        cfg.rgbByLens[cfg.cameraId] = "${cfg.rgbRed.coerceIn(0, 200)},${cfg.rgbGreen.coerceIn(0, 200)},${cfg.rgbBlue.coerceIn(0, 200)}"
+    }
+
+    /** A lens with no saved adjustment starts neutral rather than inheriting another lens's values. */
+    private fun loadLensRgb(lensId: String) {
+        if (lensId.isBlank()) return
+        val values = cfg.rgbByLens[lensId]?.split(',')?.mapNotNull { it.trim().toIntOrNull() }
+        if (values != null && values.size == 3) {
+            cfg.rgbRed = values[0].coerceIn(0, 200)
+            cfg.rgbGreen = values[1].coerceIn(0, 200)
+            cfg.rgbBlue = values[2].coerceIn(0, 200)
+        } else {
+            cfg.rgbRed = 100
+            cfg.rgbGreen = 100
+            cfg.rgbBlue = 100
+            saveActiveLensRgb()
+        }
+    }
+
+    private fun showRgbSliders() {
+        if (!idle()) return
+        val lensName = runCatching { cam.cameraLabel(cfg.cameraId) }.getOrDefault(cfg.cameraId)
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(8), dp(20), dp(8))
+        }
+        fun addChannel(name: String, initial: Int, setValue: (Int) -> Unit) {
+            val label = TextView(this).apply {
+                text = "$name · ${initial}%"
+                setTextColor(0xFFF3F0E8.toInt())
+                textSize = 12f
+            }
+            val seek = SeekBar(this).apply {
+                max = 200
+                progress = initial.coerceIn(0, 200)
+                setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                    override fun onProgressChanged(bar: SeekBar?, value: Int, fromUser: Boolean) {
+                        label.text = "$name · ${value}%"
+                        if (fromUser) {
+                            setValue(value.coerceIn(0, 200))
+                            saveActiveLensRgb()
+                            cfgDirty = true
+                            applyBwLook()
+                        }
+                    }
+                    override fun onStartTrackingTouch(bar: SeekBar?) {}
+                    override fun onStopTrackingTouch(bar: SeekBar?) {
+                        store.save("last", cfg)
+                    }
+                })
+            }
+            box.addView(label, LinearLayout.LayoutParams(MATCH, WRAP))
+            box.addView(seek, LinearLayout.LayoutParams(MATCH, WRAP).apply { bottomMargin = dp(10) })
+        }
+        addChannel("RED", cfg.rgbRed) { cfg.rgbRed = it }
+        addChannel("GREEN", cfg.rgbGreen) { cfg.rgbGreen = it }
+        addChannel("BLUE", cfg.rgbBlue) { cfg.rgbBlue = it }
+        MaterialAlertDialogBuilder(this)
+            .setTitle("RGB channel controls · $lensName")
+            .setMessage("Independent channel intensity · 100% is neutral · range 0–200%. Saved separately for each lens.")
+            .setView(box)
+            .setPositiveButton("Done") { _, _ ->
+                saveActiveLensRgb()
+                store.save("last", cfg)
                 if (cfg.mode == 0) streamChanged() else applyLive()
             }
-        })
+            .setNeutralButton("Reset to 100%") { _, _ ->
+                cfg.rgbRed = 100
+                cfg.rgbGreen = 100
+                cfg.rgbBlue = 100
+                saveActiveLensRgb()
+                cfgDirty = true
+                applyBwLook()
+                if (cfg.mode == 0) streamChanged() else applyLive()
+            }
+            .show()
     }
 
     private fun showVideoContrastSlider(lensId: String = cfg.cameraId) {
@@ -3322,24 +3426,41 @@ class MainActivity : Activity(), CameraController.Callbacks {
 
     private var appliedPreviewFilterId = Int.MIN_VALUE
     private var appliedPreviewFilterIntensity = Int.MIN_VALUE
+    private var appliedPreviewRgbRed = Int.MIN_VALUE
+    private var appliedPreviewRgbGreen = Int.MIN_VALUE
+    private var appliedPreviewRgbBlue = Int.MIN_VALUE
+    private var appliedPreviewContrast = Int.MIN_VALUE
     private var previewFilterWarningShown = false
 
     private fun applyBwLook() {
-        // Avoid rebuilding ColorMatrix/Paint on every UI refresh; only update when the
-        // selected look changes. A preview-layer failure must never take down the camera.
         if (!::tv.isInitialized) return
-        // Photo and video modes keep independent filter strengths. The preview must
-        // use the strength belonging to the active mode, not always the video value.
         val intensity = if (cfg.mode == 1) cfg.photoFilterIntensity else cfg.filterIntensity
+        val contrast = if (cfg.mode == 1) {
+            (cfg.photoContrastByLens[cfg.cameraId] ?: cfg.photoContrast).coerceIn(0, 100)
+        } else {
+            (cfg.videoContrastByLens[cfg.cameraId] ?: cfg.videoContrast).coerceIn(0, 100)
+        }
         if (appliedPreviewFilterId == cfg.filterId &&
-            appliedPreviewFilterIntensity == intensity) return
+            appliedPreviewFilterIntensity == intensity &&
+            appliedPreviewRgbRed == cfg.rgbRed &&
+            appliedPreviewRgbGreen == cfg.rgbGreen &&
+            appliedPreviewRgbBlue == cfg.rgbBlue &&
+            appliedPreviewContrast == contrast) return
         try {
-            val paint = if (cfg.filterId > 0) Paint().apply {
-                colorFilter = Look.previewFilter(cfg.filterId, intensity)
+            val hasAdjustments = cfg.filterId > 0 || cfg.rgbRed != 100 || cfg.rgbGreen != 100 ||
+                cfg.rgbBlue != 100 || contrast > 0
+            val paint = if (hasAdjustments) Paint().apply {
+                colorFilter = Look.previewFilter(
+                    cfg.filterId, intensity, cfg.rgbRed, cfg.rgbGreen, cfg.rgbBlue, contrast
+                )
             } else null
             tv.setLayerPaint(paint)
             appliedPreviewFilterId = cfg.filterId
             appliedPreviewFilterIntensity = intensity
+            appliedPreviewRgbRed = cfg.rgbRed
+            appliedPreviewRgbGreen = cfg.rgbGreen
+            appliedPreviewRgbBlue = cfg.rgbBlue
+            appliedPreviewContrast = contrast
         } catch (e: RuntimeException) {
             runCatching { tv.setLayerPaint(null) }
             appliedPreviewFilterId = cfg.filterId
