@@ -780,6 +780,8 @@ class CameraController(
                     // Portrait frames are physically rotated into portrait-sized encoder output.
                     portraitOutput = portraitOutput,
                     portraitRotationDegrees = orientationHint(),
+                    // Route GL failures back to the UI thread so a failed portrait frame path
+                    // cannot leave a seemingly active recording that contains frozen/black video.
                     onRenderError = { reason ->
                         handler.post {
                             if (recording) stopRecording()
