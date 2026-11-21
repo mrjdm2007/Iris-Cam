@@ -632,8 +632,8 @@ class MainActivity : Activity(), CameraController.Callbacks {
     private fun showLooksDialog() {
         val groups = listOf(
             "Natural" to listOf(0),
-            "Inspired" to listOf(18, 10, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29),
-            "Cinematic" to listOf(2, 3, 4, 5, 6, 7, 8, 9, 13, 14, 15, 16, 17, 1)
+            "Inspired" to listOf(27, 31, 29, 28),
+            "Cinematic" to listOf(2, 3, 4, 5, 6, 7, 8, 9)
         )
         val names = Look.FILTER_NAMES
         val intensity = if (cfg.mode == 1) cfg.photoFilterIntensity else cfg.filterIntensity
@@ -1501,14 +1501,11 @@ class MainActivity : Activity(), CameraController.Callbacks {
             "Leica · Leica Colour (inspired)" to 10,
             "Colour · Blue Cinematic" to 11,
             "Colour · Golden Hour" to 12,
-            "Dream · Dream Glow" to 13,
-            "Effects · Black and White" to 1,
-            "Effects · Halation" to 14,
-            "Effects · Soft Diffusion" to 15,
-            "Effects · Film Grain" to 16,
-            "Effects · Anamorphic Flare" to 17,
             "Colour · Zeiss Colours (inspired)" to 18,
             "Colour · Sony S-Cinetone (inspired)" to 27,
+            "Colour · ARRI Alexa 35 (inspired)" to 31,
+            "Colour · Nikon Natural Colour (inspired)" to 29,
+            "Colour · Panasonic Lumix Cinelike D (inspired)" to 28,
         )
         val items = presets.map { (label, id) ->
             val title = (if (cfg.filterId == id) "✓ " else "") + label

@@ -174,7 +174,8 @@ object Look {
         "Hasselblad Natural Colour (inspired)", "Hasselblad Portrait (inspired)", "Hasselblad Vivid (inspired)",
         "Fujifilm Classic Chrome (inspired)", "Fujifilm Velvia (inspired)", "Fujifilm Astia (inspired)",
         "Fujifilm Pro Neg (inspired)", "Fujifilm Nostalgic Neg (inspired)", "Sony S-Cinetone (inspired)",
-        "Panasonic Lumix Cinelike D (inspired)", "Nikon Natural Colour (inspired)"
+        "Panasonic Lumix Cinelike D (inspired)", "Nikon Natural Colour (inspired)",
+        "RED Komodo Cinema (inspired)", "ARRI Alexa 35 (inspired)"
     )
 
     private fun filterMatrix(id: Int): ColorMatrix {
@@ -239,6 +240,18 @@ object Look {
             27 -> basic(0.92f, 0.97f, 3f, 2f, 4f) // Sony S-Cinetone
             28 -> basic(0.88f, 0.90f, 2f, 2f, 3f) // Panasonic Lumix Cinelike D
             29 -> basic(1.00f, 1.02f, 2f, 1f, -1f) // Nikon-inspired restrained neutral colour
+            30 -> ColorMatrix(floatArrayOf(
+                1.04f, 0.015f, -0.035f, 0f, 2f,
+                -0.01f, 1.02f, 0.01f, 0f, 1f,
+                -0.025f, 0.02f, 1.06f, 0f, 3f,
+                0f, 0f, 0f, 1f, 0f
+            )) // RED Komodo-inspired cinema grade; retained for stable preset indexing
+            31 -> ColorMatrix(floatArrayOf(
+                1.025f, -0.012f, -0.013f, 0f, 1.5f,
+                -0.006f, 1.018f, -0.012f, 0f, 0.5f,
+                -0.012f, 0.014f, 0.998f, 0f, 2f,
+                0f, 0f, 0f, 1f, 0f
+            )).apply { postConcat(basic(0.97f, 1.00f, 0f, 0f, 0f)) } // ARRI Alexa 35-inspired approximation, not an official ARRI transform
             else -> ColorMatrix()
         }
     }
