@@ -298,9 +298,12 @@ object Look {
     /** Preview grade: look, contrast, then independent RGB gains. */
     fun previewFilter(
         id: Int, intensity: Int, red: Int = 100, green: Int = 100, blue: Int = 100,
-        contrast: Int = 0
+        contrast: Int = 0, reduceRedChroma: Boolean = true
     ): ColorMatrixColorFilter =
-        ColorMatrixColorFilter(withRgb(withContrast(intensityMatrix(id, intensity), contrast), red, green, blue))
+        ColorMatrixColorFilter(withRgb(
+            withContrast(intensityMatrix(id, intensity, reduceRedChroma), contrast),
+            red, green, blue
+        ))
 
     /** 4x5 Android ColorMatrix values consumed by the EGL video renderer. */
     fun videoFilterMatrix(
