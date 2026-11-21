@@ -3524,7 +3524,8 @@ class MainActivity : Activity(), CameraController.Callbacks {
             val paint = if (hasAdjustments) Paint().apply {
                 colorFilter = Look.previewFilter(
                     cfg.filterId, intensity, cfg.rgbRed, cfg.rgbGreen, cfg.rgbBlue, contrast,
-                    reduceRedChroma = cfg.mode == 1
+                    reduceRedChroma = cfg.mode == 1,
+                    postRedChromaReduction = cfg.mode == 0
                 )
             } else null
             tv.setLayerPaint(paint)
