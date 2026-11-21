@@ -800,7 +800,8 @@ class CameraController(
             // The GL renderer writes physically upright frames, so don't add rotation metadata.
             // Without the renderer, let MediaRecorder carry the device orientation as metadata.
             val hasRgb = cfg.rgbRed != 100 || cfg.rgbGreen != 100 || cfg.rgbBlue != 100
-            val useGlRenderer = cropIt || cfg.filterId > 0 || cfg.portrait || hasRgb
+            val videoContrast = (cfg.videoContrastByLens[cfg.cameraId] ?: 0).coerceIn(0, 100)
+            val useGlRenderer = cropIt || cfg.filterId > 0 || cfg.portrait || hasRgb || videoContrast > 0
             rec.setOrientationHint(if (useGlRenderer) 0 else orientationHint())
             rec.setMaxFileSize(SPLIT_BYTES)
             rec.setOnInfoListener { mr, what, _ -> onRecorderInfo(mr, what) }
