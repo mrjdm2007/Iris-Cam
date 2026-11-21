@@ -1368,7 +1368,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
         zoomLabel.visibility = View.GONE
         zoomControlsChip.visibility = View.GONE
         // The single lens button cycles only the three physical rear lenses.
-        val zoomStrip = strip(lensSelectorChip)
+        val zoomStrip = strip(lensSelectorChip, zoomSlider)
 
         expSlider = ZoomSlider(this)
         expLabel = label("EXPOSURE")
@@ -1604,7 +1604,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
         val w = if (p) (available * 0.42f).roundToInt().coerceIn(dp(148), dp(190))
                 else (available * 0.22f).roundToInt().coerceIn(dp(180), dp(220))
         listOf(zoomSlider, expSlider).forEach {
-            val l = it.layoutParams as LinearLayout.LayoutParams
+            val l = it.layoutParams as? LinearLayout.LayoutParams ?: return@forEach
             if (l.width != w) {
                 l.width = w
                 it.layoutParams = l
