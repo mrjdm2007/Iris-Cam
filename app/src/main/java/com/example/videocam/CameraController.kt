@@ -604,6 +604,7 @@ class CameraController(
     }
 
     private fun openCamera() {
+        activePhysicalLensId = null
         if (cameraIds.isEmpty()) {
             ui.onMessage("No usable camera found")
             return
@@ -727,7 +728,7 @@ class CameraController(
             // into a real portrait-sized encoder surface. Do not depend on MP4 rotation
             // metadata: some playback/inspection paths ignore it for Surface-input recordings.
             val initialPhysicalId = activePhysicalLensId
-        val initialRgb = initialPhysicalId?.let { cfg.rgbByLens[it]?.split(',')?.mapNotNull(String::toIntOrNull) }
+        val initialRgb = initialPhysicalId?.let { cfg.rgbByLens[it]?.split(',')?.mapNotNull { value -> value.trim().toIntOrNull() } }
         val gradeRed = initialRgb?.getOrNull(0)?.coerceIn(0, 200) ?: cfg.rgbRed
         val gradeGreen = initialRgb?.getOrNull(1)?.coerceIn(0, 200) ?: cfg.rgbGreen
         val gradeBlue = initialRgb?.getOrNull(2)?.coerceIn(0, 200) ?: cfg.rgbBlue
