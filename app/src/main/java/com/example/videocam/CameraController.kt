@@ -102,6 +102,9 @@ class CameraController(
         val filterId: Int,
         val filterIntensity: Int,
         val contrast: Int,
+        val rgbRed: Int,
+        val rgbGreen: Int,
+        val rgbBlue: Int,
         val hdrFactor: Float = 1f
     ) {
         var image: Image? = null // RAW only
@@ -688,7 +691,8 @@ class CameraController(
             }
             // The GL renderer writes physically upright frames, so don't add rotation metadata.
             // Without the renderer, let MediaRecorder carry the device orientation as metadata.
-            val useGlRenderer = cropIt || cfg.filterId > 0 || cfg.portrait
+            val hasRgb = cfg.rgbRed != 100 || cfg.rgbGreen != 100 || cfg.rgbBlue != 100
+            val useGlRenderer = cropIt || cfg.filterId > 0 || cfg.portrait || hasRgb
             rec.setOrientationHint(if (useGlRenderer) 0 else orientationHint())
             rec.setMaxFileSize(SPLIT_BYTES)
             rec.setOnInfoListener { mr, what, _ -> onRecorderInfo(mr, what) }
@@ -700,9 +704,9 @@ class CameraController(
             }
             rec.prepare()
             recorder = rec
-            if (cropIt || cfg.filterId > 0 || cfg.portrait) {
+            if (cropIt || cfg.filterId > 0 || cfg.portrait || hasRgb) {
                 val rot = tv.display?.rotation ?: Surface.ROTATION_90
-                val matrix = if (cfg.filterId > 0) Look.videoFilterMatrix(cfg.filterId, cfg.filterIntensity) else null
+                val matrix = Look.videoFilterMatrix(cfg.filterId, cfg.filterIntensity, cfg.rgbRed, cfg.rgbGreen, cfg.rgbBlue)
                 crop = CropRenderer(
                     rec.surface, os.width, os.height, cfg.width, cfg.height, rot,
                     fullFrame = !cropIt, filterMatrix = matrix,
@@ -1202,7 +1206,7 @@ class CameraController(
         // JPEG_R must be saved byte-for-byte to preserve its gain map. If a pixel filter
         // is selected, use ordinary JPEG so the requested look is actually rendered.
         cfg.photoFormat == 3 && ultraHdrAvailable &&
-            cfg.filterId == 0 && !cfg.flat -> ImageFormat.JPEG_R
+            cfg.filterId == 0 && !cfg.flat && cfg.rgbRed == 100 && cfg.rgbGreen == 100 && cfg.rgbBlue == 100 -> ImageFormat.JPEG_R
         else -> ImageFormat.JPEG
     }
 
@@ -1689,7 +1693,8 @@ class CameraController(
             val sh = Shot(
                 cfg.cameraId, fmt, chars, needRotation(), cfg.photoQuality, reqs.size,
                 cfg.bw, cfg.flat && !cfg.bw, cfg.photoLook, bracket != null, false, cfg.glow, cfg.blue,
-                cfg.filterId, cfg.photoFilterIntensity, (cfg.photoContrastByLens[cfg.cameraId] ?: cfg.photoContrast).coerceIn(0, 100), if (bracket != null) 8f else 1f
+                cfg.filterId, cfg.photoFilterIntensity, (cfg.photoContrastByLens[cfg.cameraId] ?: cfg.photoContrast).coerceIn(0, 100),
+                cfg.rgbRed, cfg.rgbGreen, cfg.rgbBlue, if (bracket != null) 8f else 1f
             )
             synchronized(lock) { shot = sh }
             if (plan != null && plan.expNs * reqs.size >= 1_500_000_000L) {
@@ -1802,7 +1807,29 @@ class CameraController(
             out.recycle()
             out = contrasted
         }
+        val rgb = Look.applyRgb(out, sh.rgbRed, sh.rgbGreen, sh.rgbBlue)
+        if (rgb !== out) {
+            out.recycle()
+            out = rgb
+        }
         return out
+    }
+
+    private fun applyRgbToJpeg(bytes: ByteArray, sh: Shot): ByteArray {
+        if (sh.rgbRed == 100 && sh.rgbGreen == 100 && sh.rgbBlue == 100) return bytes
+        val src = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+            ?: throw IllegalStateException("Unable to decode an RGB-adjusted HDR frame")
+        val adjusted = Look.applyRgb(src, sh.rgbRed, sh.rgbGreen, sh.rgbBlue)
+        if (adjusted !== src) src.recycle()
+        return try {
+            ByteArrayOutputStream().use { stream ->
+                if (!adjusted.compress(Bitmap.CompressFormat.JPEG, 98, stream))
+                    throw IllegalStateException("Unable to encode an RGB-adjusted HDR frame")
+                stream.toByteArray()
+            }
+        } finally {
+            adjusted.recycle()
+        }
     }
 
     private fun processShot(sh: Shot) {
@@ -1817,10 +1844,10 @@ class CameraController(
             } else if (sh.hdr && sh.jpegs.size >= 4) {
                 // Four-frame order: -3 EV, 0 EV, +1 EV, +3 EV.
                 // Rotate each frame to upright pixels before analysing and building the gain map.
-                val darkBytes = uprightJpeg(sh.jpegs[0], sh.rotDeg)
-                val baseBytes = uprightJpeg(sh.jpegs[1], sh.rotDeg)
-                val midBrightBytes = uprightJpeg(sh.jpegs[2], sh.rotDeg)
-                val brightBytes = uprightJpeg(sh.jpegs[3], sh.rotDeg)
+                val darkBytes = applyRgbToJpeg(uprightJpeg(sh.jpegs[0], sh.rotDeg), sh)
+                val baseBytes = applyRgbToJpeg(uprightJpeg(sh.jpegs[1], sh.rotDeg), sh)
+                val midBrightBytes = applyRgbToJpeg(uprightJpeg(sh.jpegs[2], sh.rotDeg), sh)
+                val brightBytes = applyRgbToJpeg(uprightJpeg(sh.jpegs[3], sh.rotDeg), sh)
                 val blob = UltraHdr.build(baseBytes, darkBytes, midBrightBytes, brightBytes, sh.hdrFactor)
                 if (blob != null) {
                     saved = saveBytes(blob, "$base.jpg")
@@ -1852,7 +1879,8 @@ class CameraController(
                 out.recycle()
             } else {
                 val bytes = sh.jpegs[0]
-                saved = if ((sh.filterId > 0 && sh.filterIntensity > 0) || sh.contrast > 0 || sh.flat || sh.bw || sh.photoLook != 0) {
+                saved = if ((sh.filterId > 0 && sh.filterIntensity > 0) || sh.contrast > 0 || sh.flat || sh.bw || sh.photoLook != 0 ||
+                    sh.rgbRed != 100 || sh.rgbGreen != 100 || sh.rgbBlue != 100) {
                     val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
                     val out = finishLook(rotateBy(bmp, sh.rotDeg), sh)
                     val u = saveBitmap(out, "$base.jpg", sh.quality)

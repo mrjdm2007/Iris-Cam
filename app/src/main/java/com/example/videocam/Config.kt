@@ -85,6 +85,9 @@ data class Config(
     var filterId: Int = 27,          // default Sony S-Cinetone-inspired colour profile; 0 = Natural
     var filterIntensity: Int = 100,  // default video look strength, 0..100
     var photoFilterIntensity: Int = 100, // default photo look strength, 0..100
+    var rgbRed: Int = 100, // independent RGB channel intensity, 0..200%; 100 = neutral
+    var rgbGreen: Int = 100,
+    var rgbBlue: Int = 100,
     var photoContrast: Int = 40, // fallback contrast strength, 0..100
     var photoContrastByLens: MutableMap<String, Int> = mutableMapOf(), // per-camera photo contrast
     var smartIso: Boolean = true, // auto photo ISO cap at 500
@@ -140,6 +143,9 @@ data class Config(
         filterId = o.filterId
         filterIntensity = o.filterIntensity
         photoFilterIntensity = o.photoFilterIntensity
+        rgbRed = o.rgbRed
+        rgbGreen = o.rgbGreen
+        rgbBlue = o.rgbBlue
         photoContrast = o.photoContrast
         photoContrastByLens = o.photoContrastByLens.toMutableMap()
         smartIso = o.smartIso
@@ -196,6 +202,9 @@ data class Config(
         .put("filterId", filterId)
         .put("filterIntensity", filterIntensity)
         .put("photoFilterIntensity", photoFilterIntensity)
+        .put("rgbRed", rgbRed.coerceIn(0, 200))
+        .put("rgbGreen", rgbGreen.coerceIn(0, 200))
+        .put("rgbBlue", rgbBlue.coerceIn(0, 200))
         .put("photoContrast", photoContrast)
         .put("photoContrastByLens", JSONObject().apply { photoContrastByLens.forEach { (lens, value) -> put(lens, value.coerceIn(0, 100)) } })
         .put("smartIso", smartIso)
@@ -289,6 +298,9 @@ data class Config(
                 filterId = finalFilterId,
                 filterIntensity = finalVideoIntensity,
                 photoFilterIntensity = finalPhotoIntensity,
+                rgbRed = o.optInt("rgbRed", d.rgbRed).coerceIn(0, 200),
+                rgbGreen = o.optInt("rgbGreen", d.rgbGreen).coerceIn(0, 200),
+                rgbBlue = o.optInt("rgbBlue", d.rgbBlue).coerceIn(0, 200),
                 photoContrast = o.optInt("photoContrast", d.photoContrast).coerceIn(0, 100),
                 photoContrastByLens = lensContrast,
                 smartIso = o.optBoolean("smartIso", d.smartIso),

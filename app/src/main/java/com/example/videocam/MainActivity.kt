@@ -1530,13 +1530,76 @@ class MainActivity : Activity(), CameraController.Callbacks {
             }
         }
         val activeIntensity = if (cfg.mode == 1) cfg.photoFilterIntensity else cfg.filterIntensity
-        return items + ("Intensity: ${activeIntensity}%" to {
-            choose("Filter intensity", (0..100 step 10).map { "$it%" }) {
-                if (cfg.mode == 1) cfg.photoFilterIntensity = it * 10 else cfg.filterIntensity = it * 10
+        return items + listOf(
+            ("Intensity: ${activeIntensity}%" to {
+                choose("Filter intensity", (0..100 step 10).map { "$it%" }) {
+                    if (cfg.mode == 1) cfg.photoFilterIntensity = it * 10 else cfg.filterIntensity = it * 10
+                    cfgDirty = true
+                    if (cfg.mode == 0) streamChanged() else applyLive()
+                }
+            }),
+            ("RGB channels · R ${cfg.rgbRed}% · G ${cfg.rgbGreen}% · B ${cfg.rgbBlue}%" to { showRgbSliders() })
+        )
+    }
+
+    private fun showRgbSliders() {
+        if (!idle()) return
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(8), dp(20), dp(8))
+        }
+        fun addChannel(name: String, initial: Int, setValue: (Int) -> Unit) {
+            val label = TextView(this).apply {
+                text = "$name · ${initial}%"
+                setTextColor(0xFFF3F0E8.toInt())
+                textSize = 12f
+            }
+            val seek = SeekBar(this).apply {
+                max = 200
+                progress = initial.coerceIn(0, 200)
+                setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                    override fun onProgressChanged(bar: SeekBar?, value: Int, fromUser: Boolean) {
+                        label.text = "$name · ${value}%"
+                        if (fromUser) {
+                            setValue(value.coerceIn(0, 200))
+                            cfgDirty = true
+                            applyBwLook()
+                        }
+                    }
+                    override fun onStartTrackingTouch(bar: SeekBar?) {}
+                    override fun onStopTrackingTouch(bar: SeekBar?) {
+                        if (cfg.mode == 0) streamChanged() else {
+                            store.save("last", cfg)
+                            refreshUi()
+                        }
+                    }
+                })
+            }
+            box.addView(label, LinearLayout.LayoutParams(MATCH, WRAP))
+            box.addView(seek, LinearLayout.LayoutParams(MATCH, WRAP).apply { bottomMargin = dp(10) })
+        }
+        addChannel("RED", cfg.rgbRed) { cfg.rgbRed = it }
+        addChannel("GREEN", cfg.rgbGreen) { cfg.rgbGreen = it }
+        addChannel("BLUE", cfg.rgbBlue) { cfg.rgbBlue = it }
+        MaterialAlertDialogBuilder(this)
+            .setTitle("RGB channel controls")
+            .setMessage("Independent channel intensity · 100% is neutral · range 0–200%.")
+            .setView(box)
+            .setPositiveButton("Done") { _, _ ->
+                if (cfg.mode == 0) streamChanged() else {
+                    store.save("last", cfg)
+                    refreshUi()
+                }
+            }
+            .setNeutralButton("Reset to 100%") { _, _ ->
+                cfg.rgbRed = 100
+                cfg.rgbGreen = 100
+                cfg.rgbBlue = 100
                 cfgDirty = true
+                applyBwLook()
                 if (cfg.mode == 0) streamChanged() else applyLive()
             }
-        })
+            .show()
     }
 
     private fun showPhotoContrastSlider(lensId: String = cfg.cameraId) {
@@ -2811,6 +2874,9 @@ class MainActivity : Activity(), CameraController.Callbacks {
 
     private var appliedPreviewFilterId = Int.MIN_VALUE
     private var appliedPreviewFilterIntensity = Int.MIN_VALUE
+    private var appliedPreviewRgbRed = Int.MIN_VALUE
+    private var appliedPreviewRgbGreen = Int.MIN_VALUE
+    private var appliedPreviewRgbBlue = Int.MIN_VALUE
     private var previewFilterWarningShown = false
 
     private fun applyBwLook() {
@@ -2821,18 +2887,27 @@ class MainActivity : Activity(), CameraController.Callbacks {
         // use the strength belonging to the active mode, not always the video value.
         val intensity = if (cfg.mode == 1) cfg.photoFilterIntensity else cfg.filterIntensity
         if (appliedPreviewFilterId == cfg.filterId &&
-            appliedPreviewFilterIntensity == intensity) return
+            appliedPreviewFilterIntensity == intensity &&
+            appliedPreviewRgbRed == cfg.rgbRed && appliedPreviewRgbGreen == cfg.rgbGreen &&
+            appliedPreviewRgbBlue == cfg.rgbBlue) return
         try {
-            val paint = if (cfg.filterId > 0) Paint().apply {
-                colorFilter = Look.previewFilter(cfg.filterId, intensity)
+            val hasRgb = cfg.rgbRed != 100 || cfg.rgbGreen != 100 || cfg.rgbBlue != 100
+            val paint = if (cfg.filterId > 0 || hasRgb) Paint().apply {
+                colorFilter = Look.previewFilter(cfg.filterId, intensity, cfg.rgbRed, cfg.rgbGreen, cfg.rgbBlue)
             } else null
             tv.setLayerPaint(paint)
             appliedPreviewFilterId = cfg.filterId
             appliedPreviewFilterIntensity = intensity
+            appliedPreviewRgbRed = cfg.rgbRed
+            appliedPreviewRgbGreen = cfg.rgbGreen
+            appliedPreviewRgbBlue = cfg.rgbBlue
         } catch (e: RuntimeException) {
             runCatching { tv.setLayerPaint(null) }
             appliedPreviewFilterId = cfg.filterId
             appliedPreviewFilterIntensity = cfg.filterIntensity
+            appliedPreviewRgbRed = cfg.rgbRed
+            appliedPreviewRgbGreen = cfg.rgbGreen
+            appliedPreviewRgbBlue = cfg.rgbBlue
             if (!previewFilterWarningShown) {
                 previewFilterWarningShown = true
                 toast("Preview filter unavailable on this device; camera preview is continuing")
