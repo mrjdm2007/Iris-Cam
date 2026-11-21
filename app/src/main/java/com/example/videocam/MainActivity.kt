@@ -270,7 +270,12 @@ class MainActivity : Activity(), CameraController.Callbacks {
             cfg.upscale = false
             cfgDirty = true
         }
-        lastLandscapeRatio = cfg.ratio
+        val orientationPrefs = getSharedPreferences("videocam", MODE_PRIVATE)
+        lastLandscapeRatio = if (cfg.portrait) {
+            orientationPrefs.getInt("lastLandscapeRatio", cfg.ratio).coerceIn(0, Ratios.NAMES.lastIndex)
+        } else {
+            cfg.ratio.also { orientationPrefs.edit().putInt("lastLandscapeRatio", it).apply() }
+        }
         applyRequestedOrientation()
         buildUi()
         rebuildSamplers()
@@ -1235,7 +1240,11 @@ class MainActivity : Activity(), CameraController.Callbacks {
                 videoOri = target
                 if (wasPortrait != nowPortrait) {
                     if (nowPortrait) {
-                        if (cfg.ratio != 0) lastLandscapeRatio = cfg.ratio
+                        if (cfg.ratio != 0) {
+                            lastLandscapeRatio = cfg.ratio
+                            getSharedPreferences("videocam", MODE_PRIVATE).edit()
+                                .putInt("lastLandscapeRatio", lastLandscapeRatio).apply()
+                        }
                         cfg.ratio = 0
                     } else {
                         cfg.ratio = lastLandscapeRatio
@@ -2058,6 +2067,8 @@ class MainActivity : Activity(), CameraController.Callbacks {
         if (!idle()) return
         choose("Aspect ratio", Ratios.NAMES) {
             cfg.ratio = it
+            lastLandscapeRatio = it
+            getSharedPreferences("videocam", MODE_PRIVATE).edit().putInt("lastLandscapeRatio", it).apply()
             if (it > 0 && cfg.fps > 60) {
                 cfg.fps = 30
                 toast("Cinematic aspect ratios record up to 60 fps; switched to 30 fps")
