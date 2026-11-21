@@ -2080,10 +2080,16 @@ class MainActivity : Activity(), CameraController.Callbacks {
             .setTitle("Video contrast · $lensName")
             .setMessage("Saved separately for this lens and independently from photo contrast. 0% leaves the image unchanged.")
             .setView(box)
-            .setPositiveButton("Done", null)
+            .setPositiveButton("Done") { _, _ ->
+                cfgDirty = true
+                store.save("last", cfg)
+                if (lensId == cfg.cameraId) streamChanged()
+            }
             .setNeutralButton("Reset to 10%") { _, _ ->
                 cfg.videoContrastByLens[lensId] = 10
                 cfgDirty = true
+                store.save("last", cfg)
+                if (lensId == cfg.cameraId) streamChanged()
                 toast("$lensName video contrast reset to 10%")
             }
             .show()
@@ -2132,10 +2138,16 @@ class MainActivity : Activity(), CameraController.Callbacks {
             .setTitle("Photo contrast · $lensName")
             .setMessage("Saved separately for this lens. 0% leaves the image unchanged.")
             .setView(box)
-            .setPositiveButton("Done", null)
+            .setPositiveButton("Done") { _, _ ->
+                cfgDirty = true
+                store.save("last", cfg)
+                if (lensId == cfg.cameraId) applyLive()
+            }
             .setNeutralButton("Reset to 10%") { _, _ ->
                 cfg.photoContrastByLens[lensId] = 10
                 cfgDirty = true
+                store.save("last", cfg)
+                if (lensId == cfg.cameraId) applyLive()
                 toast("$lensName photo contrast reset to 10%")
             }
             .show()
@@ -2474,7 +2486,9 @@ class MainActivity : Activity(), CameraController.Callbacks {
 
     private fun switchLens(id: String) {
         if (!idle()) return
+        saveActiveLensRgb()
         cfg.cameraId = id
+        loadLensRgb(cfg.cameraId)
         cfg.photoW = 0
         cfg.photoH = 0
         store.save("last", cfg)
