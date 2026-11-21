@@ -2034,7 +2034,6 @@ class MainActivity : Activity(), CameraController.Callbacks {
                     if (cfg.mode == 0) streamChanged() else applyLive()
                 }
             }),
-            ("RGB channels · ${runCatching { cam.cameraLabel(cfg.cameraId) }.getOrDefault(cfg.cameraId)} · R ${cfg.rgbRed}% · G ${cfg.rgbGreen}% · B ${cfg.rgbBlue}%" to { showRgbSliders() })
         )
     }
 
@@ -2240,7 +2239,6 @@ class MainActivity : Activity(), CameraController.Callbacks {
 
     private fun photoImageItems(): List<Pair<String, () -> Unit>> = listOf(
         "Contrast by lens: ${runCatching { cam.cameraLabel(cfg.cameraId) }.getOrDefault(cfg.cameraId)} · ${(cfg.photoContrastByLens[cfg.cameraId] ?: cfg.photoContrast).coerceIn(0, 100)}%" to { showLensContrastPicker() },
-        "RGB channels · ${runCatching { cam.cameraLabel(cfg.cameraId) }.getOrDefault(cfg.cameraId)} · R ${cfg.rgbRed}% · G ${cfg.rgbGreen}% · B ${cfg.rgbBlue}%" to { showRgbSliders() },
         "Fast moving objects: ${if (cfg.fastMovingObjects) "On" else "Off"} · Main lens only" to {
             if (cfg.cameraId != "0") {
                 toast("Select the Main 1× lens to use Fast Moving Objects")
