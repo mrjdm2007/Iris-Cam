@@ -1805,8 +1805,44 @@ class MainActivity : Activity(), CameraController.Callbacks {
             refreshUi()
         },
         "Edit layout" to { setEditing(true) },
-        "Phone capabilities" to { showCapabilities() }
+        "Phone capabilities" to { showCapabilities() },
+        "Export selected lens calibration report" to { exportSensorCalibrationReport() }
     )
+
+    private fun exportSensorCalibrationReport() {
+        // Capture the selected ID and label before background I/O so the filename and data stay aligned.
+        val cameraId = cfg.cameraId
+        val cameraLabel = runCatching { cam.cameraLabel(cameraId) }.getOrDefault("Camera $cameraId")
+        val safeLabel = cameraLabel.replace(Regex("[^A-Za-z0-9_-]+"), "_").trim('_')
+        Thread {
+            var uri: Uri? = null
+            try {
+                val json = cam.sensorDiagnosticsJson(cameraId)
+                val stamp = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US)
+                    .format(java.util.Date())
+                val filename = "IrisCam_${safeLabel.ifBlank { "Camera_$cameraId" }}_ID${cameraId}_Calibration_$stamp.json"
+                val values = android.content.ContentValues().apply {
+                    put(MediaStore.MediaColumns.DISPLAY_NAME, filename)
+                    put(MediaStore.MediaColumns.MIME_TYPE, "application/json")
+                    put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/IrisCamCalibration")
+                    put(MediaStore.MediaColumns.IS_PENDING, 1)
+                }
+                uri = contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                    ?: throw IllegalStateException("Android couldn't create the report file")
+                contentResolver.openOutputStream(uri!!, "w")?.use { stream ->
+                    stream.write(json.toByteArray(Charsets.UTF_8))
+                    stream.flush()
+                } ?: throw IllegalStateException("Couldn't write the report file")
+                contentResolver.update(uri!!, android.content.ContentValues().apply {
+                    put(MediaStore.MediaColumns.IS_PENDING, 0)
+                }, null, null)
+                runOnUiThread { toast("Saved: Downloads/IrisCamCalibration/$filename") }
+            } catch (e: Exception) {
+                uri?.let { runCatching { contentResolver.delete(it, null, null) } }
+                runOnUiThread { toast("Calibration export failed: ${e.message ?: "unknown error"}") }
+            }
+        }.start()
+    }
 
     // ---------- refresh ----------
 

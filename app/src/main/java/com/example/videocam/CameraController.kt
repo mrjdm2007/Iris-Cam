@@ -134,6 +134,7 @@ class CameraController(
 
     private lateinit var chars: CameraCharacteristics
     private var map: StreamConfigurationMap? = null
+    private val latestCaptureResults = java.util.concurrent.ConcurrentHashMap<String, TotalCaptureResult>()
 
     private var device: CameraDevice? = null
     private var session: CameraCaptureSession? = null
@@ -249,6 +250,112 @@ class CameraController(
             override fun onSurfaceTextureSizeChanged(st: SurfaceTexture, w: Int, h: Int) {}
             override fun onSurfaceTextureDestroyed(st: SurfaceTexture): Boolean = true
             override fun onSurfaceTextureUpdated(st: SurfaceTexture) {}
+        }
+    }
+
+    /**
+     * Device-reported Camera2 calibration metadata for one selected camera.
+     * This is metadata diagnostics, not a laboratory spectral sensitivity measurement.
+     */
+    fun sensorDiagnosticsJson(id: String): String {
+        require(id in cameraIds) { "Camera $id is not available on this device" }
+        val c = manager.getCameraCharacteristics(id)
+        val caps = c.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES) ?: intArrayOf()
+        val result = latestCaptureResults[id]
+        val root = org.json.JSONObject()
+        root.put("schema", "iris-cam-camera-sensor-diagnostics-v3")
+        root.put("capturedAt", java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSXXX", java.util.Locale.US).format(java.util.Date()))
+        root.put("device", org.json.JSONObject()
+            .put("manufacturer", Build.MANUFACTURER)
+            .put("brand", Build.BRAND)
+            .put("model", Build.MODEL)
+            .put("device", Build.DEVICE)
+            .put("androidRelease", Build.VERSION.RELEASE)
+            .put("sdkInt", Build.VERSION.SDK_INT)
+            .put("fingerprint", Build.FINGERPRINT))
+        root.put("camera", org.json.JSONObject()
+            .put("cameraId", id)
+            .put("cameraLabel", cameraLabel(id))
+            .put("lensFacing", c.get(CameraCharacteristics.LENS_FACING) ?: org.json.JSONObject.NULL)
+            .put("focalLengthsMm", c.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.let { values ->
+                org.json.JSONArray().apply { values.forEach { put(it.toDouble()) } }
+            } ?: org.json.JSONObject.NULL)
+            .put("physicalSensorSizeMm", c.get(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE)?.let {
+                org.json.JSONArray().put(it.width.toDouble()).put(it.height.toDouble())
+            } ?: org.json.JSONObject.NULL)
+            .put("pixelArraySize", c.get(CameraCharacteristics.SENSOR_INFO_PIXEL_ARRAY_SIZE)?.let {
+                org.json.JSONObject().put("width", it.width).put("height", it.height)
+            } ?: org.json.JSONObject.NULL)
+            .put("activeArray", c.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)?.toString() ?: org.json.JSONObject.NULL))
+        root.put("sensor", org.json.JSONObject()
+            .put("colorFilterArrangement", c.get(CameraCharacteristics.SENSOR_INFO_COLOR_FILTER_ARRANGEMENT) ?: org.json.JSONObject.NULL)
+            .put("whiteLevel", c.get(CameraCharacteristics.SENSOR_INFO_WHITE_LEVEL) ?: org.json.JSONObject.NULL)
+            .put("blackLevelPattern", c.get(CameraCharacteristics.SENSOR_BLACK_LEVEL_PATTERN)?.let { p ->
+                org.json.JSONArray().apply { for (i in 0..3) put(p.getOffsetForIndex(i % 2, i / 2)) }
+            } ?: org.json.JSONObject.NULL)
+            .put("sensitivityRange", c.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)?.let {
+                org.json.JSONArray().put(it.lower).put(it.upper)
+            } ?: org.json.JSONObject.NULL)
+            .put("exposureTimeRangeNs", c.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)?.let {
+                org.json.JSONArray().put(it.lower).put(it.upper)
+            } ?: org.json.JSONObject.NULL)
+            .put("referenceIlluminant1", c.get(CameraCharacteristics.SENSOR_REFERENCE_ILLUMINANT1) ?: org.json.JSONObject.NULL)
+            .put("referenceIlluminant2", c.get(CameraCharacteristics.SENSOR_REFERENCE_ILLUMINANT2) ?: org.json.JSONObject.NULL)
+            .put("rawCapability", caps.contains(CameraMetadata.REQUEST_AVAILABLE_CAPABILITIES_RAW))
+            .put("manualSensorCapability", caps.contains(CameraMetadata.REQUEST_AVAILABLE_CAPABILITIES_MANUAL_SENSOR))
+            .put("capabilityValues", org.json.JSONArray().apply { caps.forEach { put(it) } }))
+        root.put("calibrationMatrices", org.json.JSONObject()
+            .put("colorTransform1", transformJson(c.get(CameraCharacteristics.SENSOR_COLOR_TRANSFORM1)))
+            .put("colorTransform2", transformJson(c.get(CameraCharacteristics.SENSOR_COLOR_TRANSFORM2)))
+            .put("calibrationTransform1", transformJson(c.get(CameraCharacteristics.SENSOR_CALIBRATION_TRANSFORM1)))
+            .put("calibrationTransform2", transformJson(c.get(CameraCharacteristics.SENSOR_CALIBRATION_TRANSFORM2)))
+            .put("forwardMatrix1", transformJson(c.get(CameraCharacteristics.SENSOR_FORWARD_MATRIX1)))
+            .put("forwardMatrix2", transformJson(c.get(CameraCharacteristics.SENSOR_FORWARD_MATRIX2))))
+        val live = org.json.JSONObject().put("available", result != null)
+        if (result != null) {
+            live.put("sensorSensitivityIso", result.get(CaptureResult.SENSOR_SENSITIVITY) ?: org.json.JSONObject.NULL)
+            live.put("exposureTimeNs", result.get(CaptureResult.SENSOR_EXPOSURE_TIME) ?: org.json.JSONObject.NULL)
+            live.put("colorCorrectionMode", result.get(CaptureResult.COLOR_CORRECTION_MODE) ?: org.json.JSONObject.NULL)
+            live.put("colorCorrectionTransform", transformJson(result.get(CaptureResult.COLOR_CORRECTION_TRANSFORM)))
+            live.put("colorCorrectionGains", result.get(CaptureResult.COLOR_CORRECTION_GAINS)?.let {
+                org.json.JSONArray().put(it.red.toDouble()).put(it.greenEven.toDouble()).put(it.greenOdd.toDouble()).put(it.blue.toDouble())
+            } ?: org.json.JSONObject.NULL)
+            live.put("awbMode", result.get(CaptureResult.CONTROL_AWB_MODE) ?: org.json.JSONObject.NULL)
+            live.put("awbState", result.get(CaptureResult.CONTROL_AWB_STATE) ?: org.json.JSONObject.NULL)
+            live.put("neutralColorPoint", result.get(CaptureResult.SENSOR_NEUTRAL_COLOR_POINT)?.let {
+                rationalArrayJson(it)
+            } ?: org.json.JSONObject.NULL)
+            live.put("greenSplit", result.get(CaptureResult.SENSOR_GREEN_SPLIT) ?: org.json.JSONObject.NULL)
+        }
+        root.put("latestSelectedCameraCaptureResult", live)
+        root.put("notes", org.json.JSONArray()
+            .put("Optional Camera2 metadata keys may be absent on this device.")
+            .put("Live values are from the most recently completed preview result while this camera ID was selected.")
+            .put("This report does not measure spectral response or replace a colour-chart validation."))
+        return root.toString(2)
+    }
+
+    private fun rationalArrayJson(values: Array<android.util.Rational>): org.json.JSONArray =
+        org.json.JSONArray().apply {
+            values.forEach { value ->
+                put(org.json.JSONObject()
+                    .put("numerator", value.numerator)
+                    .put("denominator", value.denominator)
+                    .put("value", value.numerator.toDouble() / value.denominator.toDouble()))
+            }
+        }
+
+    private fun transformJson(transform: android.hardware.camera2.params.ColorSpaceTransform?): org.json.JSONArray? {
+        if (transform == null) return null
+        val elements = Array(9) { android.util.Rational(0, 1) }
+        transform.copyElements(elements, 0)
+        return org.json.JSONArray().apply {
+            elements.forEach { value ->
+                put(org.json.JSONObject()
+                    .put("numerator", value.numerator)
+                    .put("denominator", value.denominator)
+                    .put("value", value.numerator.toDouble() / value.denominator.toDouble()))
+            }
         }
     }
 
@@ -1136,6 +1243,8 @@ class CameraController(
                 }
             }
             liveFocus = res.get(CaptureResult.LENS_FOCUS_DISTANCE) ?: -1f
+            // Retain the latest completed preview result for the selected lens diagnostics export.
+            latestCaptureResults[cfg.cameraId] = res
             if (!(cfg.faceAf && faceAfSupported)) return
             val now = SystemClock.elapsedRealtime()
             if (now - last < 400) return
