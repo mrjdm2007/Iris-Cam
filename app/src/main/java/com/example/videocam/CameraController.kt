@@ -1770,9 +1770,6 @@ class CameraController(
             if (effMode() == 2 && bracket == null) {
                 handler.post { ui.onMessage("Not enough exposure range for Ultra HDR here, saving a normal JPEG") }
             }
-            if (bracket != null && (cfg.filterId > 0 || cfg.flat || cfg.bw || cfg.photoLook != 0)) {
-                handler.post { ui.onMessage("Four-frame Ultra HDR uses the camera JPEG directly; photo looks and the flat profile are bypassed.") }
-            }
             val reqs = ArrayList<CaptureRequest>()
             val count = bracket?.exp?.size ?: plan?.frames ?: 1
             for (i in 0 until count) {
