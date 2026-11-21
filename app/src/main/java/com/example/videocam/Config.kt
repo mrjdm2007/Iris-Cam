@@ -98,7 +98,7 @@ data class Config(
     var chromaticAberrationCorrection: Boolean = true, // request ISP lateral colour-fringe correction
     var lensKeys: Boolean = false,   // show the 0.5x / 1x / 2.7x shortcut buttons
     var haptics: Boolean = true,     // subtle shutter and manual slider feedback
-    var ver: Int = 6
+    var ver: Int = 7
 ) {
     fun copyFrom(o: Config) {
         cameraId = o.cameraId
@@ -288,7 +288,7 @@ data class Config(
                 grid = o.optInt("grid", d.grid),
                 ratio = o.optInt("ratio", d.ratio),
                 gridFlip = o.optInt("gridFlip", d.gridFlip),
-                previewP = o.optInt("previewP", d.previewP),
+                previewP = if (oldVersion < 7 && o.optInt("previewP", d.previewP) == 1080) 720 else o.optInt("previewP", d.previewP),
                 antiband = o.optInt("antiband", d.antiband),
                 zoomMethod = o.optInt("zoomMethod", d.zoomMethod),
                 peak = o.optInt("peak", d.peak),
@@ -324,7 +324,7 @@ data class Config(
                 chromaticAberrationCorrection = o.optBoolean("chromaticAberrationCorrection", d.chromaticAberrationCorrection),
                 lensKeys = o.optBoolean("lensKeys", d.lensKeys),
                 haptics = o.optBoolean("haptics", d.haptics),
-                ver = o.optInt("ver", d.ver).coerceIn(0, 6)
+                ver = o.optInt("ver", d.ver).coerceIn(0, 7)
             )
         }
     }
