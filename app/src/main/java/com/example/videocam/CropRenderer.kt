@@ -39,7 +39,6 @@ class CropRenderer(
     private val effectStrength: Float = 1f,
     contrastStrength: Float = 0.1f,
     private val portraitOutput: Boolean = false,
-    private val portraitRotationDegrees: Int = 90,
     private val onRenderError: ((String) -> Unit)? = null
 ) {
     private val thread = HandlerThread("crop-gl").apply { start() }
@@ -188,37 +187,23 @@ class CropRenderer(
         aPos = GLES20.glGetAttribLocation(program, "aPos")
         aTc = GLES20.glGetAttribLocation(program, "aTc")
 
-        // Camera2 supplies a landscape sensor buffer. Portrait recordings must rotate
-        // the texture into a genuinely portrait-sized encoder surface; metadata-only rotation
-        // leaves some players displaying a squeezed landscape frame.
-        if (portraitOutput) {
-            require(outW < outH) { "Portrait GL output must use portrait encoder dimensions ($outW x $outH)" }
-            require(srcW > srcH) { "Portrait GL input must retain landscape sensor dimensions ($srcW x $srcH)" }
-            require(portraitRotationDegrees == 90 || portraitRotationDegrees == 270) {
-                "Unsupported portrait sensor/display rotation: $portraitRotationDegrees"
-            }
-        }
-        val yh = if (portraitOutput) {
-            (outW * srcW.toFloat() / srcH.coerceAtLeast(1)) / outH.coerceAtLeast(1)
+        // Restore workflow #497's handling: SurfaceTexture's transform already
+        // presents the camera frame upright. Do not add another quarter-turn here.
+        val sourceAspect = if (portraitOutput) {
+            srcH.toFloat() / srcW.coerceAtLeast(1)
         } else {
-            (outW * srcH.toFloat() / srcW.coerceAtLeast(1)) / outH.coerceAtLeast(1)
+            srcW.toFloat() / srcH.coerceAtLeast(1)
         }
+        val targetAspect = outW.toFloat() / outH.coerceAtLeast(1)
+        val cropX = maxOf(1f, sourceAspect / targetAspect)
+        val cropY = maxOf(1f, targetAspect / sourceAspect)
         val q = if (portraitOutput) {
-            when (portraitRotationDegrees) {
-                90 -> floatArrayOf(
-                    -1f, -yh, 1f, 0f,
-                     1f, -yh, 1f, 1f,
-                    -1f,  yh, 0f, 0f,
-                     1f,  yh, 0f, 1f
-                )
-                270 -> floatArrayOf(
-                    -1f, -yh, 0f, 1f,
-                     1f, -yh, 0f, 0f,
-                    -1f,  yh, 1f, 1f,
-                     1f,  yh, 1f, 0f
-                )
-                else -> error("Unsupported portrait rotation")
-            }
+            floatArrayOf(
+                -cropX, -cropY, 0f, 0f,
+                 cropX, -cropY, 1f, 0f,
+                -cropX,  cropY, 0f, 1f,
+                 cropX,  cropY, 1f, 1f
+            )
         } else {
             val yh = (outW * srcH.toFloat() / srcW.coerceAtLeast(1)) / outH.coerceAtLeast(1)
             val xh = maxOf(1f, 1f / yh)
