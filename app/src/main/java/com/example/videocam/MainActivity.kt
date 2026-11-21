@@ -3053,6 +3053,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
     private var appliedPreviewRgbRed = Int.MIN_VALUE
     private var appliedPreviewRgbGreen = Int.MIN_VALUE
     private var appliedPreviewRgbBlue = Int.MIN_VALUE
+    private var appliedPreviewVideoContrast = Int.MIN_VALUE
     private var previewFilterWarningShown = false
 
     private fun applyBwLook() {
@@ -3062,14 +3063,16 @@ class MainActivity : Activity(), CameraController.Callbacks {
         // Photo and video modes keep independent filter strengths. The preview must
         // use the strength belonging to the active mode, not always the video value.
         val intensity = if (cfg.mode == 1) cfg.photoFilterIntensity else cfg.filterIntensity
+        val videoContrast = if (cfg.mode == 0) (cfg.videoContrastByLens[cfg.cameraId] ?: 0).coerceIn(0, 100) else 0
         if (appliedPreviewFilterId == cfg.filterId &&
             appliedPreviewFilterIntensity == intensity &&
             appliedPreviewRgbRed == cfg.rgbRed && appliedPreviewRgbGreen == cfg.rgbGreen &&
-            appliedPreviewRgbBlue == cfg.rgbBlue) return
+            appliedPreviewRgbBlue == cfg.rgbBlue &&
+            appliedPreviewVideoContrast == videoContrast) return
         try {
             val hasRgb = cfg.rgbRed != 100 || cfg.rgbGreen != 100 || cfg.rgbBlue != 100
             val paint = if (cfg.filterId > 0 || hasRgb) Paint().apply {
-                colorFilter = Look.previewFilter(cfg.filterId, intensity, cfg.rgbRed, cfg.rgbGreen, cfg.rgbBlue)
+                colorFilter = Look.previewFilter(cfg.filterId, intensity, cfg.rgbRed, cfg.rgbGreen, cfg.rgbBlue, videoContrast)
             } else null
             tv.setLayerPaint(paint)
             appliedPreviewFilterId = cfg.filterId
@@ -3077,6 +3080,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
             appliedPreviewRgbRed = cfg.rgbRed
             appliedPreviewRgbGreen = cfg.rgbGreen
             appliedPreviewRgbBlue = cfg.rgbBlue
+            appliedPreviewVideoContrast = videoContrast
         } catch (e: RuntimeException) {
             runCatching { tv.setLayerPaint(null) }
             appliedPreviewFilterId = cfg.filterId
@@ -3084,6 +3088,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
             appliedPreviewRgbRed = cfg.rgbRed
             appliedPreviewRgbGreen = cfg.rgbGreen
             appliedPreviewRgbBlue = cfg.rgbBlue
+            appliedPreviewVideoContrast = videoContrast
             if (!previewFilterWarningShown) {
                 previewFilterWarningShown = true
                 toast("Preview filter unavailable on this device; camera preview is continuing")
