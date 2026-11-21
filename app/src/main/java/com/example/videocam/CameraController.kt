@@ -105,6 +105,7 @@ class CameraController(
         val rgbRed: Int,
         val rgbGreen: Int,
         val rgbBlue: Int,
+        val rawTrim: Trim,
         val hdrFactor: Float = 1f
     ) {
         var image: Image? = null // RAW only
@@ -811,9 +812,12 @@ class CameraController(
             }
             rec.prepare()
             recorder = rec
-            if (cropIt || cfg.filterId > 0 || cfg.portrait || hasRgb) {
+            val videoContrast = (cfg.videoContrastByLens[cfg.cameraId] ?: 0).coerceIn(0, 100)
+            if (cropIt || cfg.filterId > 0 || cfg.portrait || hasRgb || videoContrast > 0) {
                 val rot = tv.display?.rotation ?: Surface.ROTATION_90
-                val matrix = Look.videoFilterMatrix(cfg.filterId, cfg.filterIntensity, cfg.rgbRed, cfg.rgbGreen, cfg.rgbBlue)
+                val matrix = Look.videoFilterMatrix(
+                    cfg.filterId, cfg.filterIntensity, cfg.rgbRed, cfg.rgbGreen, cfg.rgbBlue, videoContrast
+                )
                 crop = CropRenderer(
                     rec.surface, os.width, os.height, cfg.width, cfg.height, rot,
                     fullFrame = !cropIt, filterMatrix = matrix,
@@ -1807,7 +1811,7 @@ class CameraController(
                 cfg.cameraId, fmt, chars, needRotation(), cfg.photoQuality, reqs.size,
                 cfg.bw, cfg.flat && !cfg.bw, cfg.photoLook, bracket != null, false, cfg.glow, cfg.blue,
                 cfg.filterId, cfg.photoFilterIntensity, (cfg.photoContrastByLens[cfg.cameraId] ?: 40).coerceIn(0, 100),
-                cfg.rgbRed, cfg.rgbGreen, cfg.rgbBlue, if (bracket != null) 8f else 1f
+                cfg.rgbRed, cfg.rgbGreen, cfg.rgbBlue, store.trim(cfg.cameraId), if (bracket != null) 8f else 1f
             )
             synchronized(lock) { shot = sh }
             if (plan != null && plan.expNs * reqs.size >= 1_500_000_000L) {
@@ -1978,7 +1982,7 @@ class CameraController(
             } else if (sh.format == ImageFormat.RAW_SENSOR) {
                 val img = sh.image!!
                 val res = sh.result!!
-                val dev = RawDeveloper.develop(img, sh.chars, res, Trim())
+                val dev = RawDeveloper.develop(img, sh.chars, res, sh.rawTrim)
                 img.close()
                 sh.image = null
                 val out = finishLook(rotateBy(dev, sh.rotDeg), sh)
