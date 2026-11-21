@@ -1807,11 +1807,17 @@ class CameraController(
                 }
                 reqs.add(b.build())
             }
+            val shotCalibrationLens = if (cfg.cameraId == "5") activePhysicalLensId ?: "5" else cfg.cameraId
+            val shotRgb = cfg.rgbByLens[shotCalibrationLens]?.split(',')?.mapNotNull { it.trim().toIntOrNull() }
+            val shotRed = shotRgb?.getOrNull(0)?.coerceIn(0, 200) ?: cfg.rgbRed
+            val shotGreen = shotRgb?.getOrNull(1)?.coerceIn(0, 200) ?: cfg.rgbGreen
+            val shotBlue = shotRgb?.getOrNull(2)?.coerceIn(0, 200) ?: cfg.rgbBlue
             val sh = Shot(
                 cfg.cameraId, fmt, chars, needRotation(), cfg.photoQuality, reqs.size,
                 cfg.bw, cfg.flat && !cfg.bw, cfg.photoLook, bracket != null, false, cfg.glow, cfg.blue,
-                cfg.filterId, cfg.photoFilterIntensity, (cfg.photoContrastByLens[cfg.cameraId] ?: cfg.photoContrast).coerceIn(0, 100),
-                cfg.rgbRed, cfg.rgbGreen, cfg.rgbBlue,
+                cfg.filterId, cfg.photoFilterIntensity,
+                (cfg.photoContrastByLens[shotCalibrationLens] ?: cfg.photoContrast).coerceIn(0, 100),
+                shotRed, shotGreen, shotBlue,
                 cfg.backgroundColorShiftEnabled, cfg.backgroundHueShift, cfg.backgroundSaturation, cfg.backgroundTemperature,
                 cfg.portraitPhotoModeEnabled, cfg.portraitBlurPercent,
                 cfg.bokehEnhancementEnabled, cfg.bokehStrength, cfg.bokehGlow, cfg.bokehShape,
