@@ -1320,7 +1320,7 @@ class CameraController(
         // is selected, use ordinary JPEG so the requested look is actually rendered.
         cfg.photoFormat == 3 && ultraHdrAvailable &&
             cfg.filterId == 0 && !cfg.flat &&
-            (cfg.photoContrastByLens[cfg.cameraId] ?: cfg.photoContrast).coerceIn(0, 100) == 0 &&
+            (cfg.photoContrastByLens[cfg.cameraId] ?: 40).coerceIn(0, 100) == 0 &&
             cfg.rgbRed == 100 && cfg.rgbGreen == 100 && cfg.rgbBlue == 100 -> ImageFormat.JPEG_R
         else -> ImageFormat.JPEG
     }
@@ -1806,7 +1806,7 @@ class CameraController(
             val sh = Shot(
                 cfg.cameraId, fmt, chars, needRotation(), cfg.photoQuality, reqs.size,
                 cfg.bw, cfg.flat && !cfg.bw, cfg.photoLook, bracket != null, false, cfg.glow, cfg.blue,
-                cfg.filterId, cfg.photoFilterIntensity, (cfg.photoContrastByLens[cfg.cameraId] ?: cfg.photoContrast).coerceIn(0, 100),
+                cfg.filterId, cfg.photoFilterIntensity, (cfg.photoContrastByLens[cfg.cameraId] ?: 40).coerceIn(0, 100),
                 cfg.rgbRed, cfg.rgbGreen, cfg.rgbBlue, if (bracket != null) 8f else 1f
             )
             synchronized(lock) { shot = sh }
