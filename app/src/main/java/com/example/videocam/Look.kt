@@ -300,9 +300,11 @@ object Look {
         id: Int, intensity: Int, red: Int = 100, green: Int = 100, blue: Int = 100,
         contrast: Int = 0, reduceRedChroma: Boolean = true
     ): ColorMatrixColorFilter =
-        ColorMatrixColorFilter(withRgb(
-            withContrast(intensityMatrix(id, intensity, reduceRedChroma), contrast),
-            red, green, blue
+        // Match the EGL recording pipeline: look, RGB channel gains, then contrast.
+        // Keeping this order identical prevents preview/recording colour and tonal drift.
+        ColorMatrixColorFilter(withContrast(
+            withRgb(intensityMatrix(id, intensity, reduceRedChroma), red, green, blue),
+            contrast
         ))
 
     /** 4x5 Android ColorMatrix values consumed by the EGL video renderer. */
