@@ -1956,9 +1956,9 @@ class CameraController(
                 // Four-frame order: -3 EV, 0 EV, +1 EV, +3 EV.
                 // Rotate each frame to upright pixels before analysing and building the gain map.
                 val darkBytes = applyLookToJpeg(uprightJpeg(sh.jpegs[0], sh.rotDeg), sh)
-                val baseBytes = applyRgbToJpeg(uprightJpeg(sh.jpegs[1], sh.rotDeg), sh)
-                val midBrightBytes = applyRgbToJpeg(uprightJpeg(sh.jpegs[2], sh.rotDeg), sh)
-                val brightBytes = applyRgbToJpeg(uprightJpeg(sh.jpegs[3], sh.rotDeg), sh)
+                val baseBytes = applyLookToJpeg(uprightJpeg(sh.jpegs[1], sh.rotDeg), sh)
+                val midBrightBytes = applyLookToJpeg(uprightJpeg(sh.jpegs[2], sh.rotDeg), sh)
+                val brightBytes = applyLookToJpeg(uprightJpeg(sh.jpegs[3], sh.rotDeg), sh)
                 val blob = UltraHdr.build(baseBytes, darkBytes, midBrightBytes, brightBytes, sh.hdrFactor)
                 if (blob != null) {
                     saved = saveBytes(blob, "$base.jpg")
