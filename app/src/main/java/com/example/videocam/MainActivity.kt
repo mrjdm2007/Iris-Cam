@@ -318,6 +318,18 @@ class MainActivity : Activity(), CameraController.Callbacks {
             cfgDirty = true
             store.save("last", cfg)
         }
+        // Version 7 records that the preview-default migration has completed.
+        // A deliberate 1080p selection is therefore preserved on later launches.
+        if (cfg.ver < 7) {
+            cfg.ver = 7
+            cfgDirty = true
+            store.save("last", cfg)
+        }
+        if (cfg.ver < 8) {
+            cfg.ver = 8
+            cfgDirty = true
+            store.save("last", cfg)
+        }
         // Preserve legacy RGB adjustments for the lens that was selected before per-lens storage.
         if (cfg.cameraId.isNotBlank() && cfg.cameraId !in cfg.rgbByLens) {
             cfg.rgbByLens[cfg.cameraId] = "${cfg.rgbRed},${cfg.rgbGreen},${cfg.rgbBlue}"
@@ -1502,6 +1514,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
     }
 
     private fun videoImageItems(): List<Pair<String, () -> Unit>> = listOf(
+        "Video contrast by lens: ${runCatching { cam.cameraLabel(cfg.cameraId) }.getOrDefault(cfg.cameraId)} · ${(cfg.videoContrastByLens[cfg.cameraId] ?: 0).coerceIn(0, 100)}%" to { showVideoContrastPicker() },
         "Stabilization: ${when (cfg.stab) { 2 -> "EIS + OIS"; 1 -> "EIS only"; else -> "Off" }}" to {
             choose("Video stabilization", listOf("Off", "EIS only", "EIS + OIS")) {
                 cfg.stab = it
@@ -1706,6 +1719,63 @@ class MainActivity : Activity(), CameraController.Callbacks {
                 toast("$lensName photo contrast reset to 40%")
             }
             .show()
+    }
+
+    private fun showVideoContrastSlider(lensId: String) {
+        if (!idle()) return
+        val lensName = runCatching { cam.cameraLabel(lensId) }.getOrDefault(lensId)
+        val current = (cfg.videoContrastByLens[lensId] ?: 0).coerceIn(0, 100)
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(12), dp(20), dp(8))
+        }
+        val label = TextView(this).apply {
+            text = "$lensName · VIDEO CONTRAST · $current%"
+            setTextColor(0xFFF3F0E8.toInt())
+            textSize = 12f
+        }
+        val seek = SeekBar(this).apply {
+            max = 100
+            progress = current
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(bar: SeekBar?, value: Int, fromUser: Boolean) {
+                    label.text = "$lensName · VIDEO CONTRAST · ${value}%"
+                    if (fromUser) {
+                        cfg.videoContrastByLens[lensId] = value.coerceIn(0, 100)
+                        cfgDirty = true
+                    }
+                }
+                override fun onStartTrackingTouch(bar: SeekBar?) {}
+                override fun onStopTrackingTouch(bar: SeekBar?) {}
+            })
+        }
+        box.addView(label)
+        box.addView(seek, LinearLayout.LayoutParams(MATCH, WRAP))
+        MaterialAlertDialogBuilder(this)
+            .setTitle("Video contrast · $lensName")
+            .setMessage("Saved independently for this lens. 0% is neutral; adjustment is applied to live preview and recorded video.")
+            .setView(box)
+            .setPositiveButton("Done") { _, _ ->
+                store.save("last", cfg)
+                if (lensId == cfg.cameraId) streamChanged() else refreshUi()
+            }
+            .setNeutralButton("Reset to 0%") { _, _ ->
+                cfg.videoContrastByLens[lensId] = 0
+                cfgDirty = true
+                store.save("last", cfg)
+                if (lensId == cfg.cameraId) streamChanged()
+                toast("$lensName video contrast reset")
+            }
+            .show()
+    }
+
+    private fun showVideoContrastPicker() {
+        val ids = cam.cameraIds
+        if (ids.isEmpty()) return
+        choose("Video contrast · choose lens", ids.map { id ->
+            val name = runCatching { cam.cameraLabel(id) }.getOrDefault(id)
+            "$name · ${(cfg.videoContrastByLens[id] ?: 0).coerceIn(0, 100)}%"
+        }) { index -> showVideoContrastSlider(ids[index]) }
     }
 
     private fun showLensContrastPicker() {
