@@ -204,6 +204,9 @@ class MainActivity : Activity(), CameraController.Callbacks {
     private lateinit var zoomControlsChip: TextView
     private var zoomControlsExpanded = false
     private lateinit var zoomPresetChips: List<Pair<Float, TextView>>
+    private lateinit var lensSelectorChip: TextView
+    private lateinit var lensOptionChips: List<Pair<String, TextView>>
+    private var lensSelectorExpanded = false
 
     private val frames = ArrayList<DragFrame>()
     private val ui = Handler(Looper.getMainLooper())
@@ -278,6 +281,12 @@ class MainActivity : Activity(), CameraController.Callbacks {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         store = Store(this)
         cfg = store.load("last") ?: Config()
+        // Retire looks that are no longer part of the deliberately limited Inspired/Cinematic menus.
+        if (cfg.filterId !in setOf(0, 2, 3, 4, 5, 6, 7, 8, 9, 27, 28, 29, 31)) {
+            cfg.filterId = 27
+            cfgDirty = true
+            store.save("last", cfg)
+        }
         // Retire the old photo upscaling setting; saved photos keep their captured pixel dimensions.
         if (cfg.upscale) {
             cfg.upscale = false
@@ -709,8 +718,8 @@ class MainActivity : Activity(), CameraController.Callbacks {
     private fun showLooksDialog() {
         val groups = listOf(
             "Natural" to listOf(0),
-            "Inspired" to listOf(18, 10, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30),
-            "Cinematic" to listOf(2, 3, 4, 5, 6, 7, 8, 9, 13, 14, 15, 16, 17, 1)
+            "Inspired" to listOf(27, 31, 29, 28),
+            "Cinematic" to listOf(2, 3, 4, 5, 6, 7, 8, 9)
         )
         val names = Look.FILTER_NAMES
         val intensity = if (cfg.mode == 1) cfg.photoFilterIntensity else cfg.filterIntensity
@@ -1295,6 +1304,16 @@ class MainActivity : Activity(), CameraController.Callbacks {
             zoomLinked = !zoomLinked
             refreshUi()
         }
+        lensSelectorChip = chip("1×") { toggleLensSelector() }
+        lensOptionChips = listOf("1×", "2.7×", "0.7×").map { label ->
+            label to chip(label) {
+                val id = lensIdForLabel(label)
+                if (id.isNotBlank()) switchLens(id)
+                lensSelectorExpanded = false
+                refreshLensSelector()
+            }
+        }
+        lensOptionChips.forEach { it.second.visibility = View.GONE }
         zoomControlsChip = chip("ZOOM ▸") { toggleZoomControls() }
         val presetValues = listOf(0.6f, 1f, 2f, 3f)
         zoomPresetChips = presetValues.map { value ->
@@ -1306,7 +1325,8 @@ class MainActivity : Activity(), CameraController.Callbacks {
         }
         zoomPresetChips.forEach { it.second.visibility = View.GONE }
         zoomLabel.setOnClickListener { setRackTarget(0) }
-        val zoomStrip = strip(zoomLabel, zoomControlsChip, *zoomPresetChips.map { it.second }.toTypedArray(), zoomSlider)
+        val zoomStrip = strip(lensSelectorChip, *lensOptionChips.map { it.second }.toTypedArray(),
+            zoomLabel, zoomControlsChip, *zoomPresetChips.map { it.second }.toTypedArray(), zoomSlider)
 
         expSlider = ZoomSlider(this)
         expLabel = label("EXPOSURE")
@@ -1882,6 +1902,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
 
     private fun videoImageItems(): List<Pair<String, () -> Unit>> = listOf(
         "Contrast by lens: ${runCatching { cam.cameraLabel(cfg.cameraId) }.getOrDefault(cfg.cameraId)} · ${(cfg.videoContrastByLens[cfg.cameraId] ?: cfg.videoContrast).coerceIn(0, 100)}%" to { showVideoLensContrastPicker() },
+        "RGB channels · ${runCatching { cam.cameraLabel(cfg.cameraId) }.getOrDefault(cfg.cameraId)} · R ${cfg.rgbRed}% · G ${cfg.rgbGreen}% · B ${cfg.rgbBlue}%" to { showRgbSliders() },
         "Stabilization: ${when (cfg.stab) { 2 -> "EIS + OIS"; 1 -> "EIS only"; else -> "Off" }}" to {
             choose("Video stabilization", listOf("Off", "EIS only", "EIS + OIS")) {
                 cfg.stab = it
@@ -1921,17 +1942,10 @@ class MainActivity : Activity(), CameraController.Callbacks {
             "Cinema · Bleach Bypass" to 7,
             "Cinema · Noir" to 9,
             "Vintage · Vintage Fade" to 8,
-            "Leica · Leica Colour (inspired)" to 10,
-            "Colour · Blue Cinematic" to 11,
-            "Colour · Golden Hour" to 12,
-            "Dream · Dream Glow" to 13,
-            "Effects · Black and White" to 1,
-            "Effects · Halation" to 14,
-            "Effects · Soft Diffusion" to 15,
-            "Effects · Film Grain" to 16,
-            "Effects · Anamorphic Flare" to 17,
-            "Colour · Zeiss Colours (inspired)" to 18,
-            "Cinema · RED Komodo Cinema (inspired)" to 30,
+            "Inspired · Sony CineTone" to 27,
+            "Inspired · Alexa 35" to 31,
+            "Inspired · Nikon" to 29,
+            "Inspired · Panasonic" to 28,
         )
         val items = presets.map { (label, id) ->
             val title = (if (cfg.filterId == id) "✓ " else "") + label
@@ -2164,6 +2178,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
 
     private fun photoImageItems(): List<Pair<String, () -> Unit>> = listOf(
         "Contrast by lens: ${runCatching { cam.cameraLabel(cfg.cameraId) }.getOrDefault(cfg.cameraId)} · ${(cfg.photoContrastByLens[cfg.cameraId] ?: cfg.photoContrast).coerceIn(0, 100)}%" to { showLensContrastPicker() },
+        "RGB channels · ${runCatching { cam.cameraLabel(cfg.cameraId) }.getOrDefault(cfg.cameraId)} · R ${cfg.rgbRed}% · G ${cfg.rgbGreen}% · B ${cfg.rgbBlue}%" to { showRgbSliders() },
         "Fast moving objects: ${if (cfg.fastMovingObjects) "On" else "Off"} · Main lens only" to {
             if (cfg.cameraId != "0") {
                 toast("Select the Main 1× lens to use Fast Moving Objects")
@@ -2350,6 +2365,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
             chip.visibility = if (cfg.mode == 0 && zoomControlsExpanded && supported) View.VISIBLE else View.GONE
         }
         zoomControlsChip.visibility = if (photo) View.GONE else View.VISIBLE
+        if (::lensSelectorChip.isInitialized) refreshLensSelector()
         if (photo && zoomControlsExpanded) {
             zoomControlsExpanded = false
             zoomControlsChip.text = rackIndicator("ZOOM", rackTarget == 0)
@@ -2484,15 +2500,56 @@ class MainActivity : Activity(), CameraController.Callbacks {
         zoomSlider.setZoomSilently(cam.zoom)
     }
 
+    private fun lensIdForLabel(label: String): String = when (label) {
+        "1×" -> "0"
+        "2.7×" -> "3"
+        "0.7×" -> "2"
+        else -> ""
+    }
+
+    private fun currentLensLabel(): String = when (cfg.cameraId) {
+        "3" -> "2.7×"
+        "2" -> "0.7×"
+        else -> "1×" // The logical multi-camera (ID 5) is the default 1× view.
+    }
+
+    private fun toggleLensSelector() {
+        lensSelectorExpanded = !lensSelectorExpanded
+        refreshLensSelector()
+    }
+
+    private fun refreshLensSelector() {
+        if (!::lensSelectorChip.isInitialized || !::lensOptionChips.isInitialized) return
+        val current = currentLensLabel()
+        lensSelectorChip.text = current
+        lensSelectorChip.visibility = if (lensSelectorExpanded) View.GONE else View.VISIBLE
+        val available = if (::cam.isInitialized) cam.cameraIds.toSet() else emptySet()
+        lensOptionChips.forEach { (label, view) ->
+            val id = lensIdForLabel(label)
+            val show = lensSelectorExpanded && label != current && id in available
+            view.visibility = if (show) View.VISIBLE else View.GONE
+            if (show) {
+                setActive(view, id == cfg.cameraId)
+                view.animate().cancel()
+                view.alpha = 0f
+                view.translationX = -dp(14).toFloat()
+                view.animate().alpha(1f).translationX(0f).setDuration(180L).start()
+            }
+        }
+    }
+
     private fun switchLens(id: String) {
-        if (!idle()) return
+        if (!idle() || id !in cam.cameraIds || cfg.cameraId == id) return
         saveActiveLensRgb()
         cfg.cameraId = id
         loadLensRgb(cfg.cameraId)
         cfg.photoW = 0
         cfg.photoH = 0
         store.save("last", cfg)
+        lensSelectorExpanded = false
+        beginCameraTransition()
         cam.reopen()
+        refreshLensSelector()
         refreshUi()
     }
 
