@@ -91,6 +91,7 @@ data class Config(
     var rgbByLens: MutableMap<String, String> = mutableMapOf(), // per-camera RGB values encoded as R,G,B
     var photoContrast: Int = 40, // fallback contrast strength, 0..100
     var photoContrastByLens: MutableMap<String, Int> = mutableMapOf(), // per-camera photo contrast
+    var videoContrastByLens: MutableMap<String, Int> = mutableMapOf(), // per-camera video contrast; 0 = neutral
     var smartIso: Boolean = true, // auto photo ISO cap at 500
     var fastMovingObjects: Boolean = false, // short-exposure photo mode; main lens only
     var photoLook: Int = 0,          // 0 natural, 1 golden hour, 2 dream glow
@@ -98,7 +99,7 @@ data class Config(
     var chromaticAberrationCorrection: Boolean = true, // request ISP lateral colour-fringe correction
     var lensKeys: Boolean = false,   // show the 0.5x / 1x / 2.7x shortcut buttons
     var haptics: Boolean = true,     // subtle shutter and manual slider feedback
-    var ver: Int = 7
+    var ver: Int = 8
 ) {
     fun copyFrom(o: Config) {
         cameraId = o.cameraId
@@ -150,6 +151,7 @@ data class Config(
         rgbByLens = o.rgbByLens.toMutableMap()
         photoContrast = o.photoContrast
         photoContrastByLens = o.photoContrastByLens.toMutableMap()
+        videoContrastByLens = o.videoContrastByLens.toMutableMap()
         smartIso = o.smartIso
         fastMovingObjects = o.fastMovingObjects
         photoLook = o.photoLook
@@ -210,6 +212,7 @@ data class Config(
         .put("rgbByLens", JSONObject().apply { rgbByLens.forEach { (lens, values) -> put(lens, values) } })
         .put("photoContrast", photoContrast)
         .put("photoContrastByLens", JSONObject().apply { photoContrastByLens.forEach { (lens, value) -> put(lens, value.coerceIn(0, 100)) } })
+        .put("videoContrastByLens", JSONObject().apply { videoContrastByLens.forEach { (lens, value) -> put(lens, value.coerceIn(0, 100)) } })
         .put("smartIso", smartIso)
         .put("fastMovingObjects", fastMovingObjects)
         .put("photoLook", photoLook)
@@ -255,6 +258,15 @@ data class Config(
                         val key = keys.next()
                         val values = obj.optString(key, "").split(',').mapNotNull { it.trim().toIntOrNull() }
                         if (values.size == 3) put(key, values.joinToString(",") { it.coerceIn(0, 200).toString() })
+                    }
+                }
+            } ?: mutableMapOf()
+            val lensVideoContrast = o.optJSONObject("videoContrastByLens")?.let { obj ->
+                mutableMapOf<String, Int>().apply {
+                    val keys = obj.keys()
+                    while (keys.hasNext()) {
+                        val key = keys.next()
+                        put(key, obj.optInt(key, 0).coerceIn(0, 100))
                     }
                 }
             } ?: mutableMapOf()
@@ -317,6 +329,7 @@ data class Config(
                 rgbByLens = lensRgb,
                 photoContrast = o.optInt("photoContrast", d.photoContrast).coerceIn(0, 100),
                 photoContrastByLens = lensContrast,
+                videoContrastByLens = lensVideoContrast,
                 smartIso = o.optBoolean("smartIso", d.smartIso),
                 fastMovingObjects = o.optBoolean("fastMovingObjects", d.fastMovingObjects),
                 photoLook = 0,
@@ -324,7 +337,7 @@ data class Config(
                 chromaticAberrationCorrection = o.optBoolean("chromaticAberrationCorrection", d.chromaticAberrationCorrection),
                 lensKeys = o.optBoolean("lensKeys", d.lensKeys),
                 haptics = o.optBoolean("haptics", d.haptics),
-                ver = o.optInt("ver", d.ver).coerceIn(0, 7)
+                ver = o.optInt("ver", d.ver).coerceIn(0, 8)
             )
         }
     }
