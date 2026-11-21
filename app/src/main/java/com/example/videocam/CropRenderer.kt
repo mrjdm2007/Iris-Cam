@@ -34,11 +34,12 @@ class CropRenderer(
     private val srcH: Int,
     private val rotation: Int,
     private val fullFrame: Boolean = false,
-    private val filterMatrix: FloatArray? = null,
+    filterMatrix: FloatArray? = null,
     private val effectId: Int = 0,
     private val effectStrength: Float = 1f,
-    private val contrastStrength: Float = 0.1f,
-    private val portraitOutput: Boolean = false
+    contrastStrength: Float = 0.1f,
+    private val portraitOutput: Boolean = false,
+    private val onRenderError: ((String) -> Unit)? = null
 ) {
     private val thread = HandlerThread("crop-gl").apply { start() }
     private val handler = Handler(thread.looper)
@@ -65,6 +66,21 @@ class CropRenderer(
 
     @Volatile
     private var released = false
+    @Volatile private var activeFilterMatrix: FloatArray? = filterMatrix?.copyOf()
+    @Volatile private var activeContrastStrength: Float = contrastStrength
+    private var renderErrorReported = false
+
+    /** Update per-physical-lens grading without rebuilding an active recording session. */
+    fun updateColorGrade(matrix: FloatArray, contrast: Float) {
+        if (released) return
+        val copy = matrix.copyOf()
+        handler.post {
+            if (!released) {
+                activeFilterMatrix = copy
+                activeContrastStrength = contrast.coerceIn(0f, 1f)
+            }
+        }
+    }
 
     @Volatile
     var input: Surface? = null
@@ -150,10 +166,6 @@ class CropRenderer(
             "rgb+=n*0.045*uStrength;}" +
             "else if(uEffect==17){float lum=dot(rgb,vec3(0.2126,0.7152,0.0722));" +
             "float flare=clamp((lum-0.82)*5.0,0.0,1.0)*0.12*uStrength;rgb+=vec3(flare);}" +
-            "else if(uEffect==30){vec2 radial=(vTc-vec2(0.5))*2.0;" +
-            "vec2 shift=radial*dot(radial,radial)*(0.0018*uStrength);" +
-            "float rr=texture2D(sTex,vTc+shift).r;float bb=texture2D(sTex,vTc-shift).b;" +
-            "rgb=vec3(rr,rgb.g,bb);}" +
             "float redLuma=dot(rgb,vec3(0.2126,0.7152,0.0722));" +
             "rgb.r=redLuma+(rgb.r-redLuma)*0.80;" +
             "gl_FragColor=vec4(clamp(rgb,0.0,1.0),c.a);}"
@@ -171,15 +183,8 @@ class CropRenderer(
         aPos = GLES20.glGetAttribLocation(program, "aPos")
         aTc = GLES20.glGetAttribLocation(program, "aTc")
 
-        // Fit the rotated camera image to the recorder surface without stretching it.
-        // Camera buffers are landscape (srcW x srcH); portrait output rotates that image
-        // into srcH x srcW before the centre-crop is calculated.
-        // Keep the incoming camera texture in its original orientation.
-        // For portrait output, centre-crop the landscape frame to portrait without
-        // applying any additional quarter-turn or mirroring in texture coordinates.
-        // In portrait mode the incoming SurfaceTexture is already presented upright;
-        // its displayed aspect is therefore the inverse of the landscape buffer dimensions.
-        // Use that displayed aspect so the full frame maps 1:1 instead of centre-cropping it.
+        // Restore workflow #497's handling: SurfaceTexture's transform already
+        // presents the camera frame upright. Do not add another quarter-turn here.
         val sourceAspect = if (portraitOutput) {
             srcH.toFloat() / srcW.coerceAtLeast(1)
         } else {
@@ -263,7 +268,9 @@ class CropRenderer(
     private fun draw() {
         val t = st ?: return
         try {
-            EGL14.eglMakeCurrent(display, eglSurface, eglSurface, context)
+            if (!EGL14.eglMakeCurrent(display, eglSurface, eglSurface, context)) {
+                throw IllegalStateException("EGL could not activate the encoder surface")
+            }
             t.updateTexImage()
             if (!active) return
             t.getTransformMatrix(tm)
@@ -271,7 +278,7 @@ class CropRenderer(
             GLES20.glClearColor(0f, 0f, 0f, 1f)
             GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
             GLES20.glUseProgram(program)
-            val m = filterMatrix
+            val m = activeFilterMatrix
             if (m != null && m.size >= 20) {
                 GLES20.glUniform4f(uR, m[0], m[1], m[2], m[3])
                 GLES20.glUniform4f(uG, m[5], m[6], m[7], m[8])
@@ -287,7 +294,7 @@ class CropRenderer(
             }
             GLES20.glUniform1i(uEffect, effectId)
             GLES20.glUniform1f(uStrength, effectStrength.coerceIn(0f, 1f))
-            GLES20.glUniform1f(uContrast, contrastStrength.coerceIn(0f, 1f))
+            GLES20.glUniform1f(uContrast, activeContrastStrength.coerceIn(0f, 1f))
             GLES20.glUniform2f(uTexel, 1f / srcW.coerceAtLeast(1), 1f / srcH.coerceAtLeast(1))
             GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
             GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, texId)
@@ -305,9 +312,18 @@ class CropRenderer(
             val boot = SystemClock.elapsedRealtimeNanos()
             val mono = System.nanoTime()
             val pts = if (abs(ts - boot) < abs(ts - mono)) ts - (boot - mono) else ts
-            EGLExt.eglPresentationTimeANDROID(display, eglSurface, pts)
-            EGL14.eglSwapBuffers(display, eglSurface)
-        } catch (_: Throwable) {
+            if (!EGLExt.eglPresentationTimeANDROID(display, eglSurface, pts)) {
+                throw IllegalStateException("EGL rejected the video frame timestamp")
+            }
+            if (!EGL14.eglSwapBuffers(display, eglSurface)) {
+                throw IllegalStateException("EGL could not submit a frame to the video encoder")
+            }
+        } catch (t: Throwable) {
+            // Don't silently create a black/frozen clip if portrait rotation or EGL rendering fails.
+            if (!renderErrorReported) {
+                renderErrorReported = true
+                onRenderError?.invoke(t.message ?: t.javaClass.simpleName)
+            }
         }
     }
 

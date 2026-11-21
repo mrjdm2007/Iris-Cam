@@ -89,6 +89,7 @@ class CameraController(
         fun onPhotoCaptured()
         fun onPhotoSaved(uri: Uri?)
         fun onLongExposure(sec: Int)
+        fun onActivePhysicalLensChanged(id: String)
     }
 
     private class Output(val uri: Uri, val pfd: ParcelFileDescriptor)
@@ -110,6 +111,9 @@ class CameraController(
         val filterId: Int,
         val filterIntensity: Int,
         val contrast: Int,
+        val rgbRed: Int,
+        val rgbGreen: Int,
+        val rgbBlue: Int,
         val backgroundColorShift: Boolean,
         val backgroundHueShift: Int,
         val backgroundSaturation: Int,
@@ -194,6 +198,7 @@ class CameraController(
     }
     private val lock = Any()
     private var crop: CropRenderer? = null
+    @Volatile private var activePhysicalLensId: String? = null
     private val jobCount = java.util.concurrent.atomic.AtomicInteger(0)
 
     @Volatile
@@ -599,6 +604,7 @@ class CameraController(
     }
 
     private fun openCamera() {
+        activePhysicalLensId = null
         if (cameraIds.isEmpty()) {
             ui.onMessage("No usable camera found")
             return
@@ -721,8 +727,22 @@ class CameraController(
             // When GL is active in portrait mode, rotate the camera's landscape buffer
             // into a real portrait-sized encoder surface. Do not depend on MP4 rotation
             // metadata: some playback/inspection paths ignore it for Surface-input recordings.
-            val useGlRenderer = cropIt || cfg.filterId > 0
-            val recorderSize = if (cfg.portrait && useGlRenderer) Size(cfg.height, cfg.width) else os
+            val initialPhysicalId = activePhysicalLensId
+        val initialRgb = initialPhysicalId?.let { cfg.rgbByLens[it]?.split(',')?.mapNotNull { value -> value.trim().toIntOrNull() } }
+        val gradeRed = initialRgb?.getOrNull(0)?.coerceIn(0, 200) ?: cfg.rgbRed
+        val gradeGreen = initialRgb?.getOrNull(1)?.coerceIn(0, 200) ?: cfg.rgbGreen
+        val gradeBlue = initialRgb?.getOrNull(2)?.coerceIn(0, 200) ?: cfg.rgbBlue
+        val gradeLensId = initialPhysicalId ?: cfg.cameraId
+        val rgbActive = gradeRed != 100 || gradeGreen != 100 || gradeBlue != 100
+            val videoContrast = (cfg.videoContrastByLens[gradeLensId] ?: cfg.videoContrast).coerceIn(0, 100)
+            val useGlRenderer = cropIt || cfg.filterId > 0 || cfg.portrait || rgbActive || videoContrast > 0
+            // outSize() already returns swapped dimensions for gyro-selected portrait mode.
+            // Keep the GL input in sensor landscape dimensions and the encoder target portrait.
+            val portraitOutput = cfg.portrait && !cropIt
+            val recorderSize = os
+            if (portraitOutput && recorderSize.width >= recorderSize.height) {
+                throw IllegalStateException("Portrait GL recording requires portrait encoder dimensions")
+            }
             rec.setVideoSize(recorderSize.width, recorderSize.height)
             rec.setVideoEncoder(
                 if (cfg.hevc) MediaRecorder.VideoEncoder.HEVC else MediaRecorder.VideoEncoder.H264
@@ -735,7 +755,7 @@ class CameraController(
             }
             // GL portrait output is physically upright and already has portrait dimensions.
             // Keep metadata at zero to prevent players applying a second rotation.
-            rec.setOrientationHint(if (cropIt || (cfg.portrait && useGlRenderer)) 0 else orientationHint())
+            rec.setOrientationHint(if (cropIt || portraitOutput) 0 else orientationHint())
             rec.setMaxFileSize(SPLIT_BYTES)
             rec.setOnInfoListener { mr, what, _ -> onRecorderInfo(mr, what) }
             rec.setOnErrorListener { mr, what, extra ->
@@ -748,15 +768,25 @@ class CameraController(
             recorder = rec
             if (useGlRenderer) {
                 val rot = tv.display?.rotation ?: Surface.ROTATION_90
-                val matrix = if (cfg.filterId > 0) Look.videoFilterMatrix(cfg.filterId, cfg.filterIntensity) else null
+                val matrix = if (cfg.filterId > 0 || rgbActive) Look.videoFilterMatrix(
+                    cfg.filterId, cfg.filterIntensity, gradeRed, gradeGreen, gradeBlue
+                ) else null
                 crop = CropRenderer(
                     rec.surface, recorderSize.width, recorderSize.height, cfg.width, cfg.height, rot,
                     fullFrame = !cropIt, filterMatrix = matrix,
                     effectId = if (cfg.filterId > 0) cfg.filterId else 0,
                     effectStrength = cfg.filterIntensity / 100f,
-                    contrastStrength = (cfg.videoContrastByLens[cfg.cameraId] ?: cfg.videoContrast) / 100f,
-                    // Preserve incoming texture orientation; portrait is centre-cropped, not rotated.
-                    portraitOutput = cfg.portrait && !cropIt
+                    contrastStrength = videoContrast / 100f,
+                    // Match workflow #497: rely on SurfaceTexture's upright transform.
+                    portraitOutput = portraitOutput,
+                    // Route GL failures back to the UI thread so a failed portrait frame path
+                    // cannot leave a seemingly active recording that contains frozen/black video.
+                    onRenderError = { reason ->
+                        handler.post {
+                            if (recording) stopRecording()
+                            ui.onMessage("Video rendering failed; recording stopped to avoid a corrupted clip. $reason")
+                        }
+                    }
                 )
             }
         } catch (e: Exception) {
@@ -1180,6 +1210,23 @@ class CameraController(
             }
             liveFocus = res.get(CaptureResult.LENS_FOCUS_DISTANCE) ?: -1f
             liveFaceCount = res.get(CaptureResult.STATISTICS_FACES)?.size ?: 0
+            if (cfg.cameraId == "5" && Build.VERSION.SDK_INT >= 28) {
+                val physicalId = res.get(CaptureResult.LOGICAL_MULTI_CAMERA_ACTIVE_PHYSICAL_ID)
+                if (!physicalId.isNullOrBlank() && physicalId != activePhysicalLensId && physicalId in cameraIds) {
+                    activePhysicalLensId = physicalId
+                    val rgb = cfg.rgbByLens[physicalId]?.split(',')?.mapNotNull { it.trim().toIntOrNull() }
+                    val red = rgb?.getOrNull(0)?.coerceIn(0, 200) ?: 100
+                    val green = rgb?.getOrNull(1)?.coerceIn(0, 200) ?: 100
+                    val blue = rgb?.getOrNull(2)?.coerceIn(0, 200) ?: 100
+                    val contrast = (if (cfg.mode == 1) cfg.photoContrastByLens[physicalId] else cfg.videoContrastByLens[physicalId])
+                        ?: if (cfg.mode == 1) cfg.photoContrast else cfg.videoContrast
+                    crop?.updateColorGrade(
+                        Look.videoFilterMatrix(cfg.filterId, cfg.filterIntensity, red, green, blue),
+                        contrast.coerceIn(0, 100) / 100f
+                    )
+                    handler.post { ui.onActivePhysicalLensChanged(physicalId) }
+                }
+            }
             if (!(cfg.faceAf && faceAfSupported)) return
             val now = SystemClock.elapsedRealtime()
             if (now - last < 400) return
@@ -1251,7 +1298,9 @@ class CameraController(
         // is selected, use ordinary JPEG so the requested look is actually rendered.
         cfg.photoFormat == 3 && ultraHdrAvailable &&
             cfg.filterId == 0 && !cfg.flat && !cfg.backgroundColorShiftEnabled &&
-            !cfg.portraitPhotoModeEnabled && !cfg.bokehEnhancementEnabled -> ImageFormat.JPEG_R
+            !cfg.portraitPhotoModeEnabled && !cfg.bokehEnhancementEnabled &&
+            (cfg.photoContrastByLens[cfg.cameraId] ?: cfg.photoContrast).coerceIn(0, 100) == 0 &&
+            cfg.rgbRed == 100 && cfg.rgbGreen == 100 && cfg.rgbBlue == 100 -> ImageFormat.JPEG_R
         else -> ImageFormat.JPEG
     }
 
@@ -1274,7 +1323,8 @@ class CameraController(
     }
 
     private fun previewSizeForPhoto(cap: Size): Size {
-        val opts = map?.getOutputSizes(SurfaceTexture::class.java)?.filter { it.height <= 1080 } ?: emptyList()
+        val maxHeight = cfg.previewP.coerceIn(480, 1080)
+        val opts = map?.getOutputSizes(SurfaceTexture::class.java)?.filter { it.height <= maxHeight } ?: emptyList()
         val ar = cap.width.toFloat() / cap.height
         val same = opts.filter { abs(it.width.toFloat() / it.height - ar) < 0.03f }
         return same.maxByOrNull { it.width * it.height }
@@ -1764,10 +1814,17 @@ class CameraController(
                 }
                 reqs.add(b.build())
             }
+            val shotCalibrationLens = if (cfg.cameraId == "5") activePhysicalLensId ?: "5" else cfg.cameraId
+            val shotRgb = cfg.rgbByLens[shotCalibrationLens]?.split(',')?.mapNotNull { it.trim().toIntOrNull() }
+            val shotRed = shotRgb?.getOrNull(0)?.coerceIn(0, 200) ?: cfg.rgbRed
+            val shotGreen = shotRgb?.getOrNull(1)?.coerceIn(0, 200) ?: cfg.rgbGreen
+            val shotBlue = shotRgb?.getOrNull(2)?.coerceIn(0, 200) ?: cfg.rgbBlue
             val sh = Shot(
                 cfg.cameraId, fmt, chars, needRotation(), cfg.photoQuality, reqs.size,
                 cfg.bw, cfg.flat && !cfg.bw, cfg.photoLook, bracket != null, false, cfg.glow, cfg.blue,
-                cfg.filterId, cfg.photoFilterIntensity, (cfg.photoContrastByLens[cfg.cameraId] ?: cfg.photoContrast).coerceIn(0, 100),
+                cfg.filterId, cfg.photoFilterIntensity,
+                (cfg.photoContrastByLens[shotCalibrationLens] ?: cfg.photoContrast).coerceIn(0, 100),
+                shotRed, shotGreen, shotBlue,
                 cfg.backgroundColorShiftEnabled, cfg.backgroundHueShift, cfg.backgroundSaturation, cfg.backgroundTemperature,
                 cfg.portraitPhotoModeEnabled, cfg.portraitBlurPercent,
                 cfg.bokehEnhancementEnabled, cfg.bokehStrength, cfg.bokehGlow, cfg.bokehShape,
@@ -1934,6 +1991,11 @@ class CameraController(
             if (enhanced != null) { out.recycle(); out = enhanced }
             else handler.post { ui.onMessage("Bokeh Enhancement found no suitable background highlights; saved the photo unchanged.") }
         }
+        val rgb = Look.applyRgb(out, sh.rgbRed, sh.rgbGreen, sh.rgbBlue)
+        if (rgb !== out) {
+            out.recycle()
+            out = rgb
+        }
         return out
     }
 
@@ -1999,7 +2061,10 @@ class CameraController(
                 out.recycle()
             } else {
                 val bytes = sh.jpegs[0]
-                saved = if ((sh.filterId > 0 && sh.filterIntensity > 0) || sh.contrast > 0 || sh.flat || sh.bw || sh.photoLook != 0 || sh.backgroundColorShift || sh.portraitPhotoMode || sh.bokehEnhancement || autoPortraitSubject(sh)) {
+                saved = if ((sh.filterId > 0 && sh.filterIntensity > 0) || sh.contrast > 0 ||
+                    sh.rgbRed != 100 || sh.rgbGreen != 100 || sh.rgbBlue != 100 ||
+                    sh.flat || sh.bw || sh.photoLook != 0 || sh.backgroundColorShift ||
+                    sh.portraitPhotoMode || sh.bokehEnhancement || autoPortraitSubject(sh)) {
                     val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
                     val out = finishLook(rotateBy(bmp, sh.rotDeg), sh)
                     val u = saveBitmap(out, "$base.jpg", sh.quality)
@@ -2226,7 +2291,10 @@ class CameraController(
     // ---------- zoom ----------
 
     fun setZoom(z: Float) {
-        if (highSpeed || session == null) return
+        // Preserve the requested zoom even while a Camera2 session is being configured.
+        // updateRepeating() is intentionally safe when session == null; the next onReady()
+        // applies the stored zoom when the repeating request is installed.
+        if (highSpeed) return
         zoom = z.coerceIn(zoomRange.lower, zoomHi())
         updateRepeating()
         ui.onZoomChanged(zoom)

@@ -174,7 +174,7 @@ object Look {
         "Hasselblad Natural Colour (inspired)", "Hasselblad Portrait (inspired)", "Hasselblad Vivid (inspired)",
         "Fujifilm Classic Chrome (inspired)", "Fujifilm Velvia (inspired)", "Fujifilm Astia (inspired)",
         "Fujifilm Pro Neg (inspired)", "Fujifilm Nostalgic Neg (inspired)", "Sony S-Cinetone (inspired)",
-        "Panasonic Lumix Cinelike D (inspired)", "Nikon Natural Colour (inspired)", "RED Komodo Cinema (inspired)"
+        "Panasonic Lumix Cinelike D (inspired)", "Nikon Natural Colour (inspired)", "RED Komodo Cinema (inspired)", "Alexa 35 (inspired)"
     )
 
     private fun filterMatrix(id: Int): ColorMatrix {
@@ -245,6 +245,7 @@ object Look {
                 -0.025f, 0.02f, 1.06f, 0f, 3f,
                 0f, 0f, 0f, 1f, 0f
             )) // RED Komodo-inspired cinema grade: restrained saturation, balanced skin, subtle cool shadows
+            31 -> basic(0.96f, 1.035f, 1.5f, 0.5f, 1.5f) // Alexa 35-inspired: restrained chroma, neutral skin, gentle filmic contrast
             else -> ColorMatrix()
         }
     }
@@ -265,15 +266,78 @@ object Look {
         return ColorMatrix(FloatArray(20) { i -> identity[i] + (target[i] - identity[i]) * amount })
     }
 
-    /** Preview-compatible colour grade. TextureView preview only; video encoder output is not modified here. */
-    fun previewFilter(id: Int, intensity: Int): ColorMatrixColorFilter =
-        ColorMatrixColorFilter(intensityMatrix(id, intensity))
+    /** Apply independent output-channel gains after the selected look. 100% is neutral. */
+    private fun withRgb(matrix: ColorMatrix, red: Int, green: Int, blue: Int): ColorMatrix {
+        val values = matrix.array.copyOf()
+        val gains = floatArrayOf(
+            red.coerceIn(0, 200) / 100f,
+            green.coerceIn(0, 200) / 100f,
+            blue.coerceIn(0, 200) / 100f
+        )
+        for (channel in 0..2) {
+            val start = channel * 5
+            for (i in start until start + 5) values[i] *= gains[channel]
+        }
+        return ColorMatrix(values)
+    }
+
+    /** Contrast adjustment shared by the live preview; video recording applies it in the EGL shader. */
+    private fun withContrast(source: ColorMatrix, contrast: Int): ColorMatrix {
+        val amount = contrast.coerceIn(0, 100)
+        if (amount == 0) return source
+        val factor = 1f + amount / 100f
+        val offset = 127.5f * (1f - factor)
+        source.postConcat(ColorMatrix(floatArrayOf(
+            factor, 0f, 0f, 0f, offset,
+            0f, factor, 0f, 0f, offset,
+            0f, 0f, factor, 0f, offset,
+            0f, 0f, 0f, 1f, 0f
+        )))
+        return source
+    }
+
+    /** Preview grade: look, contrast, then independent RGB gains. */
+    fun previewFilter(
+        id: Int, intensity: Int, red: Int = 100, green: Int = 100, blue: Int = 100,
+        contrast: Int = 0, reduceRedChroma: Boolean = true,
+        postRedChromaReduction: Boolean = false, rgbAfterContrast: Boolean = false
+    ): ColorMatrixColorFilter {
+        // Video applies RGB before contrast; the saved-photo pipeline applies RGB after
+        // contrast. Keep each live preview in the same order as its corresponding output.
+        val look = intensityMatrix(id, intensity, reduceRedChroma)
+        val result = if (rgbAfterContrast) {
+            withRgb(withContrast(look, contrast), red, green, blue)
+        } else {
+            withContrast(withRgb(look, red, green, blue), contrast)
+        }
+        if (postRedChromaReduction) {
+            result.postConcat(ColorMatrix(floatArrayOf(
+                0.8426f, 0.1430f, 0.0144f, 0f, 0f,
+                0f, 1f, 0f, 0f, 0f,
+                0f, 0f, 1f, 0f, 0f,
+                0f, 0f, 0f, 1f, 0f
+            )))
+        }
+        return ColorMatrixColorFilter(result)
+    }
 
     /** 4x5 Android ColorMatrix values consumed by the EGL video renderer. */
-    fun videoFilterMatrix(id: Int, intensity: Int): FloatArray =
-        // Video applies the 17% red-chroma reduction in the final EGL shader stage,
-        // after video contrast, so contrast cannot undo the correction.
-        intensityMatrix(id, intensity, reduceRedChroma = false).array.copyOf()
+    fun videoFilterMatrix(
+        id: Int, intensity: Int, red: Int = 100, green: Int = 100, blue: Int = 100
+    ): FloatArray =
+        // Video applies red-chroma correction and contrast in the final EGL shader stage.
+        withRgb(intensityMatrix(id, intensity, reduceRedChroma = false), red, green, blue).array.copyOf()
+
+    /** Apply RGB channel gains to a still image; returns src unchanged at neutral settings. */
+    fun applyRgb(src: Bitmap, red: Int, green: Int, blue: Int): Bitmap {
+        if (red == 100 && green == 100 && blue == 100) return src
+        val matrix = withRgb(ColorMatrix(), red, green, blue)
+        val out = Bitmap.createBitmap(src.width, src.height, Bitmap.Config.ARGB_8888)
+        Canvas(out).drawBitmap(src, 0f, 0f, Paint(Paint.FILTER_BITMAP_FLAG).apply {
+            colorFilter = ColorMatrixColorFilter(matrix)
+        })
+        return out
+    }
 
     /** Render a selected look into a saved still. Effects are deliberately photo-only until a GPU video path exists. */
     fun applyPreset(src: Bitmap, id: Int, intensity: Int): Bitmap {

@@ -102,6 +102,8 @@ class MainActivity : Activity(), CameraController.Callbacks {
     private lateinit var store: Store
     private lateinit var cfg: Config
     private lateinit var cam: CameraController
+    // For logical camera ID 5, Camera2 reports which physical sensor is currently active.
+    private var activeCalibrationLensId: String? = null
 
     private lateinit var root: FrameLayout
     private lateinit var transitionCover: View
@@ -162,7 +164,6 @@ class MainActivity : Activity(), CameraController.Callbacks {
     private lateinit var tPeak: TextView
     private lateinit var tFalse: TextView
     private lateinit var tTimer: TextView
-    private lateinit var tRot: TextView
     private lateinit var recEdge: EdgeLineView
     private lateinit var audioMeter: AudioMeterView
     private var monitor: MonitorServer? = null
@@ -184,6 +185,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
     private var prevW = 0
     private var prevH = 0
     private var photoOri = -1
+    private var videoOri = -1
     private val readBoxes = ArrayList<View>()
     private lateinit var zoomLabel: TextView
     private lateinit var zoomGo: TextView
@@ -204,6 +206,9 @@ class MainActivity : Activity(), CameraController.Callbacks {
     private lateinit var zoomControlsChip: TextView
     private var zoomControlsExpanded = false
     private lateinit var zoomPresetChips: List<Pair<Float, TextView>>
+    private lateinit var lensSelectorChip: TextView
+    private lateinit var lensOptionChips: List<Pair<String, TextView>>
+    private var lensSelectorExpanded = false
 
     private val frames = ArrayList<DragFrame>()
     private val ui = Handler(Looper.getMainLooper())
@@ -278,22 +283,43 @@ class MainActivity : Activity(), CameraController.Callbacks {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         store = Store(this)
         cfg = store.load("last") ?: Config()
+        // Retire looks that are no longer part of the deliberately limited Inspired/Cinematic menus.
+        if (cfg.filterId !in setOf(0, 2, 3, 4, 5, 6, 7, 8, 9, 27, 28, 29, 31)) {
+            cfg.filterId = 27
+            cfgDirty = true
+            store.save("last", cfg)
+        }
         // Retire the old photo upscaling setting; saved photos keep their captured pixel dimensions.
         if (cfg.upscale) {
             cfg.upscale = false
             cfgDirty = true
         }
-        lastLandscapeRatio = cfg.ratio
+        val orientationPrefs = getSharedPreferences("videocam", MODE_PRIVATE)
+        lastLandscapeRatio = if (cfg.portrait) {
+            orientationPrefs.getInt("lastLandscapeRatio", cfg.ratio).coerceIn(0, Ratios.NAMES.lastIndex)
+        } else {
+            cfg.ratio.also { orientationPrefs.edit().putInt("lastLandscapeRatio", it).apply() }
+        }
         applyRequestedOrientation()
         buildUi()
         rebuildSamplers()
         cam = CameraController(this, tv, cfg, store, this)
+        // The 1× physical main camera is the default. Migrate the previous logical
+        // multi-camera default so the lens-cycle button starts on the real 1× lens.
+        if (cfg.cameraId.isBlank() || cfg.cameraId !in cam.cameraIds || cfg.cameraId == "5") {
+            val defaultCamera = cam.cameraIds.firstOrNull { it == "0" }
+                ?: cam.cameraIds.firstOrNull()
+            if (defaultCamera != null) {
+                cfg.cameraId = defaultCamera
+                cfgDirty = true
+                store.save("last", cfg)
+            }
+        }
         if (cfg.photoFormat == 3 && !cam.ultraHdrAvailable) cfg.photoFormat = 0
         if (cfg.scene == 3) cfg.scene = 0 // retire legacy multi-frame HDR setting
-        // Apply the first-run camera default before advancing the schema version.
-        // Existing explicit user lens choices are preserved.
+        // Apply the physical 1× default before advancing the schema version.
         if (cfg.ver < 1) {
-            if (cfg.cameraId.isBlank() && cam.cameraIds.contains("5")) cfg.cameraId = "5"
+            if (cfg.cameraId.isBlank() && cam.cameraIds.contains("0")) cfg.cameraId = "0"
             cfg.ver = 1
             store.save("last", cfg)
         }
@@ -313,6 +339,21 @@ class MainActivity : Activity(), CameraController.Callbacks {
             cfg.upscale = false
             cfg.ver = 3
             store.save("last", cfg)
+        }
+        if (cfg.ver < 15) {
+            // Workflow 497 used 1080p as the default; move that untouched default to 720p.
+            if (cfg.previewP == 1080) cfg.previewP = 720
+            // Preserve the previous global RGB trim for the active lens during migration.
+            if (cfg.cameraId.isNotBlank() && cfg.cameraId !in cfg.rgbByLens) {
+                cfg.rgbByLens[cfg.cameraId] = "${cfg.rgbRed},${cfg.rgbGreen},${cfg.rgbBlue}"
+            }
+            cfg.ver = 15
+            cfgDirty = true
+            store.save("last", cfg)
+        }
+        if (cfg.cameraId.isNotBlank()) {
+            if (cfg.cameraId in cfg.rgbByLens) loadLensRgb(cfg.cameraId)
+            else saveActiveLensRgb()
         }
         slider.onChange = { f ->
             cam.cancelRack()
@@ -689,8 +730,8 @@ class MainActivity : Activity(), CameraController.Callbacks {
     private fun showLooksDialog() {
         val groups = listOf(
             "Natural" to listOf(0),
-            "Inspired" to listOf(18, 10, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30),
-            "Cinematic" to listOf(2, 3, 4, 5, 6, 7, 8, 9, 13, 14, 15, 16, 17, 1)
+            "Inspired" to listOf(27, 31, 29, 28),
+            "Cinematic" to listOf(2, 3, 4, 5, 6, 7, 8, 9)
         )
         val names = Look.FILTER_NAMES
         val intensity = if (cfg.mode == 1) cfg.photoFilterIntensity else cfg.filterIntensity
@@ -738,6 +779,51 @@ class MainActivity : Activity(), CameraController.Callbacks {
                 override fun onStopTrackingTouch(seekBar: SeekBar?) {}
             })
         }, LinearLayout.LayoutParams(MATCH, WRAP))
+        val lensId = if (cfg.cameraId == "5") activeCalibrationLensId ?: "5" else cfg.cameraId
+        val lensName = runCatching { cam.cameraLabel(lensId) }.getOrDefault(lensId)
+        box.addView(TextView(this).apply {
+            text = "RGB · $lensName"
+            setTextColor(0xFFF3F0E8.toInt())
+            textSize = 12f
+            setPadding(0, dp(14), 0, dp(4))
+        })
+        fun addRgbChannel(name: String, initial: Int, setter: (Int) -> Unit) {
+            val channelLabel = TextView(this).apply {
+                text = "$name · $initial%"
+                setTextColor(0xFFF3F0E8.toInt())
+                textSize = 11f
+            }
+            box.addView(channelLabel, LinearLayout.LayoutParams(MATCH, WRAP))
+            box.addView(SeekBar(this).apply {
+                max = 200
+                progress = initial.coerceIn(0, 200)
+                setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                    override fun onProgressChanged(bar: SeekBar?, value: Int, fromUser: Boolean) {
+                        channelLabel.text = "$name · $value%"
+                        if (fromUser) {
+                            setter(value.coerceIn(0, 200))
+                            saveActiveLensRgb()
+                            cfgDirty = true
+                            applyBwLook()
+                        }
+                    }
+                    override fun onStartTrackingTouch(bar: SeekBar?) {}
+                    override fun onStopTrackingTouch(bar: SeekBar?) {
+                        store.save("last", cfg)
+                        if (cfg.mode == 0) streamChanged() else applyLive()
+                    }
+                })
+            }, LinearLayout.LayoutParams(MATCH, WRAP).apply { bottomMargin = dp(6) })
+        }
+        addRgbChannel("RED", cfg.rgbRed) { cfg.rgbRed = it }
+        addRgbChannel("GREEN", cfg.rgbGreen) { cfg.rgbGreen = it }
+        addRgbChannel("BLUE", cfg.rgbBlue) { cfg.rgbBlue = it }
+        box.addView(TextView(this).apply {
+            text = "100% is neutral · saved independently for each lens"
+            setTextColor(0xFFBDB8C5.toInt())
+            textSize = 10f
+            setPadding(0, dp(2), 0, dp(4))
+        })
         MaterialAlertDialogBuilder(this).setTitle("LOOKS").setView(box).setNegativeButton("Done", null).show()
     }
 
@@ -1175,13 +1261,12 @@ class MainActivity : Activity(), CameraController.Callbacks {
             cfg.timer = TIMERS[(TIMERS.indexOf(cfg.timer) + 1) % TIMERS.size]
             applyLive()
         }
-        tRot = chip("") { toggleOrientation() }
         toolsCol = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        listOf(t2x, tPeak, tFalse, tTorch, tTimer, tRot).forEachIndexed { index, item ->
+        listOf(t2x, tPeak, tFalse, tTorch, tTimer).forEachIndexed { index, item ->
             item.maxLines = 1
             if (item !== tTorch) item.textSize = 11f
             item.setPadding(dp(4), dp(6), dp(4), dp(6))
-            val key = listOf("tool2x", "toolPeak", "toolFalse", "toolTorch", "toolTimer", "toolRotate")[index]
+            val key = listOf("tool2x", "toolPeak", "toolFalse", "toolTorch", "toolTimer")[index]
             drag(key, item, dp(70), WRAP, Gravity.START or Gravity.CENTER_VERTICAL, dp(8), dp(20 + index * 58), 0, 0)
         }
 
@@ -1258,7 +1343,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
         }
 
         zoomSlider = ZoomSlider(this)
-        zoomLabel = label("ZOOM")
+        zoomLabel = label("")
         zA = chip("A") {
             zoomSlider.markA = cam.zoom
             zoomSlider.invalidate()
@@ -1276,18 +1361,14 @@ class MainActivity : Activity(), CameraController.Callbacks {
             zoomLinked = !zoomLinked
             refreshUi()
         }
-        zoomControlsChip = chip("ZOOM ▸") { toggleZoomControls() }
-        val presetValues = listOf(0.6f, 1f, 2f, 3f)
-        zoomPresetChips = presetValues.map { value ->
-            value to chip(fmtZoom(value)) {
-                cam.setZoom(value.coerceIn(cam.zoomRange.lower, cam.zoomHi()))
-                refreshZoomSlider()
-                refreshUi()
-            }
-        }
-        zoomPresetChips.forEach { it.second.visibility = View.GONE }
-        zoomLabel.setOnClickListener { setRackTarget(0) }
-        val zoomStrip = strip(zoomLabel, zoomControlsChip, *zoomPresetChips.map { it.second }.toTypedArray(), zoomSlider)
+        lensSelectorChip = chip("1×") { cyclePhysicalLens() }
+        lensOptionChips = emptyList()
+        zoomControlsChip = chip("•••") { }
+        zoomPresetChips = emptyList()
+        zoomLabel.visibility = View.GONE
+        zoomControlsChip.visibility = View.GONE
+        // The single lens button cycles only the three physical rear lenses.
+        val zoomStrip = strip(lensSelectorChip, zoomSlider)
 
         expSlider = ZoomSlider(this)
         expLabel = label("EXPOSURE")
@@ -1523,7 +1604,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
         val w = if (p) (available * 0.42f).roundToInt().coerceIn(dp(148), dp(190))
                 else (available * 0.22f).roundToInt().coerceIn(dp(180), dp(220))
         listOf(zoomSlider, expSlider).forEach {
-            val l = it.layoutParams as LinearLayout.LayoutParams
+            val l = it.layoutParams as? LinearLayout.LayoutParams ?: return@forEach
             if (l.width != w) {
                 l.width = w
                 it.layoutParams = l
@@ -1539,42 +1620,67 @@ class MainActivity : Activity(), CameraController.Callbacks {
     }
 
     /** Photo mode follows how the phone is held (motion sensor), even with Android's rotation lock on. */
+    /**
+     * Photo and video follow the physical device orientation, including when system rotation lock is on.
+     * Video orientation is fixed once recording begins so a clip cannot change dimensions mid-stream.
+     */
     private val oriListener by lazy {
         object : OrientationEventListener(this@MainActivity) {
             override fun onOrientationChanged(o: Int) {
-                if (cfg.mode != 1 || o == OrientationEventListener.ORIENTATION_UNKNOWN) return
+                if (o == OrientationEventListener.ORIENTATION_UNKNOWN) return
                 val target = when {
                     o >= 330 || o < 30 -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
                     o in 60..120 -> ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE
                     o in 240..300 -> ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
                     else -> return
                 }
-                if (target == photoOri) return
-                if (cam.busy || cam.jobs > 0 || countdown > 0) return
-                val wasPortrait = isPortrait()
-                photoOri = target
-                requestedOrientation = target
-                if (!wasPortrait && target != ActivityInfo.SCREEN_ORIENTATION_PORTRAIT) {
-                    // landscape <-> reverse landscape keeps the same screen size, so refit the preview by hand
-                    root.postDelayed({
-                        if (cfg.mode == 1) {
-                            cam.refreshPreviewLayout()
-                            loadLatestClip()
-                        }
-                    }, 400)
+                if (cfg.mode == 1) {
+                    if (target == photoOri || cam.busy || cam.jobs > 0 || countdown > 0) return
+                    val wasPortrait = isPortrait()
+                    photoOri = target
+                    requestedOrientation = target
+                    if (!wasPortrait && target != ActivityInfo.SCREEN_ORIENTATION_PORTRAIT) {
+                        root.postDelayed({
+                            if (cfg.mode == 1) {
+                                cam.refreshPreviewLayout()
+                                loadLatestClip()
+                            }
+                        }, 400)
+                    }
+                    return
                 }
+                if (cam.recording || cam.busy || target == videoOri) return
+                val wasPortrait = cfg.portrait
+                val nowPortrait = target == ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                videoOri = target
+                if (wasPortrait != nowPortrait) {
+                    if (nowPortrait) {
+                        if (cfg.ratio != 0) {
+                            lastLandscapeRatio = cfg.ratio
+                            getSharedPreferences("videocam", MODE_PRIVATE).edit()
+                                .putInt("lastLandscapeRatio", lastLandscapeRatio).apply()
+                        }
+                        cfg.ratio = 0
+                    } else {
+                        cfg.ratio = lastLandscapeRatio
+                    }
+                    cfg.portrait = nowPortrait
+                    store.save("last", cfg)
+                    refreshUi()
+                }
+                requestedOrientation = target
             }
         }
     }
 
     private fun updateOrientationMode() {
-        if (cfg.mode == 1) {
-            if (oriListener.canDetectOrientation()) oriListener.enable()
+        if (oriListener.canDetectOrientation()) oriListener.enable()
+        if (cfg.mode == 0) {
+            videoOri = -1
         } else {
-            oriListener.disable()
             photoOri = -1
-            applyRequestedOrientation()
         }
+        applyRequestedOrientation()
     }
 
     private fun applyRequestedOrientation() {
@@ -1582,23 +1688,12 @@ class MainActivity : Activity(), CameraController.Callbacks {
             requestedOrientation = photoOri
             return
         }
+        if (cfg.mode == 0 && videoOri != -1) {
+            requestedOrientation = videoOri
+            return
+        }
         requestedOrientation = if (cfg.portrait) ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
         else ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-    }
-
-    private fun toggleOrientation() {
-        if (!idle()) return
-        cancelCountdown()
-        cfg.portrait = !cfg.portrait
-        if (cfg.portrait) {
-            if (cfg.ratio != 0) lastLandscapeRatio = cfg.ratio
-            cfg.ratio = 0
-        } else {
-            cfg.ratio = lastLandscapeRatio
-        }
-        store.save("last", cfg)
-        applyRequestedOrientation()
-        refreshUi()
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {
@@ -1648,7 +1743,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
             val portraitTools = if (cfg.mode == 1) {
                 listOf("tool2x", "toolPeak", "toolFalse", "toolTorch", "toolTimer")
             } else {
-                listOf("tool2x", "toolPeak", "toolFalse", "toolTorch", "toolTimer", "toolRotate")
+                listOf("tool2x", "toolPeak", "toolFalse", "toolTorch", "toolTimer")
             }
             portraitTools.forEachIndexed { i, key ->
                 val bottom = sy(0.218f) + dp((portraitTools.lastIndex - i) * 40)
@@ -1669,7 +1764,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
             setFrameLp("facePortraitStatus", WRAP, WRAP, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL, dp(16), 0, dp(16), dp(28))
         } else {
             // Landscape reference: tools are pinned below the top bar on the left.
-            listOf("tool2x", "toolPeak", "toolFalse", "toolRotate", "toolTimer", "toolTorch")
+            listOf("tool2x", "toolPeak", "toolFalse", "toolTimer", "toolTorch")
                 .forEachIndexed { i, key ->
                     setFrameLp(key, dp(70), WRAP, Gravity.START or Gravity.TOP, dp(8), sy(0.135f) + dp(i * 42), 0, 0)
                 }
@@ -1888,17 +1983,10 @@ class MainActivity : Activity(), CameraController.Callbacks {
             "Cinema · Bleach Bypass" to 7,
             "Cinema · Noir" to 9,
             "Vintage · Vintage Fade" to 8,
-            "Leica · Leica Colour (inspired)" to 10,
-            "Colour · Blue Cinematic" to 11,
-            "Colour · Golden Hour" to 12,
-            "Dream · Dream Glow" to 13,
-            "Effects · Black and White" to 1,
-            "Effects · Halation" to 14,
-            "Effects · Soft Diffusion" to 15,
-            "Effects · Film Grain" to 16,
-            "Effects · Anamorphic Flare" to 17,
-            "Colour · Zeiss Colours (inspired)" to 18,
-            "Cinema · RED Komodo Cinema (inspired)" to 30,
+            "Inspired · Sony CineTone" to 27,
+            "Inspired · Alexa 35" to 31,
+            "Inspired · Nikon" to 29,
+            "Inspired · Panasonic" to 28,
         )
         val items = presets.map { (label, id) ->
             val title = (if (cfg.filterId == id) "✓ " else "") + label
@@ -1920,13 +2008,99 @@ class MainActivity : Activity(), CameraController.Callbacks {
             }
         }
         val activeIntensity = if (cfg.mode == 1) cfg.photoFilterIntensity else cfg.filterIntensity
-        return items + ("Intensity: ${activeIntensity}%" to {
-            choose("Filter intensity", (0..100 step 10).map { "$it%" }) {
-                if (cfg.mode == 1) cfg.photoFilterIntensity = it * 10 else cfg.filterIntensity = it * 10
-                cfgDirty = true
+        return items + listOf(
+            ("Intensity: ${activeIntensity}%" to {
+                choose("Filter intensity", (0..100 step 10).map { "$it%" }) {
+                    if (cfg.mode == 1) cfg.photoFilterIntensity = it * 10 else cfg.filterIntensity = it * 10
+                    cfgDirty = true
+                    if (cfg.mode == 0) streamChanged() else applyLive()
+                }
+            }),
+        )
+    }
+
+    /** Save the active RGB trim under the currently selected camera ID. */
+    private fun saveActiveLensRgb() {
+        val lensId = if (cfg.cameraId == "5") activeCalibrationLensId ?: "5" else cfg.cameraId
+        if (lensId.isBlank()) return
+        cfg.rgbByLens[lensId] = "${cfg.rgbRed.coerceIn(0, 200)},${cfg.rgbGreen.coerceIn(0, 200)},${cfg.rgbBlue.coerceIn(0, 200)}"
+    }
+
+    /** A lens with no saved adjustment starts neutral rather than inheriting another lens's values. */
+    private fun loadLensRgb(lensId: String) {
+        if (lensId.isBlank()) return
+        val values = cfg.rgbByLens[lensId]?.split(',')?.mapNotNull { it.trim().toIntOrNull() }
+        if (values != null && values.size == 3) {
+            cfg.rgbRed = values[0].coerceIn(0, 200)
+            cfg.rgbGreen = values[1].coerceIn(0, 200)
+            cfg.rgbBlue = values[2].coerceIn(0, 200)
+        } else {
+            cfg.rgbRed = 100
+            cfg.rgbGreen = 100
+            cfg.rgbBlue = 100
+            cfg.rgbByLens[lensId] = "100,100,100"
+        }
+    }
+
+    private fun showRgbSliders() {
+        if (!idle()) return
+        val lensId = if (cfg.cameraId == "5") activeCalibrationLensId ?: "5" else cfg.cameraId
+        val lensName = runCatching { cam.cameraLabel(lensId) }.getOrDefault(lensId)
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(8), dp(20), dp(8))
+        }
+        fun addChannel(name: String, initial: Int, setValue: (Int) -> Unit) {
+            val label = TextView(this).apply {
+                text = "$name · ${initial}%"
+                setTextColor(0xFFF3F0E8.toInt())
+                textSize = 12f
+            }
+            val seek = SeekBar(this).apply {
+                max = 200
+                progress = initial.coerceIn(0, 200)
+                setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                    override fun onProgressChanged(bar: SeekBar?, value: Int, fromUser: Boolean) {
+                        label.text = "$name · ${value}%"
+                        if (fromUser) {
+                            setValue(value.coerceIn(0, 200))
+                            saveActiveLensRgb()
+                            cfgDirty = true
+                            applyBwLook()
+                        }
+                    }
+                    override fun onStartTrackingTouch(bar: SeekBar?) {}
+                    override fun onStopTrackingTouch(bar: SeekBar?) {
+                        store.save("last", cfg)
+                    }
+                })
+            }
+            box.addView(label, LinearLayout.LayoutParams(MATCH, WRAP))
+            box.addView(seek, LinearLayout.LayoutParams(MATCH, WRAP).apply { bottomMargin = dp(10) })
+        }
+        addChannel("RED", cfg.rgbRed) { cfg.rgbRed = it }
+        addChannel("GREEN", cfg.rgbGreen) { cfg.rgbGreen = it }
+        addChannel("BLUE", cfg.rgbBlue) { cfg.rgbBlue = it }
+        MaterialAlertDialogBuilder(this)
+            .setTitle("RGB channel controls · $lensName")
+            .setMessage("Independent channel intensity · 100% is neutral · range 0–200%. Saved separately for each lens.")
+            .setView(box)
+            .setPositiveButton("Done") { _, _ ->
+                saveActiveLensRgb()
+                store.save("last", cfg)
                 if (cfg.mode == 0) streamChanged() else applyLive()
             }
-        })
+            .setNeutralButton("Reset to 100%") { _, _ ->
+                cfg.rgbRed = 100
+                cfg.rgbGreen = 100
+                cfg.rgbBlue = 100
+                saveActiveLensRgb()
+                cfgDirty = true
+                store.save("last", cfg)
+                applyBwLook()
+                if (cfg.mode == 0) streamChanged() else applyLive()
+            }
+            .show()
     }
 
     private fun showVideoContrastSlider(lensId: String = cfg.cameraId) {
@@ -1963,10 +2137,16 @@ class MainActivity : Activity(), CameraController.Callbacks {
             .setTitle("Video contrast · $lensName")
             .setMessage("Saved separately for this lens and independently from photo contrast. 0% leaves the image unchanged.")
             .setView(box)
-            .setPositiveButton("Done", null)
+            .setPositiveButton("Done") { _, _ ->
+                cfgDirty = true
+                store.save("last", cfg)
+                if (lensId == cfg.cameraId) streamChanged()
+            }
             .setNeutralButton("Reset to 10%") { _, _ ->
                 cfg.videoContrastByLens[lensId] = 10
                 cfgDirty = true
+                store.save("last", cfg)
+                if (lensId == cfg.cameraId) streamChanged()
                 toast("$lensName video contrast reset to 10%")
             }
             .show()
@@ -2015,10 +2195,16 @@ class MainActivity : Activity(), CameraController.Callbacks {
             .setTitle("Photo contrast · $lensName")
             .setMessage("Saved separately for this lens. 0% leaves the image unchanged.")
             .setView(box)
-            .setPositiveButton("Done", null)
+            .setPositiveButton("Done") { _, _ ->
+                cfgDirty = true
+                store.save("last", cfg)
+                if (lensId == cfg.cameraId) applyLive()
+            }
             .setNeutralButton("Reset to 10%") { _, _ ->
                 cfg.photoContrastByLens[lensId] = 10
                 cfgDirty = true
+                store.save("last", cfg)
+                if (lensId == cfg.cameraId) applyLive()
                 toast("$lensName photo contrast reset to 10%")
             }
             .show()
@@ -2221,6 +2407,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
             chip.visibility = if (cfg.mode == 0 && zoomControlsExpanded && supported) View.VISIBLE else View.GONE
         }
         zoomControlsChip.visibility = if (photo) View.GONE else View.VISIBLE
+        if (::lensSelectorChip.isInitialized) refreshLensSelector()
         if (photo && zoomControlsExpanded) {
             zoomControlsExpanded = false
             zoomControlsChip.text = rackIndicator("ZOOM", rackTarget == 0)
@@ -2238,9 +2425,6 @@ class MainActivity : Activity(), CameraController.Callbacks {
         setActive(tFalse, falseOn)
         setActive(tTorch, if (photo) cfg.flashMode != 0 else cam.torch)
         tTimer.text = if (cfg.timer == 0) "TIMER" else "TIMER ${cfg.timer}s"
-        tRot.text = if (cfg.portrait) "\u21BB PORT" else "\u21BB LAND"
-        setActive(tRot, cfg.portrait)
-        tRot.visibility = if (cfg.mode == 1) View.GONE else View.VISIBLE
         applySliderWidths()
         if (::sharedRackTime.isInitialized) sharedRackTime.text = rackSeconds.toString() + "s"
         applyBwLook()
@@ -2352,19 +2536,63 @@ class MainActivity : Activity(), CameraController.Callbacks {
     }
 
     private fun refreshZoomSlider() {
+        // The visible zoom control is deliberately limited to the requested 1×–7× range.
+        val maxZoom = cam.zoomHi().coerceAtLeast(1f).coerceAtMost(7f)
         zoomSlider.configure(
-            cam.zoomRange.lower, cam.zoomHi(), true, listOf(0.5f, 1f, 2f, 3f, 5f, 7f)
+            1f, maxZoom, true, listOf(1f, 2f, 3f, 5f, 7f).filter { it <= maxZoom + 0.01f }
         ) { fmtZoom(it) }
-        zoomSlider.setZoomSilently(cam.zoom)
+        zoomSlider.setZoomSilently(cam.zoom.coerceIn(1f, maxZoom))
+    }
+
+    private fun lensIdForLabel(label: String): String = when (label) {
+        "1×" -> "0"
+        "2.7×" -> "3"
+        "0.7×" -> "2"
+        else -> ""
+    }
+
+    private fun currentLensLabel(): String = when (cfg.cameraId) {
+        "3" -> "2.7×"
+        "2" -> "0.7×"
+        else -> "1×"
+    }
+
+    /** Cycle 1× main → 0.7× ultrawide → 2.7× telephoto, skipping unavailable IDs. */
+    private fun cyclePhysicalLens() {
+        val order = listOf("0", "2", "3").filter { it in cam.cameraIds }
+        if (order.isEmpty()) {
+            toast("No supported rear lenses are available")
+            return
+        }
+        val current = order.indexOf(cfg.cameraId)
+        val next = if (current < 0) order.first() else order[(current + 1) % order.size]
+        switchLens(next)
+    }
+
+    private fun refreshLensSelector() {
+        if (!::lensSelectorChip.isInitialized) return
+        // This control is exclusively for the three physical rear lenses.
+        // Hide it while the selfie or logical multi-camera is selected.
+        val isCycleLens = cfg.cameraId == "0" || cfg.cameraId == "2" || cfg.cameraId == "3"
+        lensSelectorChip.visibility = if (isCycleLens) View.VISIBLE else View.GONE
+        if (!isCycleLens) return
+        lensSelectorChip.text = currentLensLabel()
+        lensSelectorChip.contentDescription = "Current lens " + currentLensLabel() + ". Tap to switch lenses."
     }
 
     private fun switchLens(id: String) {
-        if (!idle()) return
+        if (!idle() || id !in cam.cameraIds || cfg.cameraId == id) return
+        saveActiveLensRgb()
         cfg.cameraId = id
+        activeCalibrationLensId = if (id == "5") null else id
+        loadLensRgb(cfg.cameraId)
         cfg.photoW = 0
         cfg.photoH = 0
         store.save("last", cfg)
+        lensSelectorExpanded = false
+        beginCameraTransition()
         cam.reopen()
+        refreshLensSelector()
         refreshUi()
     }
 
@@ -2419,6 +2647,8 @@ class MainActivity : Activity(), CameraController.Callbacks {
         if (!idle()) return
         choose("Aspect ratio", Ratios.NAMES) {
             cfg.ratio = it
+            lastLandscapeRatio = it
+            getSharedPreferences("videocam", MODE_PRIVATE).edit().putInt("lastLandscapeRatio", it).apply()
             if (it > 0 && cfg.fps > 60) {
                 cfg.fps = 30
                 toast("Cinematic aspect ratios record up to 60 fps; switched to 30 fps")
@@ -2669,7 +2899,10 @@ class MainActivity : Activity(), CameraController.Callbacks {
         val ids = cam.cameraIds
         if (ids.isEmpty()) return
         choose("Lens", ids.map { cam.cameraLabel(it) }) {
+            saveActiveLensRgb()
             cfg.cameraId = ids[it]
+            activeCalibrationLensId = if (cfg.cameraId == "5") null else cfg.cameraId
+            loadLensRgb(cfg.cameraId)
             cfg.photoW = 0
             cfg.photoH = 0
             store.save("last", cfg)
@@ -3308,24 +3541,45 @@ class MainActivity : Activity(), CameraController.Callbacks {
 
     private var appliedPreviewFilterId = Int.MIN_VALUE
     private var appliedPreviewFilterIntensity = Int.MIN_VALUE
+    private var appliedPreviewRgbRed = Int.MIN_VALUE
+    private var appliedPreviewRgbGreen = Int.MIN_VALUE
+    private var appliedPreviewRgbBlue = Int.MIN_VALUE
+    private var appliedPreviewContrast = Int.MIN_VALUE
     private var previewFilterWarningShown = false
 
     private fun applyBwLook() {
-        // Avoid rebuilding ColorMatrix/Paint on every UI refresh; only update when the
-        // selected look changes. A preview-layer failure must never take down the camera.
         if (!::tv.isInitialized) return
-        // Photo and video modes keep independent filter strengths. The preview must
-        // use the strength belonging to the active mode, not always the video value.
         val intensity = if (cfg.mode == 1) cfg.photoFilterIntensity else cfg.filterIntensity
+        val calibrationLens = if (cfg.cameraId == "5") activeCalibrationLensId ?: "5" else cfg.cameraId
+        val contrast = if (cfg.mode == 1) {
+            (cfg.photoContrastByLens[calibrationLens] ?: cfg.photoContrast).coerceIn(0, 100)
+        } else {
+            (cfg.videoContrastByLens[calibrationLens] ?: cfg.videoContrast).coerceIn(0, 100)
+        }
         if (appliedPreviewFilterId == cfg.filterId &&
-            appliedPreviewFilterIntensity == intensity) return
+            appliedPreviewFilterIntensity == intensity &&
+            appliedPreviewRgbRed == cfg.rgbRed &&
+            appliedPreviewRgbGreen == cfg.rgbGreen &&
+            appliedPreviewRgbBlue == cfg.rgbBlue &&
+            appliedPreviewContrast == contrast) return
         try {
-            val paint = if (cfg.filterId > 0) Paint().apply {
-                colorFilter = Look.previewFilter(cfg.filterId, intensity)
+            val hasAdjustments = cfg.filterId > 0 || cfg.rgbRed != 100 || cfg.rgbGreen != 100 ||
+                cfg.rgbBlue != 100 || contrast > 0
+            val paint = if (hasAdjustments) Paint().apply {
+                colorFilter = Look.previewFilter(
+                    cfg.filterId, intensity, cfg.rgbRed, cfg.rgbGreen, cfg.rgbBlue, contrast,
+                    reduceRedChroma = cfg.mode == 1,
+                    postRedChromaReduction = cfg.mode == 0,
+                    rgbAfterContrast = cfg.mode == 1
+                )
             } else null
             tv.setLayerPaint(paint)
             appliedPreviewFilterId = cfg.filterId
             appliedPreviewFilterIntensity = intensity
+            appliedPreviewRgbRed = cfg.rgbRed
+            appliedPreviewRgbGreen = cfg.rgbGreen
+            appliedPreviewRgbBlue = cfg.rgbBlue
+            appliedPreviewContrast = contrast
         } catch (e: RuntimeException) {
             runCatching { tv.setLayerPaint(null) }
             appliedPreviewFilterId = cfg.filterId
@@ -3762,5 +4016,14 @@ class MainActivity : Activity(), CameraController.Callbacks {
         zoomLabel.text = rackIndicator("ZOOM", rackTarget == 0)
         zoomSlider.setZoomSilently(z)
         setActive(t2x, z >= 1.9f)
+    }
+
+    override fun onActivePhysicalLensChanged(id: String) {
+        if (cfg.cameraId != "5" || id == activeCalibrationLensId) return
+        activeCalibrationLensId = id
+        loadLensRgb(id)
+        cfgDirty = true
+        store.save("last", cfg)
+        applyBwLook()
     }
 }
