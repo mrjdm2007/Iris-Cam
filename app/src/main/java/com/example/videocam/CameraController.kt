@@ -89,6 +89,7 @@ class CameraController(
         fun onPhotoCaptured()
         fun onPhotoSaved(uri: Uri?)
         fun onLongExposure(sec: Int)
+        fun onActivePhysicalLensChanged(id: String)
     }
 
     private class Output(val uri: Uri, val pfd: ParcelFileDescriptor)
@@ -197,6 +198,7 @@ class CameraController(
     }
     private val lock = Any()
     private var crop: CropRenderer? = null
+    @Volatile private var activePhysicalLensId: String? = null
     private val jobCount = java.util.concurrent.atomic.AtomicInteger(0)
 
     @Volatile
@@ -724,8 +726,14 @@ class CameraController(
             // When GL is active in portrait mode, rotate the camera's landscape buffer
             // into a real portrait-sized encoder surface. Do not depend on MP4 rotation
             // metadata: some playback/inspection paths ignore it for Surface-input recordings.
-            val rgbActive = cfg.rgbRed != 100 || cfg.rgbGreen != 100 || cfg.rgbBlue != 100
-            val videoContrast = (cfg.videoContrastByLens[cfg.cameraId] ?: cfg.videoContrast).coerceIn(0, 100)
+            val initialPhysicalId = activePhysicalLensId
+        val initialRgb = initialPhysicalId?.let { cfg.rgbByLens[it]?.split(',')?.mapNotNull(String::toIntOrNull) }
+        val gradeRed = initialRgb?.getOrNull(0)?.coerceIn(0, 200) ?: cfg.rgbRed
+        val gradeGreen = initialRgb?.getOrNull(1)?.coerceIn(0, 200) ?: cfg.rgbGreen
+        val gradeBlue = initialRgb?.getOrNull(2)?.coerceIn(0, 200) ?: cfg.rgbBlue
+        val gradeLensId = initialPhysicalId ?: cfg.cameraId
+        val rgbActive = gradeRed != 100 || gradeGreen != 100 || gradeBlue != 100
+            val videoContrast = (cfg.videoContrastByLens[gradeLensId] ?: cfg.videoContrast).coerceIn(0, 100)
             val useGlRenderer = cropIt || cfg.filterId > 0 || cfg.portrait || rgbActive || videoContrast > 0
             // outSize() already returns swapped dimensions for gyro-selected portrait mode.
             // Keep the GL input in sensor landscape dimensions and the encoder target portrait.
@@ -760,14 +768,14 @@ class CameraController(
             if (useGlRenderer) {
                 val rot = tv.display?.rotation ?: Surface.ROTATION_90
                 val matrix = if (cfg.filterId > 0 || rgbActive) Look.videoFilterMatrix(
-                    cfg.filterId, cfg.filterIntensity, cfg.rgbRed, cfg.rgbGreen, cfg.rgbBlue
+                    cfg.filterId, cfg.filterIntensity, gradeRed, gradeGreen, gradeBlue
                 ) else null
                 crop = CropRenderer(
                     rec.surface, recorderSize.width, recorderSize.height, cfg.width, cfg.height, rot,
                     fullFrame = !cropIt, filterMatrix = matrix,
                     effectId = if (cfg.filterId > 0) cfg.filterId else 0,
                     effectStrength = cfg.filterIntensity / 100f,
-                    contrastStrength = (cfg.videoContrastByLens[cfg.cameraId] ?: cfg.videoContrast) / 100f,
+                    contrastStrength = videoContrast / 100f,
                     // Portrait frames are physically rotated into portrait-sized encoder output.
                     portraitOutput = portraitOutput,
                     portraitRotationDegrees = orientationHint()
@@ -1194,6 +1202,23 @@ class CameraController(
             }
             liveFocus = res.get(CaptureResult.LENS_FOCUS_DISTANCE) ?: -1f
             liveFaceCount = res.get(CaptureResult.STATISTICS_FACES)?.size ?: 0
+            if (cfg.cameraId == "5" && Build.VERSION.SDK_INT >= 28) {
+                val physicalId = res.get(CaptureResult.LOGICAL_MULTI_CAMERA_ACTIVE_PHYSICAL_ID)
+                if (!physicalId.isNullOrBlank() && physicalId != activePhysicalLensId && physicalId in cameraIds) {
+                    activePhysicalLensId = physicalId
+                    val rgb = cfg.rgbByLens[physicalId]?.split(',')?.mapNotNull { it.trim().toIntOrNull() }
+                    val red = rgb?.getOrNull(0)?.coerceIn(0, 200) ?: 100
+                    val green = rgb?.getOrNull(1)?.coerceIn(0, 200) ?: 100
+                    val blue = rgb?.getOrNull(2)?.coerceIn(0, 200) ?: 100
+                    val contrast = (if (cfg.mode == 1) cfg.photoContrastByLens[physicalId] else cfg.videoContrastByLens[physicalId])
+                        ?: if (cfg.mode == 1) cfg.photoContrast else cfg.videoContrast
+                    crop?.updateColorGrade(
+                        Look.videoFilterMatrix(cfg.filterId, cfg.filterIntensity, red, green, blue),
+                        contrast.coerceIn(0, 100) / 100f
+                    )
+                    handler.post { ui.onActivePhysicalLensChanged(physicalId) }
+                }
+            }
             if (!(cfg.faceAf && faceAfSupported)) return
             val now = SystemClock.elapsedRealtime()
             if (now - last < 400) return
