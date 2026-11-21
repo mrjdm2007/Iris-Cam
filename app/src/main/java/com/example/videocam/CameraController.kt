@@ -727,7 +727,13 @@ class CameraController(
             val rgbActive = cfg.rgbRed != 100 || cfg.rgbGreen != 100 || cfg.rgbBlue != 100
             val videoContrast = (cfg.videoContrastByLens[cfg.cameraId] ?: cfg.videoContrast).coerceIn(0, 100)
             val useGlRenderer = cropIt || cfg.filterId > 0 || cfg.portrait || rgbActive || videoContrast > 0
-            val recorderSize = if (cfg.portrait && useGlRenderer) Size(cfg.height, cfg.width) else os
+            // outSize() already returns swapped dimensions for gyro-selected portrait mode.
+            // Keep the GL input in sensor landscape dimensions and the encoder target portrait.
+            val portraitOutput = cfg.portrait && !cropIt
+            val recorderSize = os
+            if (portraitOutput && recorderSize.width >= recorderSize.height) {
+                throw IllegalStateException("Portrait GL recording requires portrait encoder dimensions")
+            }
             rec.setVideoSize(recorderSize.width, recorderSize.height)
             rec.setVideoEncoder(
                 if (cfg.hevc) MediaRecorder.VideoEncoder.HEVC else MediaRecorder.VideoEncoder.H264
@@ -740,7 +746,7 @@ class CameraController(
             }
             // GL portrait output is physically upright and already has portrait dimensions.
             // Keep metadata at zero to prevent players applying a second rotation.
-            rec.setOrientationHint(if (cropIt || (cfg.portrait && useGlRenderer)) 0 else orientationHint())
+            rec.setOrientationHint(if (cropIt || portraitOutput) 0 else orientationHint())
             rec.setMaxFileSize(SPLIT_BYTES)
             rec.setOnInfoListener { mr, what, _ -> onRecorderInfo(mr, what) }
             rec.setOnErrorListener { mr, what, extra ->
@@ -763,7 +769,7 @@ class CameraController(
                     effectStrength = cfg.filterIntensity / 100f,
                     contrastStrength = (cfg.videoContrastByLens[cfg.cameraId] ?: cfg.videoContrast) / 100f,
                     // Portrait frames are physically rotated into portrait-sized encoder output.
-                    portraitOutput = cfg.portrait && !cropIt,
+                    portraitOutput = portraitOutput,
                     portraitRotationDegrees = orientationHint()
                 )
             }
