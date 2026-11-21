@@ -779,7 +779,13 @@ class CameraController(
                     contrastStrength = videoContrast / 100f,
                     // Portrait frames are physically rotated into portrait-sized encoder output.
                     portraitOutput = portraitOutput,
-                    portraitRotationDegrees = orientationHint()
+                    portraitRotationDegrees = orientationHint(),
+                    onRenderError = { reason ->
+                        handler.post {
+                            if (recording) stopRecording()
+                            ui.onMessage("Video rendering failed; recording stopped to avoid a corrupted clip. $reason")
+                        }
+                    }
                 )
             }
         } catch (e: Exception) {
