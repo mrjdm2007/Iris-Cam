@@ -1348,7 +1348,8 @@ class CameraController(
     }
 
     private fun previewSizeForPhoto(cap: Size): Size {
-        val opts = map?.getOutputSizes(SurfaceTexture::class.java)?.filter { it.height <= 1080 } ?: emptyList()
+        val maxH = cfg.previewP.coerceIn(480, 1080)
+        val opts = map?.getOutputSizes(SurfaceTexture::class.java)?.filter { it.height <= maxH } ?: emptyList()
         val ar = cap.width.toFloat() / cap.height
         val same = opts.filter { abs(it.width.toFloat() / it.height - ar) < 0.03f }
         return same.maxByOrNull { it.width * it.height }
