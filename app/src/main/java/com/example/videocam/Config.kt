@@ -386,7 +386,7 @@ data class Config(
                 chromaticAberrationCorrection = o.optBoolean("chromaticAberrationCorrection", d.chromaticAberrationCorrection),
                 lensKeys = o.optBoolean("lensKeys", d.lensKeys),
                 haptics = o.optBoolean("haptics", d.haptics),
-                ver = maxOf(15, o.optInt("ver", d.ver))
+                ver = maxOf(14, o.optInt("ver", d.ver))
             )
         }
     }
