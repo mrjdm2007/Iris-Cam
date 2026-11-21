@@ -34,10 +34,10 @@ class CropRenderer(
     private val srcH: Int,
     private val rotation: Int,
     private val fullFrame: Boolean = false,
-    private val filterMatrix: FloatArray? = null,
+    filterMatrix: FloatArray? = null,
     private val effectId: Int = 0,
     private val effectStrength: Float = 1f,
-    private val contrastStrength: Float = 0.1f,
+    contrastStrength: Float = 0.1f,
     private val portraitOutput: Boolean = false,
     private val portraitRotationDegrees: Int = 90
 ) {
@@ -66,6 +66,20 @@ class CropRenderer(
 
     @Volatile
     private var released = false
+    @Volatile private var activeFilterMatrix: FloatArray? = filterMatrix?.copyOf()
+    @Volatile private var activeContrastStrength: Float = contrastStrength
+
+    /** Update per-physical-lens grading without rebuilding an active recording session. */
+    fun updateColorGrade(matrix: FloatArray, contrast: Float) {
+        if (released) return
+        val copy = matrix.copyOf()
+        handler.post {
+            if (!released) {
+                activeFilterMatrix = copy
+                activeContrastStrength = contrast.coerceIn(0f, 1f)
+            }
+        }
+    }
 
     @Volatile
     var input: Surface? = null
@@ -279,7 +293,7 @@ class CropRenderer(
             GLES20.glClearColor(0f, 0f, 0f, 1f)
             GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
             GLES20.glUseProgram(program)
-            val m = filterMatrix
+            val m = activeFilterMatrix
             if (m != null && m.size >= 20) {
                 GLES20.glUniform4f(uR, m[0], m[1], m[2], m[3])
                 GLES20.glUniform4f(uG, m[5], m[6], m[7], m[8])
@@ -295,7 +309,7 @@ class CropRenderer(
             }
             GLES20.glUniform1i(uEffect, effectId)
             GLES20.glUniform1f(uStrength, effectStrength.coerceIn(0f, 1f))
-            GLES20.glUniform1f(uContrast, contrastStrength.coerceIn(0f, 1f))
+            GLES20.glUniform1f(uContrast, activeContrastStrength.coerceIn(0f, 1f))
             GLES20.glUniform2f(uTexel, 1f / srcW.coerceAtLeast(1), 1f / srcH.coerceAtLeast(1))
             GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
             GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, texId)
