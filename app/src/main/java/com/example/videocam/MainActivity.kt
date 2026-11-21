@@ -302,6 +302,19 @@ class MainActivity : Activity(), CameraController.Callbacks {
         buildUi()
         rebuildSamplers()
         cam = CameraController(this, tv, cfg, store, this)
+        // Config.fromJson intentionally preserves newer schema versions, so the old
+        // cfg.ver < 1 first-run branch is not reliable for selecting the logical camera.
+        // Choose the logical multi-camera by default when no lens has ever been saved.
+        if (cfg.cameraId.isBlank() || cfg.cameraId !in cam.cameraIds) {
+            val defaultCamera = cam.cameraIds.firstOrNull { it == "5" }
+                ?: cam.cameraIds.firstOrNull { it == "0" }
+                ?: cam.cameraIds.firstOrNull()
+            if (defaultCamera != null) {
+                cfg.cameraId = defaultCamera
+                cfgDirty = true
+                store.save("last", cfg)
+            }
+        }
         if (cfg.photoFormat == 3 && !cam.ultraHdrAvailable) cfg.photoFormat = 0
         if (cfg.scene == 3) cfg.scene = 0 // retire legacy multi-frame HDR setting
         // Apply the first-run camera default before advancing the schema version.
