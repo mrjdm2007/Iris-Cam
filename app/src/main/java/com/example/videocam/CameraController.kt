@@ -1315,7 +1315,9 @@ class CameraController(
         // JPEG_R must be saved byte-for-byte to preserve its gain map. If a pixel filter
         // is selected, use ordinary JPEG so the requested look is actually rendered.
         cfg.photoFormat == 3 && ultraHdrAvailable &&
-            cfg.filterId == 0 && !cfg.flat && cfg.rgbRed == 100 && cfg.rgbGreen == 100 && cfg.rgbBlue == 100 -> ImageFormat.JPEG_R
+            cfg.filterId == 0 && !cfg.flat &&
+            (cfg.photoContrastByLens[cfg.cameraId] ?: cfg.photoContrast).coerceIn(0, 100) == 0 &&
+            cfg.rgbRed == 100 && cfg.rgbGreen == 100 && cfg.rgbBlue == 100 -> ImageFormat.JPEG_R
         else -> ImageFormat.JPEG
     }
 
@@ -1924,16 +1926,16 @@ class CameraController(
         return out
     }
 
-    private fun applyRgbToJpeg(bytes: ByteArray, sh: Shot): ByteArray {
-        if (sh.rgbRed == 100 && sh.rgbGreen == 100 && sh.rgbBlue == 100) return bytes
+    private fun applyLookToJpeg(bytes: ByteArray, sh: Shot): ByteArray {
         val src = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-            ?: throw IllegalStateException("Unable to decode an RGB-adjusted HDR frame")
-        val adjusted = Look.applyRgb(src, sh.rgbRed, sh.rgbGreen, sh.rgbBlue)
-        if (adjusted !== src) src.recycle()
+            ?: throw IllegalStateException("Unable to decode a processed HDR frame")
+        // Apply the same complete still-image pipeline to every bracket frame so the
+        // base image and gain-map inputs remain in the same colour space.
+        val adjusted = finishLook(src, sh)
         return try {
             ByteArrayOutputStream().use { stream ->
                 if (!adjusted.compress(Bitmap.CompressFormat.JPEG, 98, stream))
-                    throw IllegalStateException("Unable to encode an RGB-adjusted HDR frame")
+                    throw IllegalStateException("Unable to encode a processed HDR frame")
                 stream.toByteArray()
             }
         } finally {
@@ -1953,7 +1955,7 @@ class CameraController(
             } else if (sh.hdr && sh.jpegs.size >= 4) {
                 // Four-frame order: -3 EV, 0 EV, +1 EV, +3 EV.
                 // Rotate each frame to upright pixels before analysing and building the gain map.
-                val darkBytes = applyRgbToJpeg(uprightJpeg(sh.jpegs[0], sh.rotDeg), sh)
+                val darkBytes = applyLookToJpeg(uprightJpeg(sh.jpegs[0], sh.rotDeg), sh)
                 val baseBytes = applyRgbToJpeg(uprightJpeg(sh.jpegs[1], sh.rotDeg), sh)
                 val midBrightBytes = applyRgbToJpeg(uprightJpeg(sh.jpegs[2], sh.rotDeg), sh)
                 val brightBytes = applyRgbToJpeg(uprightJpeg(sh.jpegs[3], sh.rotDeg), sh)
