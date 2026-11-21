@@ -286,12 +286,32 @@ object Look {
     }
 
     /** Preview-compatible colour grade, including RGB channel controls. */
-    fun previewFilter(id: Int, intensity: Int, red: Int = 100, green: Int = 100, blue: Int = 100): ColorMatrixColorFilter =
-        ColorMatrixColorFilter(withRgb(intensityMatrix(id, intensity), red, green, blue))
+    private fun withContrast(source: ColorMatrix, contrast: Int): ColorMatrix {
+        val amount = contrast.coerceIn(0, 100)
+        if (amount == 0) return source
+        val factor = 1f + amount / 100f
+        val offset = 127.5f * (1f - factor)
+        source.postConcat(ColorMatrix(floatArrayOf(
+            factor, 0f, 0f, 0f, offset,
+            0f, factor, 0f, 0f, offset,
+            0f, 0f, factor, 0f, offset,
+            0f, 0f, 0f, 1f, 0f
+        )))
+        return source
+    }
+
+    fun previewFilter(
+        id: Int, intensity: Int, red: Int = 100, green: Int = 100, blue: Int = 100,
+        contrast: Int = 0
+    ): ColorMatrixColorFilter =
+        ColorMatrixColorFilter(withContrast(withRgb(intensityMatrix(id, intensity), red, green, blue), contrast))
 
     /** 4x5 Android ColorMatrix values consumed by the EGL video renderer. */
-    fun videoFilterMatrix(id: Int, intensity: Int, red: Int = 100, green: Int = 100, blue: Int = 100): FloatArray =
-        withRgb(intensityMatrix(id, intensity), red, green, blue).array.copyOf()
+    fun videoFilterMatrix(
+        id: Int, intensity: Int, red: Int = 100, green: Int = 100, blue: Int = 100,
+        contrast: Int = 0
+    ): FloatArray =
+        withContrast(withRgb(intensityMatrix(id, intensity), red, green, blue), contrast).array.copyOf()
 
     /** Apply RGB channel gains to a still image; returns src unchanged at neutral settings. */
     fun applyRgb(src: Bitmap, red: Int, green: Int, blue: Int): Bitmap {
