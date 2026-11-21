@@ -38,7 +38,8 @@ class CropRenderer(
     private val effectId: Int = 0,
     private val effectStrength: Float = 1f,
     private val contrastStrength: Float = 0.1f,
-    private val portraitOutput: Boolean = false
+    private val portraitOutput: Boolean = false,
+    private val portraitRotationDegrees: Int = 90
 ) {
     private val thread = HandlerThread("crop-gl").apply { start() }
     private val handler = Handler(thread.looper)
@@ -171,29 +172,28 @@ class CropRenderer(
         aPos = GLES20.glGetAttribLocation(program, "aPos")
         aTc = GLES20.glGetAttribLocation(program, "aTc")
 
-        // Fit the rotated camera image to the recorder surface without stretching it.
-        // Camera buffers are landscape (srcW x srcH); portrait output rotates that image
-        // into srcH x srcW before the centre-crop is calculated.
-        // Keep the incoming camera texture in its original orientation.
-        // For portrait output, centre-crop the landscape frame to portrait without
-        // applying any additional quarter-turn or mirroring in texture coordinates.
-        // In portrait mode the incoming SurfaceTexture is already presented upright;
-        // its displayed aspect is therefore the inverse of the landscape buffer dimensions.
-        // Use that displayed aspect so the full frame maps 1:1 instead of centre-cropping it.
-        val sourceAspect = if (portraitOutput) {
-            srcH.toFloat() / srcW.coerceAtLeast(1)
+        // Camera2 supplies a landscape sensor buffer. For portrait recordings, rotate
+        // that texture into the portrait encoder surface before fitting the frame. This
+        // writes real portrait pixels and avoids relying on rotation metadata or squeezing
+        // a landscape frame into portrait dimensions.
+        val yh = if (portraitOutput) {
+            (outW * srcW.toFloat() / srcH.coerceAtLeast(1)) / outH.coerceAtLeast(1)
         } else {
-            srcW.toFloat() / srcH.coerceAtLeast(1)
+            (outW * srcH.toFloat() / srcW.coerceAtLeast(1)) / outH.coerceAtLeast(1)
         }
-        val targetAspect = outW.toFloat() / outH.coerceAtLeast(1)
-        val cropX = maxOf(1f, sourceAspect / targetAspect)
-        val cropY = maxOf(1f, targetAspect / sourceAspect)
-        val q = if (portraitOutput) {
+        val q = if (portraitOutput && portraitRotationDegrees == 90) {
             floatArrayOf(
-                -cropX, -cropY, 0f, 0f,
-                 cropX, -cropY, 1f, 0f,
-                -cropX,  cropY, 0f, 1f,
-                 cropX,  cropY, 1f, 1f
+                -1f, -yh, 1f, 0f,
+                 1f, -yh, 1f, 1f,
+                -1f,  yh, 0f, 0f,
+                 1f,  yh, 0f, 1f
+            )
+        } else if (portraitOutput) {
+            floatArrayOf(
+                -1f, -yh, 0f, 1f,
+                 1f, -yh, 0f, 0f,
+                -1f,  yh, 1f, 1f,
+                 1f,  yh, 1f, 0f
             )
         } else {
             val yh = (outW * srcH.toFloat() / srcW.coerceAtLeast(1)) / outH.coerceAtLeast(1)
