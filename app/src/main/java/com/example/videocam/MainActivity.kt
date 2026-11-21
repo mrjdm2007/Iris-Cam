@@ -782,6 +782,51 @@ class MainActivity : Activity(), CameraController.Callbacks {
                 override fun onStopTrackingTouch(seekBar: SeekBar?) {}
             })
         }, LinearLayout.LayoutParams(MATCH, WRAP))
+        val lensId = if (cfg.cameraId == "5") activeCalibrationLensId ?: "5" else cfg.cameraId
+        val lensName = runCatching { cam.cameraLabel(lensId) }.getOrDefault(lensId)
+        box.addView(TextView(this).apply {
+            text = "RGB · $lensName"
+            setTextColor(0xFFF3F0E8.toInt())
+            textSize = 12f
+            setPadding(0, dp(14), 0, dp(4))
+        })
+        fun addRgbChannel(name: String, initial: Int, setter: (Int) -> Unit) {
+            val channelLabel = TextView(this).apply {
+                text = "$name · $initial%"
+                setTextColor(0xFFF3F0E8.toInt())
+                textSize = 11f
+            }
+            box.addView(channelLabel, LinearLayout.LayoutParams(MATCH, WRAP))
+            box.addView(SeekBar(this).apply {
+                max = 200
+                progress = initial.coerceIn(0, 200)
+                setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                    override fun onProgressChanged(bar: SeekBar?, value: Int, fromUser: Boolean) {
+                        channelLabel.text = "$name · $value%"
+                        if (fromUser) {
+                            setter(value.coerceIn(0, 200))
+                            saveActiveLensRgb()
+                            cfgDirty = true
+                            applyBwLook()
+                        }
+                    }
+                    override fun onStartTrackingTouch(bar: SeekBar?) {}
+                    override fun onStopTrackingTouch(bar: SeekBar?) {
+                        store.save("last", cfg)
+                        if (cfg.mode == 0) streamChanged() else applyLive()
+                    }
+                })
+            }, LinearLayout.LayoutParams(MATCH, WRAP).apply { bottomMargin = dp(6) })
+        }
+        addRgbChannel("RED", cfg.rgbRed) { cfg.rgbRed = it }
+        addRgbChannel("GREEN", cfg.rgbGreen) { cfg.rgbGreen = it }
+        addRgbChannel("BLUE", cfg.rgbBlue) { cfg.rgbBlue = it }
+        box.addView(TextView(this).apply {
+            text = "100% is neutral · saved independently for each lens"
+            setTextColor(0xFFBDB8C5.toInt())
+            textSize = 10f
+            setPadding(0, dp(2), 0, dp(4))
+        })
         MaterialAlertDialogBuilder(this).setTitle("LOOKS").setView(box).setNegativeButton("Done", null).show()
     }
 
@@ -1329,7 +1374,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
             }
         }
         lensOptionChips.forEach { it.second.visibility = View.GONE }
-        zoomControlsChip = chip("ZOOM ▸") { toggleZoomControls() }
+        zoomControlsChip = chip("•••") { toggleZoomControls() }
         val presetValues = listOf(0.6f, 1f, 2f, 3f)
         zoomPresetChips = presetValues.map { value ->
             value to chip(fmtZoom(value)) {
@@ -1341,7 +1386,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
         zoomPresetChips.forEach { it.second.visibility = View.GONE }
         zoomLabel.setOnClickListener { setRackTarget(0) }
         val zoomStrip = strip(lensSelectorChip, *lensOptionChips.map { it.second }.toTypedArray(),
-            zoomLabel, zoomControlsChip, *zoomPresetChips.map { it.second }.toTypedArray(), zoomSlider)
+            zoomControlsChip, *zoomPresetChips.map { it.second }.toTypedArray(), zoomSlider)
 
         expSlider = ZoomSlider(this)
         expLabel = label("EXPOSURE")
@@ -1917,7 +1962,6 @@ class MainActivity : Activity(), CameraController.Callbacks {
 
     private fun videoImageItems(): List<Pair<String, () -> Unit>> = listOf(
         "Contrast by lens: ${runCatching { cam.cameraLabel(cfg.cameraId) }.getOrDefault(cfg.cameraId)} · ${(cfg.videoContrastByLens[cfg.cameraId] ?: cfg.videoContrast).coerceIn(0, 100)}%" to { showVideoLensContrastPicker() },
-        "RGB channels · ${runCatching { cam.cameraLabel(cfg.cameraId) }.getOrDefault(cfg.cameraId)} · R ${cfg.rgbRed}% · G ${cfg.rgbGreen}% · B ${cfg.rgbBlue}%" to { showRgbSliders() },
         "Stabilization: ${when (cfg.stab) { 2 -> "EIS + OIS"; 1 -> "EIS only"; else -> "Off" }}" to {
             choose("Video stabilization", listOf("Off", "EIS only", "EIS + OIS")) {
                 cfg.stab = it
