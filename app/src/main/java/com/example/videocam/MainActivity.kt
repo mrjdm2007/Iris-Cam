@@ -2571,8 +2571,12 @@ class MainActivity : Activity(), CameraController.Callbacks {
 
     private fun refreshLensSelector() {
         if (!::lensSelectorChip.isInitialized) return
+        // This control is exclusively for the three physical rear lenses.
+        // Hide it while the selfie or logical multi-camera is selected.
+        val isCycleLens = cfg.cameraId == "0" || cfg.cameraId == "2" || cfg.cameraId == "3"
+        lensSelectorChip.visibility = if (isCycleLens) View.VISIBLE else View.GONE
+        if (!isCycleLens) return
         lensSelectorChip.text = currentLensLabel()
-        lensSelectorChip.visibility = View.VISIBLE
         lensSelectorChip.contentDescription = "Current lens " + currentLensLabel() + ". Tap to switch lenses."
     }
 
