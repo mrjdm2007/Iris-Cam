@@ -174,7 +174,7 @@ object Look {
         "Hasselblad Natural Colour (inspired)", "Hasselblad Portrait (inspired)", "Hasselblad Vivid (inspired)",
         "Fujifilm Classic Chrome (inspired)", "Fujifilm Velvia (inspired)", "Fujifilm Astia (inspired)",
         "Fujifilm Pro Neg (inspired)", "Fujifilm Nostalgic Neg (inspired)", "Sony S-Cinetone (inspired)",
-        "Panasonic Lumix Cinelike D (inspired)", "Nikon Natural Colour (inspired)", "RED Komodo Cinema (inspired)"
+        "Panasonic Lumix Cinelike D (inspired)", "Nikon Natural Colour (inspired)", "RED Komodo Cinema (inspired)", "Alexa 35 (inspired)"
     )
 
     private fun filterMatrix(id: Int): ColorMatrix {
@@ -245,6 +245,7 @@ object Look {
                 -0.025f, 0.02f, 1.06f, 0f, 3f,
                 0f, 0f, 0f, 1f, 0f
             )) // RED Komodo-inspired cinema grade: restrained saturation, balanced skin, subtle cool shadows
+            31 -> basic(0.96f, 1.035f, 1.5f, 0.5f, 1.5f) // Alexa 35-inspired: restrained chroma, neutral skin, gentle filmic contrast
             else -> ColorMatrix()
         }
     }
