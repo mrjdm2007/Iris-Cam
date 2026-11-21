@@ -2522,7 +2522,8 @@ class MainActivity : Activity(), CameraController.Callbacks {
         if (!::lensSelectorChip.isInitialized || !::lensOptionChips.isInitialized) return
         val current = currentLensLabel()
         lensSelectorChip.text = current
-        lensSelectorChip.visibility = if (lensSelectorExpanded) View.GONE else View.VISIBLE
+        // Keep the selected lens chip visible so tapping it again collapses the row.
+        lensSelectorChip.visibility = View.VISIBLE
         val available = if (::cam.isInitialized) cam.cameraIds.toSet() else emptySet()
         lensOptionChips.forEach { (label, view) ->
             val id = lensIdForLabel(label)
