@@ -813,8 +813,7 @@ class CameraController(
             }
             rec.prepare()
             recorder = rec
-            val videoContrast = (cfg.videoContrastByLens[cfg.cameraId] ?: 0).coerceIn(0, 100)
-            if (cropIt || cfg.filterId > 0 || cfg.portrait || hasRgb || videoContrast > 0) {
+            if (useGlRenderer) {
                 val rot = tv.display?.rotation ?: Surface.ROTATION_90
                 val matrix = Look.videoFilterMatrix(
                     cfg.filterId, cfg.filterIntensity, cfg.rgbRed, cfg.rgbGreen, cfg.rgbBlue, videoContrast
