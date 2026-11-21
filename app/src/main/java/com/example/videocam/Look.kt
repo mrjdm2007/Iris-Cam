@@ -300,14 +300,16 @@ object Look {
     fun previewFilter(
         id: Int, intensity: Int, red: Int = 100, green: Int = 100, blue: Int = 100,
         contrast: Int = 0, reduceRedChroma: Boolean = true,
-        postRedChromaReduction: Boolean = false
+        postRedChromaReduction: Boolean = false, rgbAfterContrast: Boolean = false
     ): ColorMatrixColorFilter {
-        // Match the EGL recording pipeline: look, RGB gains, contrast, then its final
-        // red-chroma trim. The video shader applies that final trim even for Natural.
-        val result = withContrast(
-            withRgb(intensityMatrix(id, intensity, reduceRedChroma), red, green, blue),
-            contrast
-        )
+        // Video applies RGB before contrast; the saved-photo pipeline applies RGB after
+        // contrast. Keep each live preview in the same order as its corresponding output.
+        val look = intensityMatrix(id, intensity, reduceRedChroma)
+        val result = if (rgbAfterContrast) {
+            withRgb(withContrast(look, contrast), red, green, blue)
+        } else {
+            withContrast(withRgb(look, red, green, blue), contrast)
+        }
         if (postRedChromaReduction) {
             result.postConcat(ColorMatrix(floatArrayOf(
                 0.8426f, 0.1430f, 0.0144f, 0f, 0f,
