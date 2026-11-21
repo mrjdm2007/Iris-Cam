@@ -306,6 +306,13 @@ object Look {
     ): ColorMatrixColorFilter =
         ColorMatrixColorFilter(withContrast(withRgb(intensityMatrix(id, intensity), red, green, blue), contrast))
 
+    /** Photo preview follows the still-image pipeline order: look, contrast, then RGB gains. */
+    fun previewPhotoFilter(
+        id: Int, intensity: Int, red: Int = 100, green: Int = 100, blue: Int = 100,
+        contrast: Int = 0
+    ): ColorMatrixColorFilter =
+        ColorMatrixColorFilter(withRgb(withContrast(intensityMatrix(id, intensity), contrast), red, green, blue))
+
     /** 4x5 Android ColorMatrix values consumed by the EGL video renderer. */
     fun videoFilterMatrix(
         id: Int, intensity: Int, red: Int = 100, green: Int = 100, blue: Int = 100,
