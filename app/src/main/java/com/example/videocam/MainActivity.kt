@@ -1229,7 +1229,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
                 }
 
                 // Never change the output dimensions or display rotation halfway through a clip.
-                if (cam.recording || cam.busy || countdown > 0 || target == videoOri) return
+                if (cam.recording || cam.busy || target == videoOri) return
                 val wasPortrait = cfg.portrait
                 val nowPortrait = target == ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
                 videoOri = target
