@@ -2292,7 +2292,10 @@ class CameraController(
     // ---------- zoom ----------
 
     fun setZoom(z: Float) {
-        if (highSpeed || session == null) return
+        // Preserve the requested zoom even while a Camera2 session is being configured.
+        // updateRepeating() is intentionally safe when session == null; the next onReady()
+        // applies the stored zoom when the repeating request is installed.
+        if (highSpeed) return
         zoom = z.coerceIn(zoomRange.lower, zoomHi())
         updateRepeating()
         ui.onZoomChanged(zoom)
