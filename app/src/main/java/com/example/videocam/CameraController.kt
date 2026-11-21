@@ -779,7 +779,11 @@ class CameraController(
                     contrastStrength = videoContrast / 100f,
                     // Portrait frames are physically rotated into portrait-sized encoder output.
                     portraitOutput = portraitOutput,
-                    portraitRotationDegrees = orientationHint(),
+                    // SurfaceTexture's texture-coordinate transform is applied after this rotation.
+                    // The previous direction used the display-to-sensor hint directly, which
+                    // produced a 90-degree anticlockwise portrait recording on the rear camera.
+                    // Use the inverse rotation so the encoded pixels are upright; metadata stays 0.
+                    portraitRotationDegrees = (360 - orientationHint()) % 360,
                     // Route GL failures back to the UI thread so a failed portrait frame path
                     // cannot leave a seemingly active recording that contains frozen/black video.
                     onRenderError = { reason ->
