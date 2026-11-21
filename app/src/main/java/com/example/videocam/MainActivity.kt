@@ -2054,6 +2054,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
                 cfg.rgbBlue = 100
                 saveActiveLensRgb()
                 cfgDirty = true
+                store.save("last", cfg)
                 applyBwLook()
                 if (cfg.mode == 0) streamChanged() else applyLive()
             }
