@@ -102,6 +102,8 @@ class MainActivity : Activity(), CameraController.Callbacks {
     private lateinit var store: Store
     private lateinit var cfg: Config
     private lateinit var cam: CameraController
+    // For logical camera ID 5, Camera2 reports which physical sensor is currently active.
+    private var activeCalibrationLensId: String? = null
 
     private lateinit var root: FrameLayout
     private lateinit var transitionCover: View
@@ -1994,8 +1996,9 @@ class MainActivity : Activity(), CameraController.Callbacks {
 
     /** Save the active RGB trim under the currently selected camera ID. */
     private fun saveActiveLensRgb() {
-        if (cfg.cameraId.isBlank()) return
-        cfg.rgbByLens[cfg.cameraId] = "${cfg.rgbRed.coerceIn(0, 200)},${cfg.rgbGreen.coerceIn(0, 200)},${cfg.rgbBlue.coerceIn(0, 200)}"
+        val lensId = if (cfg.cameraId == "5") activeCalibrationLensId ?: "5" else cfg.cameraId
+        if (lensId.isBlank()) return
+        cfg.rgbByLens[lensId] = "${cfg.rgbRed.coerceIn(0, 200)},${cfg.rgbGreen.coerceIn(0, 200)},${cfg.rgbBlue.coerceIn(0, 200)}"
     }
 
     /** A lens with no saved adjustment starts neutral rather than inheriting another lens's values. */
@@ -2010,13 +2013,14 @@ class MainActivity : Activity(), CameraController.Callbacks {
             cfg.rgbRed = 100
             cfg.rgbGreen = 100
             cfg.rgbBlue = 100
-            saveActiveLensRgb()
+            cfg.rgbByLens[lensId] = "100,100,100"
         }
     }
 
     private fun showRgbSliders() {
         if (!idle()) return
-        val lensName = runCatching { cam.cameraLabel(cfg.cameraId) }.getOrDefault(cfg.cameraId)
+        val lensId = if (cfg.cameraId == "5") activeCalibrationLensId ?: "5" else cfg.cameraId
+        val lensName = runCatching { cam.cameraLabel(lensId) }.getOrDefault(lensId)
         val box = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(20), dp(8), dp(20), dp(8))
@@ -2557,6 +2561,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
         if (!idle() || id !in cam.cameraIds || cfg.cameraId == id) return
         saveActiveLensRgb()
         cfg.cameraId = id
+        activeCalibrationLensId = if (id == "5") null else id
         loadLensRgb(cfg.cameraId)
         cfg.photoW = 0
         cfg.photoH = 0
@@ -2873,6 +2878,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
         choose("Lens", ids.map { cam.cameraLabel(it) }) {
             saveActiveLensRgb()
             cfg.cameraId = ids[it]
+            activeCalibrationLensId = if (cfg.cameraId == "5") null else cfg.cameraId
             loadLensRgb(cfg.cameraId)
             cfg.photoW = 0
             cfg.photoH = 0
@@ -3521,10 +3527,11 @@ class MainActivity : Activity(), CameraController.Callbacks {
     private fun applyBwLook() {
         if (!::tv.isInitialized) return
         val intensity = if (cfg.mode == 1) cfg.photoFilterIntensity else cfg.filterIntensity
+        val calibrationLens = if (cfg.cameraId == "5") activeCalibrationLensId ?: "5" else cfg.cameraId
         val contrast = if (cfg.mode == 1) {
-            (cfg.photoContrastByLens[cfg.cameraId] ?: cfg.photoContrast).coerceIn(0, 100)
+            (cfg.photoContrastByLens[calibrationLens] ?: cfg.photoContrast).coerceIn(0, 100)
         } else {
-            (cfg.videoContrastByLens[cfg.cameraId] ?: cfg.videoContrast).coerceIn(0, 100)
+            (cfg.videoContrastByLens[calibrationLens] ?: cfg.videoContrast).coerceIn(0, 100)
         }
         if (appliedPreviewFilterId == cfg.filterId &&
             appliedPreviewFilterIntensity == intensity &&
@@ -3986,5 +3993,14 @@ class MainActivity : Activity(), CameraController.Callbacks {
         zoomLabel.text = rackIndicator("ZOOM", rackTarget == 0)
         zoomSlider.setZoomSilently(z)
         setActive(t2x, z >= 1.9f)
+    }
+
+    override fun onActivePhysicalLensChanged(id: String) {
+        if (cfg.cameraId != "5" || id == activeCalibrationLensId) return
+        activeCalibrationLensId = id
+        loadLensRgb(id)
+        cfgDirty = true
+        store.save("last", cfg)
+        applyBwLook()
     }
 }
