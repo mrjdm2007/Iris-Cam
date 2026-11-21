@@ -39,7 +39,8 @@ class CropRenderer(
     private val effectStrength: Float = 1f,
     contrastStrength: Float = 0.1f,
     private val portraitOutput: Boolean = false,
-    private val portraitRotationDegrees: Int = 90
+    private val portraitRotationDegrees: Int = 90,
+    private val onRenderError: ((String) -> Unit)? = null
 ) {
     private val thread = HandlerThread("crop-gl").apply { start() }
     private val handler = Handler(thread.looper)
@@ -68,6 +69,7 @@ class CropRenderer(
     private var released = false
     @Volatile private var activeFilterMatrix: FloatArray? = filterMatrix?.copyOf()
     @Volatile private var activeContrastStrength: Float = contrastStrength
+    private var renderErrorReported = false
 
     /** Update per-physical-lens grading without rebuilding an active recording session. */
     fun updateColorGrade(matrix: FloatArray, contrast: Float) {
@@ -285,7 +287,9 @@ class CropRenderer(
     private fun draw() {
         val t = st ?: return
         try {
-            EGL14.eglMakeCurrent(display, eglSurface, eglSurface, context)
+            if (!EGL14.eglMakeCurrent(display, eglSurface, eglSurface, context)) {
+                throw IllegalStateException("EGL could not activate the encoder surface")
+            }
             t.updateTexImage()
             if (!active) return
             t.getTransformMatrix(tm)
@@ -327,9 +331,18 @@ class CropRenderer(
             val boot = SystemClock.elapsedRealtimeNanos()
             val mono = System.nanoTime()
             val pts = if (abs(ts - boot) < abs(ts - mono)) ts - (boot - mono) else ts
-            EGLExt.eglPresentationTimeANDROID(display, eglSurface, pts)
-            EGL14.eglSwapBuffers(display, eglSurface)
-        } catch (_: Throwable) {
+            if (!EGLExt.eglPresentationTimeANDROID(display, eglSurface, pts)) {
+                throw IllegalStateException("EGL rejected the video frame timestamp")
+            }
+            if (!EGL14.eglSwapBuffers(display, eglSurface)) {
+                throw IllegalStateException("EGL could not submit a frame to the video encoder")
+            }
+        } catch (t: Throwable) {
+            // Don't silently create a black/frozen clip if portrait rotation or EGL rendering fails.
+            if (!renderErrorReported) {
+                renderErrorReported = true
+                onRenderError?.invoke(t.message ?: t.javaClass.simpleName)
+            }
         }
     }
 
