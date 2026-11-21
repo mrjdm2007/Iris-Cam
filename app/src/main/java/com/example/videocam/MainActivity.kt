@@ -1704,7 +1704,9 @@ class MainActivity : Activity(), CameraController.Callbacks {
         val mp = if (sz != null) "%.1fMP".format(sz.width * sz.height / 1e6) else "--"
         val m = when {
             cam.effMode() == 2 -> "ULTRA HDR"
-            cfg.photoFormat == 3 && cam.ultraHdrAvailable && cfg.filterId == 0 && !cfg.flat && !cfg.upscale -> "ULTRA HDR"
+            cfg.photoFormat == 3 && cam.ultraHdrAvailable && cfg.filterId == 0 && !cfg.flat && !cfg.upscale &&
+                (cfg.photoContrastByLens[cfg.cameraId] ?: cfg.photoContrast).coerceIn(0, 100) == 0 &&
+                cfg.rgbRed == 100 && cfg.rgbGreen == 100 && cfg.rgbBlue == 100 -> "ULTRA HDR"
             cfg.scene == 1 -> "NIGHT"
             cfg.scene == 2 -> "ASTRO"
             cfg.scene == 3 -> "HDR"
@@ -1725,7 +1727,9 @@ class MainActivity : Activity(), CameraController.Callbacks {
         val mode = when (cam.effMode()) {
             2 -> "Ultra HDR (4-frame bracket)"
             1 -> "RAW develop"
-            else -> if (cfg.photoFormat == 3 && cam.ultraHdrAvailable && cfg.filterId == 0 && !cfg.flat) {
+            else -> if (cfg.photoFormat == 3 && cam.ultraHdrAvailable && cfg.filterId == 0 && !cfg.flat &&
+                (cfg.photoContrastByLens[cfg.cameraId] ?: cfg.photoContrast).coerceIn(0, 100) == 0 &&
+                cfg.rgbRed == 100 && cfg.rgbGreen == 100 && cfg.rgbBlue == 100) {
                 "Ultra HDR (native JPEG_R)"
             } else {
                 "Phone JPEG"
