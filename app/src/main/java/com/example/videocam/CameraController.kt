@@ -1235,6 +1235,9 @@ class CameraController(
             r: CaptureRequest,
             res: TotalCaptureResult
         ) {
+            val resultCameraId = r.tag as? String
+            if (resultCameraId != null) latestCaptureResults[resultCameraId] = res
+            if (resultCameraId != null && resultCameraId != cfg.cameraId) return
             liveIso = res.get(CaptureResult.SENSOR_SENSITIVITY) ?: liveIso
             res.get(CaptureResult.SENSOR_EXPOSURE_TIME)?.let {
                 if (it > 0) {
@@ -1243,8 +1246,6 @@ class CameraController(
                 }
             }
             liveFocus = res.get(CaptureResult.LENS_FOCUS_DISTANCE) ?: -1f
-            // Retain the latest completed preview result for the selected lens diagnostics export.
-            latestCaptureResults[cfg.cameraId] = res
             if (!(cfg.faceAf && faceAfSupported)) return
             val now = SystemClock.elapsedRealtime()
             if (now - last < 400) return
@@ -1283,6 +1284,9 @@ class CameraController(
         val s = session ?: return
         try {
             val b = currentBuilder() ?: return
+            // Tag each repeating request with the camera ID that produced its frames.
+            // Camera2 may deliver a final callback after a lens switch has begun.
+            b.setTag(cfg.cameraId)
             if (s is CameraConstrainedHighSpeedCaptureSession) {
                 s.setRepeatingBurst(s.createHighSpeedRequestList(b.build()), null, handler)
             } else {
