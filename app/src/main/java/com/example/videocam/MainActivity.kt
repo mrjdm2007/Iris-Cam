@@ -3539,7 +3539,8 @@ class MainActivity : Activity(), CameraController.Callbacks {
                 colorFilter = Look.previewFilter(
                     cfg.filterId, intensity, cfg.rgbRed, cfg.rgbGreen, cfg.rgbBlue, contrast,
                     reduceRedChroma = cfg.mode == 1,
-                    postRedChromaReduction = cfg.mode == 0
+                    postRedChromaReduction = cfg.mode == 0,
+                    rgbAfterContrast = cfg.mode == 1
                 )
             } else null
             tv.setLayerPaint(paint)
