@@ -110,6 +110,9 @@ class CameraController(
         val filterId: Int,
         val filterIntensity: Int,
         val contrast: Int,
+        val rgbRed: Int,
+        val rgbGreen: Int,
+        val rgbBlue: Int,
         val backgroundColorShift: Boolean,
         val backgroundHueShift: Int,
         val backgroundSaturation: Int,
@@ -721,7 +724,9 @@ class CameraController(
             // When GL is active in portrait mode, rotate the camera's landscape buffer
             // into a real portrait-sized encoder surface. Do not depend on MP4 rotation
             // metadata: some playback/inspection paths ignore it for Surface-input recordings.
-            val useGlRenderer = cropIt || cfg.filterId > 0
+            val rgbActive = cfg.rgbRed != 100 || cfg.rgbGreen != 100 || cfg.rgbBlue != 100
+            val videoContrast = (cfg.videoContrastByLens[cfg.cameraId] ?: cfg.videoContrast).coerceIn(0, 100)
+            val useGlRenderer = cropIt || cfg.filterId > 0 || rgbActive || videoContrast > 0
             val recorderSize = if (cfg.portrait && useGlRenderer) Size(cfg.height, cfg.width) else os
             rec.setVideoSize(recorderSize.width, recorderSize.height)
             rec.setVideoEncoder(
@@ -748,7 +753,9 @@ class CameraController(
             recorder = rec
             if (useGlRenderer) {
                 val rot = tv.display?.rotation ?: Surface.ROTATION_90
-                val matrix = if (cfg.filterId > 0) Look.videoFilterMatrix(cfg.filterId, cfg.filterIntensity) else null
+                val matrix = if (cfg.filterId > 0 || rgbActive) Look.videoFilterMatrix(
+                    cfg.filterId, cfg.filterIntensity, cfg.rgbRed, cfg.rgbGreen, cfg.rgbBlue
+                ) else null
                 crop = CropRenderer(
                     rec.surface, recorderSize.width, recorderSize.height, cfg.width, cfg.height, rot,
                     fullFrame = !cropIt, filterMatrix = matrix,
@@ -1251,7 +1258,9 @@ class CameraController(
         // is selected, use ordinary JPEG so the requested look is actually rendered.
         cfg.photoFormat == 3 && ultraHdrAvailable &&
             cfg.filterId == 0 && !cfg.flat && !cfg.backgroundColorShiftEnabled &&
-            !cfg.portraitPhotoModeEnabled && !cfg.bokehEnhancementEnabled -> ImageFormat.JPEG_R
+            !cfg.portraitPhotoModeEnabled && !cfg.bokehEnhancementEnabled &&
+            (cfg.photoContrastByLens[cfg.cameraId] ?: cfg.photoContrast).coerceIn(0, 100) == 0 &&
+            cfg.rgbRed == 100 && cfg.rgbGreen == 100 && cfg.rgbBlue == 100 -> ImageFormat.JPEG_R
         else -> ImageFormat.JPEG
     }
 
@@ -1274,7 +1283,8 @@ class CameraController(
     }
 
     private fun previewSizeForPhoto(cap: Size): Size {
-        val opts = map?.getOutputSizes(SurfaceTexture::class.java)?.filter { it.height <= 1080 } ?: emptyList()
+        val maxHeight = cfg.previewP.coerceIn(480, 1080)
+        val opts = map?.getOutputSizes(SurfaceTexture::class.java)?.filter { it.height <= maxHeight } ?: emptyList()
         val ar = cap.width.toFloat() / cap.height
         val same = opts.filter { abs(it.width.toFloat() / it.height - ar) < 0.03f }
         return same.maxByOrNull { it.width * it.height }
@@ -1768,6 +1778,7 @@ class CameraController(
                 cfg.cameraId, fmt, chars, needRotation(), cfg.photoQuality, reqs.size,
                 cfg.bw, cfg.flat && !cfg.bw, cfg.photoLook, bracket != null, false, cfg.glow, cfg.blue,
                 cfg.filterId, cfg.photoFilterIntensity, (cfg.photoContrastByLens[cfg.cameraId] ?: cfg.photoContrast).coerceIn(0, 100),
+                cfg.rgbRed, cfg.rgbGreen, cfg.rgbBlue,
                 cfg.backgroundColorShiftEnabled, cfg.backgroundHueShift, cfg.backgroundSaturation, cfg.backgroundTemperature,
                 cfg.portraitPhotoModeEnabled, cfg.portraitBlurPercent,
                 cfg.bokehEnhancementEnabled, cfg.bokehStrength, cfg.bokehGlow, cfg.bokehShape,
@@ -1933,6 +1944,11 @@ class CameraController(
             val enhanced = runCatching { PhotoBokehEnhancement.apply(out, sh.bokehStrength, sh.bokehGlow, sh.bokehShape) }.getOrNull()
             if (enhanced != null) { out.recycle(); out = enhanced }
             else handler.post { ui.onMessage("Bokeh Enhancement found no suitable background highlights; saved the photo unchanged.") }
+        }
+        val rgb = Look.applyRgb(out, sh.rgbRed, sh.rgbGreen, sh.rgbBlue)
+        if (rgb !== out) {
+            out.recycle()
+            out = rgb
         }
         return out
     }
