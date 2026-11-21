@@ -2022,7 +2022,10 @@ class CameraController(
                 out.recycle()
             } else {
                 val bytes = sh.jpegs[0]
-                saved = if ((sh.filterId > 0 && sh.filterIntensity > 0) || sh.contrast > 0 || sh.flat || sh.bw || sh.photoLook != 0 || sh.backgroundColorShift || sh.portraitPhotoMode || sh.bokehEnhancement || autoPortraitSubject(sh)) {
+                saved = if ((sh.filterId > 0 && sh.filterIntensity > 0) || sh.contrast > 0 ||
+                    sh.rgbRed != 100 || sh.rgbGreen != 100 || sh.rgbBlue != 100 ||
+                    sh.flat || sh.bw || sh.photoLook != 0 || sh.backgroundColorShift ||
+                    sh.portraitPhotoMode || sh.bokehEnhancement || autoPortraitSubject(sh)) {
                     val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
                     val out = finishLook(rotateBy(bmp, sh.rotDeg), sh)
                     val u = saveBitmap(out, "$base.jpg", sh.quality)
