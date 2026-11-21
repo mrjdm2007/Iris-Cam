@@ -2527,7 +2527,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
         val available = if (::cam.isInitialized) cam.cameraIds.toSet() else emptySet()
         lensOptionChips.forEach { (label, view) ->
             val id = lensIdForLabel(label)
-            val show = lensSelectorExpanded && label != current && id in available
+            val show = lensSelectorExpanded && id != cfg.cameraId && id in available
             view.visibility = if (show) View.VISIBLE else View.GONE
             if (show) {
                 setActive(view, id == cfg.cameraId)
