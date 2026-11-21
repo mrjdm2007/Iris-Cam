@@ -1346,7 +1346,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
         }
 
         zoomSlider = ZoomSlider(this)
-        zoomLabel = label("ZOOM")
+        zoomLabel = label("")
         zA = chip("A") {
             zoomSlider.markA = cam.zoom
             zoomSlider.invalidate()
@@ -1364,29 +1364,18 @@ class MainActivity : Activity(), CameraController.Callbacks {
             zoomLinked = !zoomLinked
             refreshUi()
         }
-        lensSelectorChip = chip("1×") { toggleLensSelector() }
-        lensOptionChips = listOf("1×", "2.7×", "0.7×").map { label ->
-            label to chip(label) {
-                val id = lensIdForLabel(label)
-                if (id.isNotBlank()) switchLens(id)
-                lensSelectorExpanded = false
-                refreshLensSelector()
-            }
+        lensSelectorChip = chip("1×") {
+            // Dedicated 1× reset button; continuous zoom is handled by the slider beside it.
+            cam.setZoom(1f.coerceIn(cam.zoomRange.lower, cam.zoomHi()))
+            refreshZoomSlider()
+            refreshUi()
         }
-        lensOptionChips.forEach { it.second.visibility = View.GONE }
-        zoomControlsChip = chip("•••") { toggleZoomControls() }
-        val presetValues = listOf(0.6f, 1f, 2f, 3f)
-        zoomPresetChips = presetValues.map { value ->
-            value to chip(fmtZoom(value)) {
-                cam.setZoom(value.coerceIn(cam.zoomRange.lower, cam.zoomHi()))
-                refreshZoomSlider()
-                refreshUi()
-            }
-        }
-        zoomPresetChips.forEach { it.second.visibility = View.GONE }
-        zoomLabel.setOnClickListener { setRackTarget(0) }
-        val zoomStrip = strip(lensSelectorChip, *lensOptionChips.map { it.second }.toTypedArray(),
-            zoomControlsChip, *zoomPresetChips.map { it.second }.toTypedArray(), zoomSlider)
+        lensOptionChips = emptyList()
+        zoomControlsChip = chip("•••") { }
+        zoomPresetChips = emptyList()
+        zoomLabel.visibility = View.GONE
+        zoomControlsChip.visibility = View.GONE
+        val zoomStrip = strip(lensSelectorChip, zoomSlider)
 
         expSlider = ZoomSlider(this)
         expLabel = label("EXPOSURE")
@@ -2554,10 +2543,12 @@ class MainActivity : Activity(), CameraController.Callbacks {
     }
 
     private fun refreshZoomSlider() {
+        // The visible zoom control is deliberately limited to the requested 1×–7× range.
+        val maxZoom = cam.zoomHi().coerceAtLeast(1f).coerceAtMost(7f)
         zoomSlider.configure(
-            cam.zoomRange.lower, cam.zoomHi(), true, listOf(0.5f, 1f, 2f, 3f, 5f, 7f)
+            1f, maxZoom, true, listOf(1f, 2f, 3f, 5f, 7f).filter { it <= maxZoom + 0.01f }
         ) { fmtZoom(it) }
-        zoomSlider.setZoomSilently(cam.zoom)
+        zoomSlider.setZoomSilently(cam.zoom.coerceIn(1f, maxZoom))
     }
 
     private fun lensIdForLabel(label: String): String = when (label) {
@@ -2579,24 +2570,9 @@ class MainActivity : Activity(), CameraController.Callbacks {
     }
 
     private fun refreshLensSelector() {
-        if (!::lensSelectorChip.isInitialized || !::lensOptionChips.isInitialized) return
-        val current = currentLensLabel()
-        lensSelectorChip.text = current
-        // Keep the selected lens chip visible so tapping it again collapses the row.
+        if (!::lensSelectorChip.isInitialized) return
+        lensSelectorChip.text = "1×"
         lensSelectorChip.visibility = View.VISIBLE
-        val available = if (::cam.isInitialized) cam.cameraIds.toSet() else emptySet()
-        lensOptionChips.forEach { (label, view) ->
-            val id = lensIdForLabel(label)
-            val show = lensSelectorExpanded && id != cfg.cameraId && id in available
-            view.visibility = if (show) View.VISIBLE else View.GONE
-            if (show) {
-                setActive(view, id == cfg.cameraId)
-                view.animate().cancel()
-                view.alpha = 0f
-                view.translationX = -dp(14).toFloat()
-                view.animate().alpha(1f).translationX(0f).setDuration(180L).start()
-            }
-        }
     }
 
     private fun switchLens(id: String) {
