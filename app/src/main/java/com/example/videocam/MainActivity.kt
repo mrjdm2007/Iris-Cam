@@ -304,12 +304,10 @@ class MainActivity : Activity(), CameraController.Callbacks {
         buildUi()
         rebuildSamplers()
         cam = CameraController(this, tv, cfg, store, this)
-        // Config.fromJson intentionally preserves newer schema versions, so the old
-        // cfg.ver < 1 first-run branch is not reliable for selecting the logical camera.
-        // Choose the logical multi-camera by default when no lens has ever been saved.
-        if (cfg.cameraId.isBlank() || cfg.cameraId !in cam.cameraIds) {
-            val defaultCamera = cam.cameraIds.firstOrNull { it == "5" }
-                ?: cam.cameraIds.firstOrNull { it == "0" }
+        // The 1× physical main camera is the default. Migrate the previous logical
+        // multi-camera default so the lens-cycle button starts on the real 1× lens.
+        if (cfg.cameraId.isBlank() || cfg.cameraId !in cam.cameraIds || cfg.cameraId == "5") {
+            val defaultCamera = cam.cameraIds.firstOrNull { it == "0" }
                 ?: cam.cameraIds.firstOrNull()
             if (defaultCamera != null) {
                 cfg.cameraId = defaultCamera
@@ -319,10 +317,9 @@ class MainActivity : Activity(), CameraController.Callbacks {
         }
         if (cfg.photoFormat == 3 && !cam.ultraHdrAvailable) cfg.photoFormat = 0
         if (cfg.scene == 3) cfg.scene = 0 // retire legacy multi-frame HDR setting
-        // Apply the first-run camera default before advancing the schema version.
-        // Existing explicit user lens choices are preserved.
+        // Apply the physical 1× default before advancing the schema version.
         if (cfg.ver < 1) {
-            if (cfg.cameraId.isBlank() && cam.cameraIds.contains("5")) cfg.cameraId = "5"
+            if (cfg.cameraId.isBlank() && cam.cameraIds.contains("0")) cfg.cameraId = "0"
             cfg.ver = 1
             store.save("last", cfg)
         }
@@ -1364,18 +1361,14 @@ class MainActivity : Activity(), CameraController.Callbacks {
             zoomLinked = !zoomLinked
             refreshUi()
         }
-        lensSelectorChip = chip("1×") {
-            // Dedicated 1× reset button; continuous zoom is handled by the slider beside it.
-            cam.setZoom(1f.coerceIn(cam.zoomRange.lower, cam.zoomHi()))
-            refreshZoomSlider()
-            refreshUi()
-        }
+        lensSelectorChip = chip("1×") { cyclePhysicalLens() }
         lensOptionChips = emptyList()
         zoomControlsChip = chip("•••") { }
         zoomPresetChips = emptyList()
         zoomLabel.visibility = View.GONE
         zoomControlsChip.visibility = View.GONE
-        val zoomStrip = strip(lensSelectorChip, zoomSlider)
+        // The single lens button cycles only the three physical rear lenses.
+        val zoomStrip = strip(lensSelectorChip)
 
         expSlider = ZoomSlider(this)
         expLabel = label("EXPOSURE")
@@ -2561,18 +2554,26 @@ class MainActivity : Activity(), CameraController.Callbacks {
     private fun currentLensLabel(): String = when (cfg.cameraId) {
         "3" -> "2.7×"
         "2" -> "0.7×"
-        else -> "1×" // The logical multi-camera (ID 5) is the default 1× view.
+        else -> "1×"
     }
 
-    private fun toggleLensSelector() {
-        lensSelectorExpanded = !lensSelectorExpanded
-        refreshLensSelector()
+    /** Cycle 1× main → 0.7× ultrawide → 2.7× telephoto, skipping unavailable IDs. */
+    private fun cyclePhysicalLens() {
+        val order = listOf("0", "2", "3").filter { it in cam.cameraIds }
+        if (order.isEmpty()) {
+            toast("No supported rear lenses are available")
+            return
+        }
+        val current = order.indexOf(cfg.cameraId)
+        val next = if (current < 0) order.first() else order[(current + 1) % order.size]
+        switchLens(next)
     }
 
     private fun refreshLensSelector() {
         if (!::lensSelectorChip.isInitialized) return
-        lensSelectorChip.text = "1×"
+        lensSelectorChip.text = currentLensLabel()
         lensSelectorChip.visibility = View.VISIBLE
+        lensSelectorChip.contentDescription = "Current lens " + currentLensLabel() + ". Tap to switch lenses."
     }
 
     private fun switchLens(id: String) {
