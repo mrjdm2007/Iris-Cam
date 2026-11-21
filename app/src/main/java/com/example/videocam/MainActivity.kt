@@ -162,7 +162,6 @@ class MainActivity : Activity(), CameraController.Callbacks {
     private lateinit var tPeak: TextView
     private lateinit var tFalse: TextView
     private lateinit var tTimer: TextView
-    private lateinit var tRot: TextView
     private lateinit var recEdge: EdgeLineView
     private lateinit var audioMeter: AudioMeterView
     private var monitor: MonitorServer? = null
@@ -184,6 +183,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
     private var prevW = 0
     private var prevH = 0
     private var photoOri = -1
+    private var videoOri = -1
     private val readBoxes = ArrayList<View>()
     private lateinit var zoomLabel: TextView
     private lateinit var zoomGo: TextView
@@ -1175,13 +1175,12 @@ class MainActivity : Activity(), CameraController.Callbacks {
             cfg.timer = TIMERS[(TIMERS.indexOf(cfg.timer) + 1) % TIMERS.size]
             applyLive()
         }
-        tRot = chip("") { toggleOrientation() }
         toolsCol = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        listOf(t2x, tPeak, tFalse, tTorch, tTimer, tRot).forEachIndexed { index, item ->
+        listOf(t2x, tPeak, tFalse, tTorch, tTimer).forEachIndexed { index, item ->
             item.maxLines = 1
             if (item !== tTorch) item.textSize = 11f
             item.setPadding(dp(4), dp(6), dp(4), dp(6))
-            val key = listOf("tool2x", "toolPeak", "toolFalse", "toolTorch", "toolTimer", "toolRotate")[index]
+            val key = listOf("tool2x", "toolPeak", "toolFalse", "toolTorch", "toolTimer")[index]
             drag(key, item, dp(70), WRAP, Gravity.START or Gravity.CENTER_VERTICAL, dp(8), dp(20 + index * 58), 0, 0)
         }
 
@@ -1539,42 +1538,67 @@ class MainActivity : Activity(), CameraController.Callbacks {
     }
 
     /** Photo mode follows how the phone is held (motion sensor), even with Android's rotation lock on. */
+    /**
+     * Photo and video follow the physical device orientation, including when system rotation lock is on.
+     * Video orientation is fixed once recording begins so a clip cannot change dimensions mid-stream.
+     */
     private val oriListener by lazy {
         object : OrientationEventListener(this@MainActivity) {
             override fun onOrientationChanged(o: Int) {
-                if (cfg.mode != 1 || o == OrientationEventListener.ORIENTATION_UNKNOWN) return
+                if (o == OrientationEventListener.ORIENTATION_UNKNOWN) return
                 val target = when {
                     o >= 330 || o < 30 -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
                     o in 60..120 -> ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE
                     o in 240..300 -> ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
                     else -> return
                 }
-                if (target == photoOri) return
-                if (cam.busy || cam.jobs > 0 || countdown > 0) return
-                val wasPortrait = isPortrait()
-                photoOri = target
-                requestedOrientation = target
-                if (!wasPortrait && target != ActivityInfo.SCREEN_ORIENTATION_PORTRAIT) {
-                    // landscape <-> reverse landscape keeps the same screen size, so refit the preview by hand
-                    root.postDelayed({
-                        if (cfg.mode == 1) {
-                            cam.refreshPreviewLayout()
-                            loadLatestClip()
-                        }
-                    }, 400)
+                if (cfg.mode == 1) {
+                    if (target == photoOri || cam.busy || cam.jobs > 0 || countdown > 0) return
+                    val wasPortrait = isPortrait()
+                    photoOri = target
+                    requestedOrientation = target
+                    if (!wasPortrait && target != ActivityInfo.SCREEN_ORIENTATION_PORTRAIT) {
+                        root.postDelayed({
+                            if (cfg.mode == 1) {
+                                cam.refreshPreviewLayout()
+                                loadLatestClip()
+                            }
+                        }, 400)
+                    }
+                    return
                 }
+                if (cam.recording || cam.busy || target == videoOri) return
+                val wasPortrait = cfg.portrait
+                val nowPortrait = target == ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                videoOri = target
+                if (wasPortrait != nowPortrait) {
+                    if (nowPortrait) {
+                        if (cfg.ratio != 0) {
+                            lastLandscapeRatio = cfg.ratio
+                            getSharedPreferences("videocam", MODE_PRIVATE).edit()
+                                .putInt("lastLandscapeRatio", lastLandscapeRatio).apply()
+                        }
+                        cfg.ratio = 0
+                    } else {
+                        cfg.ratio = lastLandscapeRatio
+                    }
+                    cfg.portrait = nowPortrait
+                    store.save("last", cfg)
+                    refreshUi()
+                }
+                requestedOrientation = target
             }
         }
     }
 
     private fun updateOrientationMode() {
-        if (cfg.mode == 1) {
-            if (oriListener.canDetectOrientation()) oriListener.enable()
+        if (oriListener.canDetectOrientation()) oriListener.enable()
+        if (cfg.mode == 0) {
+            videoOri = -1
         } else {
-            oriListener.disable()
             photoOri = -1
-            applyRequestedOrientation()
         }
+        applyRequestedOrientation()
     }
 
     private fun applyRequestedOrientation() {
@@ -1582,23 +1606,12 @@ class MainActivity : Activity(), CameraController.Callbacks {
             requestedOrientation = photoOri
             return
         }
+        if (cfg.mode == 0 && videoOri != -1) {
+            requestedOrientation = videoOri
+            return
+        }
         requestedOrientation = if (cfg.portrait) ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
         else ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-    }
-
-    private fun toggleOrientation() {
-        if (!idle()) return
-        cancelCountdown()
-        cfg.portrait = !cfg.portrait
-        if (cfg.portrait) {
-            if (cfg.ratio != 0) lastLandscapeRatio = cfg.ratio
-            cfg.ratio = 0
-        } else {
-            cfg.ratio = lastLandscapeRatio
-        }
-        store.save("last", cfg)
-        applyRequestedOrientation()
-        refreshUi()
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {
@@ -1648,7 +1661,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
             val portraitTools = if (cfg.mode == 1) {
                 listOf("tool2x", "toolPeak", "toolFalse", "toolTorch", "toolTimer")
             } else {
-                listOf("tool2x", "toolPeak", "toolFalse", "toolTorch", "toolTimer", "toolRotate")
+                listOf("tool2x", "toolPeak", "toolFalse", "toolTorch", "toolTimer")
             }
             portraitTools.forEachIndexed { i, key ->
                 val bottom = sy(0.218f) + dp((portraitTools.lastIndex - i) * 40)
@@ -1669,7 +1682,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
             setFrameLp("facePortraitStatus", WRAP, WRAP, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL, dp(16), 0, dp(16), dp(28))
         } else {
             // Landscape reference: tools are pinned below the top bar on the left.
-            listOf("tool2x", "toolPeak", "toolFalse", "toolRotate", "toolTimer", "toolTorch")
+            listOf("tool2x", "toolPeak", "toolFalse", "toolTimer", "toolTorch")
                 .forEachIndexed { i, key ->
                     setFrameLp(key, dp(70), WRAP, Gravity.START or Gravity.TOP, dp(8), sy(0.135f) + dp(i * 42), 0, 0)
                 }
@@ -2238,9 +2251,6 @@ class MainActivity : Activity(), CameraController.Callbacks {
         setActive(tFalse, falseOn)
         setActive(tTorch, if (photo) cfg.flashMode != 0 else cam.torch)
         tTimer.text = if (cfg.timer == 0) "TIMER" else "TIMER ${cfg.timer}s"
-        tRot.text = if (cfg.portrait) "\u21BB PORT" else "\u21BB LAND"
-        setActive(tRot, cfg.portrait)
-        tRot.visibility = if (cfg.mode == 1) View.GONE else View.VISIBLE
         applySliderWidths()
         if (::sharedRackTime.isInitialized) sharedRackTime.text = rackSeconds.toString() + "s"
         applyBwLook()
@@ -2419,6 +2429,8 @@ class MainActivity : Activity(), CameraController.Callbacks {
         if (!idle()) return
         choose("Aspect ratio", Ratios.NAMES) {
             cfg.ratio = it
+            lastLandscapeRatio = it
+            getSharedPreferences("videocam", MODE_PRIVATE).edit().putInt("lastLandscapeRatio", it).apply()
             if (it > 0 && cfg.fps > 60) {
                 cfg.fps = 30
                 toast("Cinematic aspect ratios record up to 60 fps; switched to 30 fps")
@@ -2669,7 +2681,9 @@ class MainActivity : Activity(), CameraController.Callbacks {
         val ids = cam.cameraIds
         if (ids.isEmpty()) return
         choose("Lens", ids.map { cam.cameraLabel(it) }) {
+            saveActiveLensRgb()
             cfg.cameraId = ids[it]
+            loadLensRgb(cfg.cameraId)
             cfg.photoW = 0
             cfg.photoH = 0
             store.save("last", cfg)
