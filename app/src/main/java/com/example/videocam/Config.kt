@@ -63,7 +63,7 @@ data class Config(
     var grid: Int = 0,
     var ratio: Int = 0,              // cinematic shape of the video resolution (index into Ratios), 0 = 16:9
     var gridFlip: Int = 0,
-    var previewP: Int = 1080,        // preview stream height: 720 or 1080
+    var previewP: Int = 720,         // default preview stream height: 720p
     var antiband: Int = 0,           // 0 = auto, 1 = 50 Hz, 2 = 60 Hz, 3 = off
     var zoomMethod: Int = 0,         // 0 = zoom ratio, 1 = crop region
     var peak: Int = 0,               // focus peaking: 0 = off, 1 = low, 2 = medium, 3 = high
@@ -96,6 +96,10 @@ data class Config(
     var filterId: Int = 27,          // default Sony S-Cinetone-inspired colour profile; 0 = Natural
     var filterIntensity: Int = 100,  // default video look strength, 0..100
     var photoFilterIntensity: Int = 100, // default photo look strength, 0..100
+    var rgbRed: Int = 100, // active lens RGB channel intensity, 0..200%; 100 = neutral
+    var rgbGreen: Int = 100,
+    var rgbBlue: Int = 100,
+    var rgbByLens: MutableMap<String, String> = mutableMapOf(), // per-camera RGB values encoded as R,G,B
     var photoContrast: Int = 10, // default contrast strength for every lens, 0..100
     var photoContrastByLens: MutableMap<String, Int> = mutableMapOf(), // per-camera photo contrast
     var videoContrast: Int = 10, // legacy fallback for video contrast, 0..100
@@ -107,7 +111,7 @@ data class Config(
     var chromaticAberrationCorrection: Boolean = true, // request ISP lateral colour-fringe correction
     var lensKeys: Boolean = false,   // show the 0.5x / 1x / 2.7x shortcut buttons
     var haptics: Boolean = true,     // subtle shutter and manual slider feedback
-    var ver: Int = 14
+    var ver: Int = 15
 ) {
     fun copyFrom(o: Config) {
         cameraId = o.cameraId
@@ -164,6 +168,10 @@ data class Config(
         filterId = o.filterId
         filterIntensity = o.filterIntensity
         photoFilterIntensity = o.photoFilterIntensity
+        rgbRed = o.rgbRed
+        rgbGreen = o.rgbGreen
+        rgbBlue = o.rgbBlue
+        rgbByLens = o.rgbByLens.toMutableMap()
         photoContrast = o.photoContrast
         photoContrastByLens = o.photoContrastByLens.toMutableMap()
         videoContrast = o.videoContrast
@@ -233,6 +241,10 @@ data class Config(
         .put("filterId", filterId)
         .put("filterIntensity", filterIntensity)
         .put("photoFilterIntensity", photoFilterIntensity)
+        .put("rgbRed", rgbRed.coerceIn(0, 200))
+        .put("rgbGreen", rgbGreen.coerceIn(0, 200))
+        .put("rgbBlue", rgbBlue.coerceIn(0, 200))
+        .put("rgbByLens", JSONObject().apply { rgbByLens.forEach { (lens, values) -> put(lens, values) } })
         .put("photoContrast", photoContrast)
         .put("photoContrastByLens", JSONObject().apply { photoContrastByLens.forEach { (lens, value) -> put(lens, value.coerceIn(0, 100)) } })
         .put("videoContrast", videoContrast.coerceIn(0, 100))
@@ -275,6 +287,16 @@ data class Config(
             val finalFilterId = if (migrateSonyDefault) 27 else selectedFilter
             val finalVideoIntensity = if (migrateSonyDefault) 100 else selectedIntensity
             val finalPhotoIntensity = if (migrateSonyDefault) 100 else selectedPhotoIntensity
+            val lensRgb = o.optJSONObject("rgbByLens")?.let { obj ->
+                mutableMapOf<String, String>().apply {
+                    val keys = obj.keys()
+                    while (keys.hasNext()) {
+                        val key = keys.next()
+                        val values = obj.optString(key, "").split(',').mapNotNull { it.trim().toIntOrNull() }
+                        if (values.size == 3) put(key, values.joinToString(",") { it.coerceIn(0, 200).toString() })
+                    }
+                }
+            } ?: mutableMapOf()
             val videoLensContrast = o.optJSONObject("videoContrastByLens")?.let { obj ->
                 mutableMapOf<String, Int>().apply {
                     val keys = obj.keys()
@@ -349,6 +371,10 @@ data class Config(
                 filterId = finalFilterId,
                 filterIntensity = finalVideoIntensity,
                 photoFilterIntensity = finalPhotoIntensity,
+                rgbRed = o.optInt("rgbRed", d.rgbRed).coerceIn(0, 200),
+                rgbGreen = o.optInt("rgbGreen", d.rgbGreen).coerceIn(0, 200),
+                rgbBlue = o.optInt("rgbBlue", d.rgbBlue).coerceIn(0, 200),
+                rgbByLens = lensRgb,
                 photoContrast = (if (oldVersion < 7 && o.optInt("photoContrast", 40) == 40) 10 else o.optInt("photoContrast", d.photoContrast)).coerceIn(0, 100),
                 photoContrastByLens = lensContrast,
                 videoContrast = o.optInt("videoContrast", d.videoContrast).coerceIn(0, 100),
@@ -360,7 +386,7 @@ data class Config(
                 chromaticAberrationCorrection = o.optBoolean("chromaticAberrationCorrection", d.chromaticAberrationCorrection),
                 lensKeys = o.optBoolean("lensKeys", d.lensKeys),
                 haptics = o.optBoolean("haptics", d.haptics),
-                ver = maxOf(14, o.optInt("ver", d.ver))
+                ver = maxOf(15, o.optInt("ver", d.ver))
             )
         }
     }
