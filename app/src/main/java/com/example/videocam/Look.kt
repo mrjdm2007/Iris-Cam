@@ -299,14 +299,25 @@ object Look {
     /** Preview grade: look, contrast, then independent RGB gains. */
     fun previewFilter(
         id: Int, intensity: Int, red: Int = 100, green: Int = 100, blue: Int = 100,
-        contrast: Int = 0, reduceRedChroma: Boolean = true
-    ): ColorMatrixColorFilter =
-        // Match the EGL recording pipeline: look, RGB channel gains, then contrast.
-        // Keeping this order identical prevents preview/recording colour and tonal drift.
-        ColorMatrixColorFilter(withContrast(
+        contrast: Int = 0, reduceRedChroma: Boolean = true,
+        postRedChromaReduction: Boolean = false
+    ): ColorMatrixColorFilter {
+        // Match the EGL recording pipeline: look, RGB gains, contrast, then its final
+        // red-chroma trim. The video shader applies that final trim even for Natural.
+        val result = withContrast(
             withRgb(intensityMatrix(id, intensity, reduceRedChroma), red, green, blue),
             contrast
-        ))
+        )
+        if (postRedChromaReduction) {
+            result.postConcat(ColorMatrix(floatArrayOf(
+                0.8426f, 0.1430f, 0.0144f, 0f, 0f,
+                0f, 1f, 0f, 0f, 0f,
+                0f, 0f, 1f, 0f, 0f,
+                0f, 0f, 0f, 1f, 0f
+            )))
+        }
+        return ColorMatrixColorFilter(result)
+    }
 
     /** 4x5 Android ColorMatrix values consumed by the EGL video renderer. */
     fun videoFilterMatrix(
