@@ -311,6 +311,19 @@ class MainActivity : Activity(), CameraController.Callbacks {
             cfg.ver = 5
             store.save("last", cfg)
         }
+        if (cfg.ver < 6) {
+            // 1080p was the previous untouched default; start the new default at 720p.
+            if (cfg.previewP == 1080) cfg.previewP = 720
+            cfg.ver = 6
+            cfgDirty = true
+            store.save("last", cfg)
+        }
+        // Preserve legacy RGB adjustments for the lens that was selected before per-lens storage.
+        if (cfg.cameraId.isNotBlank() && cfg.cameraId !in cfg.rgbByLens) {
+            cfg.rgbByLens[cfg.cameraId] = "${cfg.rgbRed},${cfg.rgbGreen},${cfg.rgbBlue}"
+            cfgDirty = true
+            store.save("last", cfg)
+        }
         slider.onChange = { f ->
             cam.cancelRack()
             cam.setFocus(f)
@@ -1563,6 +1576,27 @@ class MainActivity : Activity(), CameraController.Callbacks {
         )
     }
 
+    /** Keep the legacy active RGB fields in sync with a persistent per-camera value. */
+    private fun saveActiveLensRgb() {
+        if (cfg.cameraId.isBlank()) return
+        cfg.rgbByLens[cfg.cameraId] = "${cfg.rgbRed.coerceIn(0, 200)},${cfg.rgbGreen.coerceIn(0, 200)},${cfg.rgbBlue.coerceIn(0, 200)}"
+    }
+
+    /** A lens without saved adjustments starts neutral rather than inheriting another lens's trim. */
+    private fun loadLensRgb(lensId: String) {
+        val values = cfg.rgbByLens[lensId]?.split(',')?.mapNotNull { it.trim().toIntOrNull() }
+        if (values != null && values.size == 3) {
+            cfg.rgbRed = values[0].coerceIn(0, 200)
+            cfg.rgbGreen = values[1].coerceIn(0, 200)
+            cfg.rgbBlue = values[2].coerceIn(0, 200)
+        } else {
+            cfg.rgbRed = 100
+            cfg.rgbGreen = 100
+            cfg.rgbBlue = 100
+            saveActiveLensRgb()
+        }
+    }
+
     private fun showRgbSliders() {
         if (!idle()) return
         val box = LinearLayout(this).apply {
@@ -1583,6 +1617,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
                         label.text = "$name · ${value}%"
                         if (fromUser) {
                             setValue(value.coerceIn(0, 200))
+                            saveActiveLensRgb()
                             cfgDirty = true
                             applyBwLook()
                         }
@@ -1616,6 +1651,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
                 cfg.rgbRed = 100
                 cfg.rgbGreen = 100
                 cfg.rgbBlue = 100
+                saveActiveLensRgb()
                 cfgDirty = true
                 applyBwLook()
                 if (cfg.mode == 0) streamChanged() else applyLive()
@@ -2010,7 +2046,9 @@ class MainActivity : Activity(), CameraController.Callbacks {
 
     private fun switchLens(id: String) {
         if (!idle()) return
+        saveActiveLensRgb()
         cfg.cameraId = id
+        loadLensRgb(id)
         store.save("last", cfg)
         cam.reopen()
         refreshUi()
@@ -2319,7 +2357,9 @@ class MainActivity : Activity(), CameraController.Callbacks {
         val ids = cam.cameraIds
         if (ids.isEmpty()) return
         choose("Lens", ids.map { cam.cameraLabel(it) }) {
+            saveActiveLensRgb()
             cfg.cameraId = ids[it]
+            loadLensRgb(cfg.cameraId)
             store.save("last", cfg)
             beginCameraTransition()
             cam.reopen()
