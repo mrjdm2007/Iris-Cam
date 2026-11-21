@@ -301,6 +301,11 @@ class MainActivity : Activity(), CameraController.Callbacks {
             cfg.ver = 3
             store.save("last", cfg)
         }
+        // Mark the current schema only after every legacy migration above has run.
+        if (cfg.ver < 5) {
+            cfg.ver = 5
+            store.save("last", cfg)
+        }
         slider.onChange = { f ->
             cam.cancelRack()
             cam.setFocus(f)
