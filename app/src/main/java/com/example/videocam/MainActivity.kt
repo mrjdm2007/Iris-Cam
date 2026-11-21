@@ -324,6 +324,12 @@ class MainActivity : Activity(), CameraController.Callbacks {
             cfgDirty = true
             store.save("last", cfg)
         }
+        // Preserve the legacy global contrast only for the lens active during migration.
+        if (cfg.cameraId.isNotBlank() && cfg.cameraId !in cfg.photoContrastByLens) {
+            cfg.photoContrastByLens[cfg.cameraId] = cfg.photoContrast.coerceIn(0, 100)
+            cfgDirty = true
+            store.save("last", cfg)
+        }
         slider.onChange = { f ->
             cam.cancelRack()
             cam.setFocus(f)
@@ -1572,7 +1578,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
                     if (cfg.mode == 0) streamChanged() else applyLive()
                 }
             }),
-            ("RGB channels · R ${cfg.rgbRed}% · G ${cfg.rgbGreen}% · B ${cfg.rgbBlue}%" to { showRgbSliders() })
+            ("RGB channels · ${runCatching { cam.cameraLabel(cfg.cameraId) }.getOrDefault(cfg.cameraId)} · R ${cfg.rgbRed}% · G ${cfg.rgbGreen}% · B ${cfg.rgbBlue}%" to { showRgbSliders() })
         )
     }
 
@@ -1662,7 +1668,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
     private fun showPhotoContrastSlider(lensId: String = cfg.cameraId) {
         if (!idle()) return
         val lensName = runCatching { cam.cameraLabel(lensId) }.getOrDefault(lensId)
-        val currentContrast = (cfg.photoContrastByLens[lensId] ?: cfg.photoContrast).coerceIn(0, 100)
+        val currentContrast = (cfg.photoContrastByLens[lensId] ?: 40).coerceIn(0, 100)
         val box = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(20), dp(12), dp(20), dp(8))
@@ -1707,12 +1713,12 @@ class MainActivity : Activity(), CameraController.Callbacks {
         if (ids.isEmpty()) return
         choose("Photo contrast · choose lens", ids.map { id ->
             val name = runCatching { cam.cameraLabel(id) }.getOrDefault(id)
-            "$name · ${(cfg.photoContrastByLens[id] ?: cfg.photoContrast).coerceIn(0, 100)}%"
+            "$name · ${(cfg.photoContrastByLens[id] ?: 40).coerceIn(0, 100)}%"
         }) { index -> showPhotoContrastSlider(ids[index]) }
     }
 
     private fun photoImageItems(): List<Pair<String, () -> Unit>> = listOf(
-        "Contrast by lens: ${runCatching { cam.cameraLabel(cfg.cameraId) }.getOrDefault(cfg.cameraId)} · ${(cfg.photoContrastByLens[cfg.cameraId] ?: cfg.photoContrast).coerceIn(0, 100)}%" to { showLensContrastPicker() },
+        "Contrast by lens: ${runCatching { cam.cameraLabel(cfg.cameraId) }.getOrDefault(cfg.cameraId)} · ${(cfg.photoContrastByLens[cfg.cameraId] ?: 40).coerceIn(0, 100)}%" to { showLensContrastPicker() },
         "Smart ISO cap: ${if (cfg.smartIso) "500" else "Off"}" to {
             cfg.smartIso = !cfg.smartIso
             cfgDirty = true
@@ -1760,7 +1766,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
         val m = when {
             cam.effMode() == 2 -> "ULTRA HDR"
             cfg.photoFormat == 3 && cam.ultraHdrAvailable && cfg.filterId == 0 && !cfg.flat && !cfg.upscale &&
-                (cfg.photoContrastByLens[cfg.cameraId] ?: cfg.photoContrast).coerceIn(0, 100) == 0 &&
+                (cfg.photoContrastByLens[cfg.cameraId] ?: 40).coerceIn(0, 100) == 0 &&
                 cfg.rgbRed == 100 && cfg.rgbGreen == 100 && cfg.rgbBlue == 100 -> "ULTRA HDR"
             cfg.scene == 1 -> "NIGHT"
             cfg.scene == 2 -> "ASTRO"
@@ -1783,7 +1789,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
             2 -> "Ultra HDR (4-frame bracket)"
             1 -> "RAW develop"
             else -> if (cfg.photoFormat == 3 && cam.ultraHdrAvailable && cfg.filterId == 0 && !cfg.flat &&
-                (cfg.photoContrastByLens[cfg.cameraId] ?: cfg.photoContrast).coerceIn(0, 100) == 0 &&
+                (cfg.photoContrastByLens[cfg.cameraId] ?: 40).coerceIn(0, 100) == 0 &&
                 cfg.rgbRed == 100 && cfg.rgbGreen == 100 && cfg.rgbBlue == 100) {
                 "Ultra HDR (native JPEG_R)"
             } else {
