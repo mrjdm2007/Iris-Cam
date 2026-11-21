@@ -62,7 +62,7 @@ data class Config(
     var grid: Int = 0,
     var ratio: Int = 0,              // cinematic shape of the video resolution (index into Ratios), 0 = 16:9
     var gridFlip: Int = 0,
-    var previewP: Int = 1080,        // preview stream height: 720 or 1080
+    var previewP: Int = 720,         // preview stream height: 480, 720 or 1080
     var antiband: Int = 0,           // 0 = auto, 1 = 50 Hz, 2 = 60 Hz, 3 = off
     var zoomMethod: Int = 0,         // 0 = zoom ratio, 1 = crop region
     var peak: Int = 0,               // focus peaking: 0 = off, 1 = low, 2 = medium, 3 = high
@@ -88,6 +88,7 @@ data class Config(
     var rgbRed: Int = 100, // independent RGB channel intensity, 0..200%; 100 = neutral
     var rgbGreen: Int = 100,
     var rgbBlue: Int = 100,
+    var rgbByLens: MutableMap<String, String> = mutableMapOf(), // per-camera RGB values encoded as R,G,B
     var photoContrast: Int = 40, // fallback contrast strength, 0..100
     var photoContrastByLens: MutableMap<String, Int> = mutableMapOf(), // per-camera photo contrast
     var smartIso: Boolean = true, // auto photo ISO cap at 500
@@ -97,7 +98,7 @@ data class Config(
     var chromaticAberrationCorrection: Boolean = true, // request ISP lateral colour-fringe correction
     var lensKeys: Boolean = false,   // show the 0.5x / 1x / 2.7x shortcut buttons
     var haptics: Boolean = true,     // subtle shutter and manual slider feedback
-    var ver: Int = 5
+    var ver: Int = 6
 ) {
     fun copyFrom(o: Config) {
         cameraId = o.cameraId
@@ -146,6 +147,7 @@ data class Config(
         rgbRed = o.rgbRed
         rgbGreen = o.rgbGreen
         rgbBlue = o.rgbBlue
+        rgbByLens = o.rgbByLens.toMutableMap()
         photoContrast = o.photoContrast
         photoContrastByLens = o.photoContrastByLens.toMutableMap()
         smartIso = o.smartIso
@@ -205,6 +207,7 @@ data class Config(
         .put("rgbRed", rgbRed.coerceIn(0, 200))
         .put("rgbGreen", rgbGreen.coerceIn(0, 200))
         .put("rgbBlue", rgbBlue.coerceIn(0, 200))
+        .put("rgbByLens", JSONObject().apply { rgbByLens.forEach { (lens, values) -> put(lens, values) } })
         .put("photoContrast", photoContrast)
         .put("photoContrastByLens", JSONObject().apply { photoContrastByLens.forEach { (lens, value) -> put(lens, value.coerceIn(0, 100)) } })
         .put("smartIso", smartIso)
@@ -245,6 +248,16 @@ data class Config(
             val finalFilterId = if (migrateSonyDefault) 27 else selectedFilter
             val finalVideoIntensity = if (migrateSonyDefault) 100 else selectedIntensity
             val finalPhotoIntensity = if (migrateSonyDefault) 100 else selectedPhotoIntensity
+            val lensRgb = o.optJSONObject("rgbByLens")?.let { obj ->
+                mutableMapOf<String, String>().apply {
+                    val keys = obj.keys()
+                    while (keys.hasNext()) {
+                        val key = keys.next()
+                        val values = obj.optString(key, "").split(',').mapNotNull { it.trim().toIntOrNull() }
+                        if (values.size == 3) put(key, values.joinToString(",") { it.coerceIn(0, 200).toString() })
+                    }
+                }
+            } ?: mutableMapOf()
             val lensContrast = o.optJSONObject("photoContrastByLens")?.let { obj ->
                 mutableMapOf<String, Int>().apply {
                     val keys = obj.keys()
@@ -301,6 +314,7 @@ data class Config(
                 rgbRed = o.optInt("rgbRed", d.rgbRed).coerceIn(0, 200),
                 rgbGreen = o.optInt("rgbGreen", d.rgbGreen).coerceIn(0, 200),
                 rgbBlue = o.optInt("rgbBlue", d.rgbBlue).coerceIn(0, 200),
+                rgbByLens = lensRgb,
                 photoContrast = o.optInt("photoContrast", d.photoContrast).coerceIn(0, 100),
                 photoContrastByLens = lensContrast,
                 smartIso = o.optBoolean("smartIso", d.smartIso),
@@ -310,7 +324,7 @@ data class Config(
                 chromaticAberrationCorrection = o.optBoolean("chromaticAberrationCorrection", d.chromaticAberrationCorrection),
                 lensKeys = o.optBoolean("lensKeys", d.lensKeys),
                 haptics = o.optBoolean("haptics", d.haptics),
-                ver = o.optInt("ver", d.ver).coerceIn(0, 5)
+                ver = o.optInt("ver", d.ver).coerceIn(0, 6)
             )
         }
     }
