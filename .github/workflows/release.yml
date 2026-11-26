@@ -52,7 +52,16 @@ jobs:
           IRIS_RELEASE_KEY_ALIAS: ${{ secrets.IRIS_RELEASE_KEY_ALIAS }}
           IRIS_RELEASE_KEY_PASSWORD: ${{ secrets.IRIS_RELEASE_KEY_PASSWORD }}
         run: |
-          gradle assembleRelease --no-daemon
+          for attempt in 1 2 3; do
+            if [ "$attempt" -eq 1 ]; then
+              gradle assembleRelease --no-daemon && break
+            else
+              gradle --refresh-dependencies assembleRelease --no-daemon && break
+            fi
+            echo "Release build attempt $attempt failed; retrying after a short delay"
+            sleep $((attempt * 20))
+          done
+          test -f app/build/outputs/apk/release/app-release.apk
           cp app/build/outputs/apk/release/app-release.apk "IrisCam-${GITHUB_REF_NAME}.apk"
 
       - name: Publish GitHub Release
