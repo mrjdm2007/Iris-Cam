@@ -3,6 +3,13 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
+val releaseStorePath = System.getenv("IRIS_RELEASE_STORE_FILE")
+val releaseStorePassword = System.getenv("IRIS_RELEASE_STORE_PASSWORD")
+val releaseKeyAlias = System.getenv("IRIS_RELEASE_KEY_ALIAS")
+val releaseKeyPassword = System.getenv("IRIS_RELEASE_KEY_PASSWORD")
+val hasReleaseSigning = listOf(releaseStorePath, releaseStorePassword, releaseKeyAlias, releaseKeyPassword)
+    .all { !it.isNullOrBlank() }
+
 android {
     namespace = "com.example.videocam"
     compileSdk = 34
@@ -15,10 +22,21 @@ android {
         versionName = "1.1.0"
     }
 
+    signingConfigs {
+        create("irisRelease") {
+            if (hasReleaseSigning) {
+                storeFile = file(releaseStorePath!!)
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
+        }
+    }
     buildTypes {
         release {
-            // Internal sideload release: signed with the debug key until a private release keystore is configured.
-            signingConfig = signingConfigs.getByName("debug")
+            // Configure the four IRIS_RELEASE_* environment variables in CI to sign distributable builds.
+            // Without them, use the debug key for internal testing only.
+            signingConfig = signingConfigs.getByName(if (hasReleaseSigning) "irisRelease" else "debug")
             isMinifyEnabled = false
         }
     }
