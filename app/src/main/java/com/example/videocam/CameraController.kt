@@ -2556,6 +2556,7 @@ class CameraController(
                 if (!updateRepeating()) {
                     pendingRecordingStart = null
                     recordingExposureLockActive = false
+                    updateRepeating()
                     ui.onMessage("Couldn't apply the exposure lock; recording will continue with automatic exposure")
                     completeRecordingStart(activeRecorder)
                 } else {
@@ -2565,6 +2566,7 @@ class CameraController(
                             pendingRecordingStart = null
                             recordingStartTimeout = null
                             recordingExposureLockActive = false
+                            updateRepeating()
                             ui.onMessage("Exposure lock confirmation timed out; starting with automatic exposure")
                             completeRecordingStart(pending)
                         }
