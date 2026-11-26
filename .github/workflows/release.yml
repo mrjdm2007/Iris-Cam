@@ -34,6 +34,17 @@ jobs:
             echo "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/iris-release.jks"
           fi
 
+      - name: Verify production signing configuration
+        env:
+          STORE_PASSWORD: ${{ secrets.IRIS_RELEASE_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.IRIS_RELEASE_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.IRIS_RELEASE_KEY_PASSWORD }}
+        run: |
+          test -s "$RUNNER_TEMP/iris-release.jks" || { echo "Missing IRIS_RELEASE_KEYSTORE_BASE64"; exit 1; }
+          test -n "$STORE_PASSWORD" || { echo "Missing IRIS_RELEASE_STORE_PASSWORD"; exit 1; }
+          test -n "$KEY_ALIAS" || { echo "Missing IRIS_RELEASE_KEY_ALIAS"; exit 1; }
+          test -n "$KEY_PASSWORD" || { echo "Missing IRIS_RELEASE_KEY_PASSWORD"; exit 1; }
+
       - name: Build release APK
         env:
           IRIS_RELEASE_STORE_FILE: ${{ runner.temp }}/iris-release.jks
