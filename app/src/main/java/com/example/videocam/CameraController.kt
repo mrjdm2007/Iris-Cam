@@ -1315,17 +1315,19 @@ class CameraController(
         updateRepeating()
     }
 
-    fun updateRepeating() {
-        val s = session ?: return
-        try {
-            val b = currentBuilder() ?: return
+    fun updateRepeating(): Boolean {
+        val s = session ?: return false
+        return try {
+            val b = currentBuilder() ?: return false
             if (s is CameraConstrainedHighSpeedCaptureSession) {
                 s.setRepeatingBurst(s.createHighSpeedRequestList(b.build()), null, handler)
             } else {
                 s.setRepeatingRequest(b.build(), resultCb, cbHandler)
             }
+            true
         } catch (e: Exception) {
             ui.onMessage("Camera: ${e.message}")
+            false
         }
     }
 
@@ -2544,7 +2546,12 @@ class CameraController(
                 ui.onMessage("This camera doesn't support exposure lock; auto exposure may change while recording")
             } else {
                 pendingRecordingStart = activeRecorder
-                updateRepeating()
+                if (!updateRepeating()) {
+                    pendingRecordingStart = null
+                    recordingExposureLockActive = false
+                    ui.onMessage("Couldn't apply the exposure lock; recording will continue with automatic exposure")
+                    completeRecordingStart(activeRecorder)
+                }
                 return
             }
         }
