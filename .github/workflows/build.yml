@@ -36,7 +36,17 @@ jobs:
           IRIS_RELEASE_STORE_PASSWORD: ${{ secrets.IRIS_RELEASE_STORE_PASSWORD }}
           IRIS_RELEASE_KEY_ALIAS: ${{ secrets.IRIS_RELEASE_KEY_ALIAS }}
           IRIS_RELEASE_KEY_PASSWORD: ${{ secrets.IRIS_RELEASE_KEY_PASSWORD }}
-        run: gradle assembleDebug assembleRelease --no-daemon
+        run: |
+          for attempt in 1 2 3; do
+            if [ "$attempt" -eq 1 ]; then
+              gradle assembleDebug assembleRelease --no-daemon && exit 0
+            else
+              gradle --refresh-dependencies assembleDebug assembleRelease --no-daemon && exit 0
+            fi
+            echo "Build attempt $attempt failed; retrying after a short delay"
+            sleep $((attempt * 20))
+          done
+          exit 1
 
       - uses: actions/upload-artifact@v4
         with:
