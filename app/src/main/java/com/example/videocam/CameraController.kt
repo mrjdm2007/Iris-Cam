@@ -2538,6 +2538,7 @@ class CameraController(
             configureAndStart()
             return
         }
+        recordingStartCancelled = false
         if (!cfg.manualExposure) {
             // Snapshot AE's latest completed result, submit a tagged lock request, and only
             // start the encoder after Camera2 confirms that request has reached the sensor.
@@ -2551,7 +2552,6 @@ class CameraController(
             } else if (!recordingExposureLockActive) {
                 ui.onMessage("This camera doesn't support exposure lock; auto exposure may change while recording")
             } else {
-                recordingStartCancelled = false
                 pendingRecordingStart = activeRecorder
                 if (!updateRepeating()) {
                     pendingRecordingStart = null
