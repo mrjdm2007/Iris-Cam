@@ -3,9 +3,9 @@ name: Build APK
 on:
   workflow_dispatch:
   push:
-    branches: [main, master, 'feature/**', 'ui-layout-wireless-guide', 'workflow-378-camera-fixes', 'workflow-497-camera-features']
+    branches: [main, master, 'feature/**', 'ui-layout-wireless-guide', 'workflow-378-camera-fixes', 'workflow-497-camera-features', 'workflow-498-video-exposure-lock-release', 'workflow-499-exposure-release-fixes']
   pull_request:
-    branches: [main, master]
+    branches: [main, master, 'workflow-497-camera-features', 'workflow-498-video-exposure-lock-release', 'workflow-499-exposure-release-fixes']
 
 jobs:
   build:
@@ -22,10 +22,38 @@ jobs:
         with:
           gradle-version: 8.7
 
-      - name: Build debug APK
-        run: gradle assembleDebug --no-daemon
+      - name: Prepare private release signing key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.IRIS_RELEASE_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/iris-release.jks"
+          fi
+
+      - name: Build debug and release APKs
+        env:
+          IRIS_RELEASE_STORE_FILE: ${{ runner.temp }}/iris-release.jks
+          IRIS_RELEASE_STORE_PASSWORD: ${{ secrets.IRIS_RELEASE_STORE_PASSWORD }}
+          IRIS_RELEASE_KEY_ALIAS: ${{ secrets.IRIS_RELEASE_KEY_ALIAS }}
+          IRIS_RELEASE_KEY_PASSWORD: ${{ secrets.IRIS_RELEASE_KEY_PASSWORD }}
+        run: |
+          for attempt in 1 2 3; do
+            if [ "$attempt" -eq 1 ]; then
+              gradle assembleDebug assembleRelease --no-daemon && exit 0
+            else
+              gradle --refresh-dependencies assembleDebug assembleRelease --no-daemon && exit 0
+            fi
+            echo "Build attempt $attempt failed; retrying after a short delay"
+            sleep $((attempt * 20))
+          done
+          exit 1
 
       - uses: actions/upload-artifact@v4
         with:
           name: IrisCam-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: IrisCam-v1.1.0-${{ secrets.IRIS_RELEASE_KEYSTORE_BASE64 != '' && 'signed' || 'internal-debug-signed' }}-apk
+          path: app/build/outputs/apk/release/app-release.apk

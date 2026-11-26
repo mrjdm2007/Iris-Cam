@@ -222,6 +222,20 @@ class CameraController(
 
     var recording = false
         private set
+
+    // In Auto video mode, freeze the exposure measured immediately before recording.
+    // EV changes from the exposure slider are applied against this baseline while AE stays off.
+    @Volatile private var recordingExposureLockActive = false
+    private var recordingLockExposureNs = 0L
+    private var recordingLockIso = 0
+    private var recordingLockStartEv = 0
+    @Volatile private var recordingAeRelockPending = false
+    @Volatile private var recordingEvUpdateTag = Any()
+    private val recordingStartLockTag = Any()
+    @Volatile private var pendingRecordingStart: MediaRecorder? = null
+    private var recordingStartTimeout: Runnable? = null
+    @Volatile private var recordingStartCancelled = false
+
     var manualFocus = false
         private set
     var focusFraction = 0f
@@ -551,6 +565,7 @@ class CameraController(
         rackAnim?.cancel()
         cancelZoomPull()
         if (recording) stopRecording()
+        cancelPendingRecordingStart()
         closeSession()
         releaseRecorder()
         device?.close()
@@ -1129,10 +1144,31 @@ class CameraController(
             }
             b.set(CaptureRequest.SENSOR_EXPOSURE_TIME, ns)
             b.set(CaptureRequest.SENSOR_SENSITIVITY, cfg.iso.coerceIn(isoRange.lower, isoRange.upper))
+        } else if (recordingExposureLockActive && manualSensor) {
+            // Keep the sensor values captured at record start. The EV slider changes only
+            // shutter exposure relative to that fixed baseline; scene metering cannot drift.
+            b.set(CaptureRequest.CONTROL_AE_MODE, CameraMetadata.CONTROL_AE_MODE_OFF)
+            val evDelta = (cfg.ev - recordingLockStartEv) * evStepEv
+            var ns = (recordingLockExposureNs * Math.pow(2.0, evDelta.toDouble())).toLong()
+            chars.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)?.let {
+                // Never request a shutter longer than one frame period; this avoids fighting
+                // the configured video frame rate when the EV slider is moved down.
+                val frameLimitNs = 1_000_000_000L / cfg.fps.coerceAtLeast(1)
+                val upper = min(it.upper, frameLimitNs).coerceAtLeast(it.lower)
+                ns = ns.coerceIn(it.lower, upper)
+            }
+            b.set(CaptureRequest.SENSOR_EXPOSURE_TIME, ns)
+            b.set(CaptureRequest.SENSOR_SENSITIVITY, recordingLockIso.coerceIn(isoRange.lower, isoRange.upper))
         } else {
             b.set(CaptureRequest.CONTROL_AE_EXPOSURE_COMPENSATION, cfg.ev)
-            if (aeLock && aeLockAvail) b.set(CaptureRequest.CONTROL_AE_LOCK, true)
+            if ((aeLock || recordingExposureLockActive) && aeLockAvail) {
+                // On AE-only cameras, briefly release AE only for an explicit EV-slider update,
+                // then re-lock from the first result produced by that updated request.
+                b.set(CaptureRequest.CONTROL_AE_LOCK, !(recordingExposureLockActive && recordingAeRelockPending))
+            }
         }
+        if (pendingRecordingStart != null) b.setTag(recordingStartLockTag)
+        else if (recordingExposureLockActive && recordingAeRelockPending) b.setTag(recordingEvUpdateTag)
         if (awbLock && awbLockAvail) b.set(CaptureRequest.CONTROL_AWB_LOCK, true)
         if (torch && flashAvail) b.set(CaptureRequest.FLASH_MODE, CameraMetadata.FLASH_MODE_TORCH)
         pick(
@@ -1202,6 +1238,21 @@ class CameraController(
             res: TotalCaptureResult
         ) {
             liveIso = res.get(CaptureResult.SENSOR_SENSITIVITY) ?: liveIso
+            if (r.tag === recordingStartLockTag) {
+                val pending = pendingRecordingStart
+                if (pending != null) {
+                    pendingRecordingStart = null
+                    recordingStartTimeout?.let { handler.removeCallbacks(it) }
+                    recordingStartTimeout = null
+                    handler.post { completeRecordingStart(pending) }
+                }
+            }
+            if (recordingAeRelockPending && r.tag === recordingEvUpdateTag) {
+                recordingAeRelockPending = false
+                handler.post {
+                    if (recording && recordingExposureLockActive) updateRepeating()
+                }
+            }
             res.get(CaptureResult.SENSOR_EXPOSURE_TIME)?.let {
                 if (it > 0) {
                     liveExpNs = it
@@ -1261,17 +1312,28 @@ class CameraController(
     private fun currentBuilder(): CaptureRequest.Builder? =
         if (cfg.mode == 1) buildPhotoPreview() else buildRequest()
 
-    fun updateRepeating() {
-        val s = session ?: return
-        try {
-            val b = currentBuilder() ?: return
+    /** Apply a user EV-slider change without leaving AE unlocked on cameras lacking manual sensor control. */
+    fun updateExposureValue() {
+        if (recording && recordingExposureLockActive && !manualSensor && aeLockAvail) {
+            recordingEvUpdateTag = Any()
+            recordingAeRelockPending = true
+        }
+        updateRepeating()
+    }
+
+    fun updateRepeating(): Boolean {
+        val s = session ?: return false
+        return try {
+            val b = currentBuilder() ?: return false
             if (s is CameraConstrainedHighSpeedCaptureSession) {
                 s.setRepeatingBurst(s.createHighSpeedRequestList(b.build()), null, handler)
             } else {
                 s.setRepeatingRequest(b.build(), resultCb, cbHandler)
             }
+            true
         } catch (e: Exception) {
             ui.onMessage("Camera: ${e.message}")
+            false
         }
     }
 
@@ -2465,7 +2527,7 @@ class CameraController(
     // ---------- recording ----------
 
     fun startRecording() {
-        if (recording) return
+        if (recording || pendingRecordingStart != null) return
         if (session == null) {
             ui.onMessage("Camera is still preparing the video session. Try again in a moment.")
             return
@@ -2476,6 +2538,50 @@ class CameraController(
             configureAndStart()
             return
         }
+        recordingStartCancelled = false
+        if (!cfg.manualExposure) {
+            // Snapshot AE's latest completed result, submit a tagged lock request, and only
+            // start the encoder after Camera2 confirms that request has reached the sensor.
+            recordingLockExposureNs = liveExpNs.takeIf { it > 0L } ?: (1_000_000_000L / cfg.fps.coerceAtLeast(1))
+            recordingLockIso = liveIso.takeIf { it > 0 } ?: isoRange.lower.coerceAtLeast(100)
+            recordingLockStartEv = cfg.ev
+            recordingAeRelockPending = false
+            recordingExposureLockActive = !highSpeed && (manualSensor || aeLockAvail)
+            if (highSpeed) {
+                ui.onMessage("Exposure lock isn't supported reliably in high-speed recording; auto exposure remains active")
+            } else if (!recordingExposureLockActive) {
+                ui.onMessage("This camera doesn't support exposure lock; auto exposure may change while recording")
+            } else {
+                pendingRecordingStart = activeRecorder
+                if (!updateRepeating()) {
+                    pendingRecordingStart = null
+                    recordingExposureLockActive = false
+                    updateRepeating()
+                    ui.onMessage("Couldn't apply the exposure lock; recording will continue with automatic exposure")
+                    completeRecordingStart(activeRecorder)
+                } else {
+                    val timeout = Runnable {
+                        val pending = pendingRecordingStart
+                        if (pending != null) {
+                            pendingRecordingStart = null
+                            recordingStartTimeout = null
+                            recordingExposureLockActive = false
+                            updateRepeating()
+                            ui.onMessage("Exposure lock confirmation timed out; starting with automatic exposure")
+                            completeRecordingStart(pending)
+                        }
+                    }
+                    recordingStartTimeout = timeout
+                    handler.postDelayed(timeout, 1500L)
+                }
+                return
+            }
+        }
+        completeRecordingStart(activeRecorder)
+    }
+
+    private fun completeRecordingStart(activeRecorder: MediaRecorder) {
+        if (released || recording || recordingStartCancelled) return
         try {
             activeRecorder.start()
             crop?.active = true
@@ -2483,17 +2589,34 @@ class CameraController(
             ui.onRecording(true)
         } catch (e: Exception) {
             recording = false
+            recordingExposureLockActive = false
+            recordingAeRelockPending = false
             crop?.active = false
             ui.onRecording(false)
+            updateRepeating()
             ui.onMessage("Couldn't start recording: ${e.message}")
             releaseRecorder()
             configureAndStart()
         }
     }
 
+    private fun cancelPendingRecordingStart() {
+        recordingStartCancelled = true
+        pendingRecordingStart = null
+        recordingStartTimeout?.let { handler.removeCallbacks(it) }
+        recordingStartTimeout = null
+        recordingExposureLockActive = false
+        recordingAeRelockPending = false
+    }
+
     fun stopRecording() {
-        if (!recording) return
+        if (!recording) {
+            cancelPendingRecordingStart()
+            return
+        }
         recording = false
+        recordingExposureLockActive = false
+        recordingAeRelockPending = false
         crop?.active = false
         try {
             session?.stopRepeating()
