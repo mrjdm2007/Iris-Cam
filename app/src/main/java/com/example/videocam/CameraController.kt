@@ -229,6 +229,8 @@ class CameraController(
     private var recordingLockExposureNs = 0L
     private var recordingLockIso = 0
     private var recordingLockStartEv = 0
+    @Volatile private var recordingAeRelockPending = false
+    private val recordingEvUpdateTag = Any()
 
     var manualFocus = false
         private set
@@ -1151,8 +1153,11 @@ class CameraController(
         } else {
             b.set(CaptureRequest.CONTROL_AE_EXPOSURE_COMPENSATION, cfg.ev)
             if ((aeLock || recordingExposureLockActive) && aeLockAvail) {
-                b.set(CaptureRequest.CONTROL_AE_LOCK, true)
+                // On AE-only cameras, briefly release AE only for an explicit EV-slider update,
+                // then re-lock from the first result produced by that updated request.
+                b.set(CaptureRequest.CONTROL_AE_LOCK, !(recordingExposureLockActive && recordingAeRelockPending))
             }
+            if (recordingExposureLockActive && recordingAeRelockPending) b.setTag(recordingEvUpdateTag)
         }
         if (awbLock && awbLockAvail) b.set(CaptureRequest.CONTROL_AWB_LOCK, true)
         if (torch && flashAvail) b.set(CaptureRequest.FLASH_MODE, CameraMetadata.FLASH_MODE_TORCH)
@@ -1223,6 +1228,12 @@ class CameraController(
             res: TotalCaptureResult
         ) {
             liveIso = res.get(CaptureResult.SENSOR_SENSITIVITY) ?: liveIso
+            if (recordingAeRelockPending && r.tag === recordingEvUpdateTag) {
+                recordingAeRelockPending = false
+                handler.post {
+                    if (recording && recordingExposureLockActive) updateRepeating()
+                }
+            }
             res.get(CaptureResult.SENSOR_EXPOSURE_TIME)?.let {
                 if (it > 0) {
                     liveExpNs = it
@@ -1281,6 +1292,14 @@ class CameraController(
 
     private fun currentBuilder(): CaptureRequest.Builder? =
         if (cfg.mode == 1) buildPhotoPreview() else buildRequest()
+
+    /** Apply a user EV-slider change without leaving AE unlocked on cameras lacking manual sensor control. */
+    fun updateExposureValue() {
+        if (recording && recordingExposureLockActive && !manualSensor && aeLockAvail) {
+            recordingAeRelockPending = true
+        }
+        updateRepeating()
+    }
 
     fun updateRepeating() {
         val s = session ?: return
@@ -2504,8 +2523,20 @@ class CameraController(
                 recordingLockExposureNs = liveExpNs.takeIf { it > 0L } ?: (1_000_000_000L / 30L)
                 recordingLockIso = liveIso.takeIf { it > 0 } ?: isoRange.lower.coerceAtLeast(100)
                 recordingLockStartEv = cfg.ev
+                recordingAeRelockPending = false
                 recordingExposureLockActive = true
-                updateRepeating()
+                if (!manualSensor && !aeLockAvail) {
+                    ui.onMessage("This camera does not support exposure lock; auto exposure may change while recording")
+                    recordingExposureLockActive = false
+                } else {
+                    updateRepeating()
+                }
+                if (highSpeed && manualSensor) {
+                    // Constrained high-speed sessions may reject manual sensor requests.
+                    // Preserve recording compatibility and explicitly report the limitation.
+                    recordingExposureLockActive = false
+                    ui.onMessage("Exposure lock isn't supported reliably in high-speed recording")
+                }
             }
             activeRecorder.start()
             crop?.active = true
@@ -2514,6 +2545,7 @@ class CameraController(
         } catch (e: Exception) {
             recording = false
             recordingExposureLockActive = false
+            recordingAeRelockPending = false
             crop?.active = false
             ui.onRecording(false)
             updateRepeating()
@@ -2527,6 +2559,7 @@ class CameraController(
         if (!recording) return
         recording = false
         recordingExposureLockActive = false
+        recordingAeRelockPending = false
         crop?.active = false
         try {
             session?.stopRepeating()
