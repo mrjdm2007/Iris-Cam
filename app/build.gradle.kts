@@ -11,12 +11,14 @@ android {
         applicationId = "com.iris.cam"
         minSdk = 29
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.1.0"
     }
 
     buildTypes {
         release {
+            // Internal sideload release: signed with the debug key until a private release keystore is configured.
+            signingConfig = signingConfigs.getByName("debug")
             isMinifyEnabled = false
         }
     }

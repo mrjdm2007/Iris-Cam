@@ -222,6 +222,14 @@ class CameraController(
 
     var recording = false
         private set
+
+    // In Auto video mode, freeze the exposure measured immediately before recording.
+    // EV changes from the exposure slider are applied against this baseline while AE stays off.
+    @Volatile private var recordingExposureLockActive = false
+    private var recordingLockExposureNs = 0L
+    private var recordingLockIso = 0
+    private var recordingLockStartEv = 0
+
     var manualFocus = false
         private set
     var focusFraction = 0f
@@ -1129,9 +1137,22 @@ class CameraController(
             }
             b.set(CaptureRequest.SENSOR_EXPOSURE_TIME, ns)
             b.set(CaptureRequest.SENSOR_SENSITIVITY, cfg.iso.coerceIn(isoRange.lower, isoRange.upper))
+        } else if (recordingExposureLockActive && manualSensor) {
+            // Keep the sensor values captured at record start. The EV slider changes only
+            // shutter exposure relative to that fixed baseline; scene metering cannot drift.
+            b.set(CaptureRequest.CONTROL_AE_MODE, CameraMetadata.CONTROL_AE_MODE_OFF)
+            val evDelta = (cfg.ev - recordingLockStartEv) * evStepEv
+            var ns = (recordingLockExposureNs * Math.pow(2.0, evDelta.toDouble())).toLong()
+            chars.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)?.let {
+                ns = ns.coerceIn(it.lower, it.upper)
+            }
+            b.set(CaptureRequest.SENSOR_EXPOSURE_TIME, ns)
+            b.set(CaptureRequest.SENSOR_SENSITIVITY, recordingLockIso.coerceIn(isoRange.lower, isoRange.upper))
         } else {
             b.set(CaptureRequest.CONTROL_AE_EXPOSURE_COMPENSATION, cfg.ev)
-            if (aeLock && aeLockAvail) b.set(CaptureRequest.CONTROL_AE_LOCK, true)
+            if ((aeLock || recordingExposureLockActive) && aeLockAvail) {
+                b.set(CaptureRequest.CONTROL_AE_LOCK, true)
+            }
         }
         if (awbLock && awbLockAvail) b.set(CaptureRequest.CONTROL_AWB_LOCK, true)
         if (torch && flashAvail) b.set(CaptureRequest.FLASH_MODE, CameraMetadata.FLASH_MODE_TORCH)
@@ -2477,14 +2498,25 @@ class CameraController(
             return
         }
         try {
+            if (!cfg.manualExposure) {
+                // Snapshot the most recent AE result before starting the encoder. On manual-sensor
+                // cameras this becomes a true sensor lock, not an AE lock that blocks EV changes.
+                recordingLockExposureNs = liveExpNs.takeIf { it > 0L } ?: (1_000_000_000L / 30L)
+                recordingLockIso = liveIso.takeIf { it > 0 } ?: isoRange.lower.coerceAtLeast(100)
+                recordingLockStartEv = cfg.ev
+                recordingExposureLockActive = true
+                updateRepeating()
+            }
             activeRecorder.start()
             crop?.active = true
             recording = true
             ui.onRecording(true)
         } catch (e: Exception) {
             recording = false
+            recordingExposureLockActive = false
             crop?.active = false
             ui.onRecording(false)
+            updateRepeating()
             ui.onMessage("Couldn't start recording: ${e.message}")
             releaseRecorder()
             configureAndStart()
@@ -2494,6 +2526,7 @@ class CameraController(
     fun stopRecording() {
         if (!recording) return
         recording = false
+        recordingExposureLockActive = false
         crop?.active = false
         try {
             session?.stopRepeating()
