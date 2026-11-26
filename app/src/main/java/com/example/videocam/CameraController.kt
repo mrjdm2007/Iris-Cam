@@ -233,6 +233,8 @@ class CameraController(
     @Volatile private var recordingEvUpdateTag = Any()
     private val recordingStartLockTag = Any()
     @Volatile private var pendingRecordingStart: MediaRecorder? = null
+    private var recordingStartTimeout: Runnable? = null
+    @Volatile private var recordingStartCancelled = false
 
     var manualFocus = false
         private set
@@ -563,6 +565,7 @@ class CameraController(
         rackAnim?.cancel()
         cancelZoomPull()
         if (recording) stopRecording()
+        cancelPendingRecordingStart()
         closeSession()
         releaseRecorder()
         device?.close()
@@ -1239,6 +1242,8 @@ class CameraController(
                 val pending = pendingRecordingStart
                 if (pending != null) {
                     pendingRecordingStart = null
+                    recordingStartTimeout?.let { handler.removeCallbacks(it) }
+                    recordingStartTimeout = null
                     handler.post { completeRecordingStart(pending) }
                 }
             }
@@ -2546,12 +2551,26 @@ class CameraController(
             } else if (!recordingExposureLockActive) {
                 ui.onMessage("This camera doesn't support exposure lock; auto exposure may change while recording")
             } else {
+                recordingStartCancelled = false
                 pendingRecordingStart = activeRecorder
                 if (!updateRepeating()) {
                     pendingRecordingStart = null
                     recordingExposureLockActive = false
                     ui.onMessage("Couldn't apply the exposure lock; recording will continue with automatic exposure")
                     completeRecordingStart(activeRecorder)
+                } else {
+                    val timeout = Runnable {
+                        val pending = pendingRecordingStart
+                        if (pending != null) {
+                            pendingRecordingStart = null
+                            recordingStartTimeout = null
+                            recordingExposureLockActive = false
+                            ui.onMessage("Exposure lock confirmation timed out; starting with automatic exposure")
+                            completeRecordingStart(pending)
+                        }
+                    }
+                    recordingStartTimeout = timeout
+                    handler.postDelayed(timeout, 1500L)
                 }
                 return
             }
@@ -2560,7 +2579,7 @@ class CameraController(
     }
 
     private fun completeRecordingStart(activeRecorder: MediaRecorder) {
-        if (released || recording) return
+        if (released || recording || recordingStartCancelled) return
         try {
             activeRecorder.start()
             crop?.active = true
@@ -2579,8 +2598,20 @@ class CameraController(
         }
     }
 
+    private fun cancelPendingRecordingStart() {
+        recordingStartCancelled = true
+        pendingRecordingStart = null
+        recordingStartTimeout?.let { handler.removeCallbacks(it) }
+        recordingStartTimeout = null
+        recordingExposureLockActive = false
+        recordingAeRelockPending = false
+    }
+
     fun stopRecording() {
-        if (!recording) return
+        if (!recording) {
+            cancelPendingRecordingStart()
+            return
+        }
         recording = false
         recordingExposureLockActive = false
         recordingAeRelockPending = false
