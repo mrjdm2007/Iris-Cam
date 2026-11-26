@@ -1146,7 +1146,11 @@ class CameraController(
             val evDelta = (cfg.ev - recordingLockStartEv) * evStepEv
             var ns = (recordingLockExposureNs * Math.pow(2.0, evDelta.toDouble())).toLong()
             chars.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)?.let {
-                ns = ns.coerceIn(it.lower, it.upper)
+                // Never request a shutter longer than one frame period; this avoids fighting
+                // the configured video frame rate when the EV slider is moved down.
+                val frameLimitNs = 1_000_000_000L / cfg.fps.coerceAtLeast(1)
+                val upper = min(it.upper, frameLimitNs).coerceAtLeast(it.lower)
+                ns = ns.coerceIn(it.lower, upper)
             }
             b.set(CaptureRequest.SENSOR_EXPOSURE_TIME, ns)
             b.set(CaptureRequest.SENSOR_SENSITIVITY, recordingLockIso.coerceIn(isoRange.lower, isoRange.upper))
@@ -2518,24 +2522,19 @@ class CameraController(
         }
         try {
             if (!cfg.manualExposure) {
-                // Snapshot the most recent AE result before starting the encoder. On manual-sensor
-                // cameras this becomes a true sensor lock, not an AE lock that blocks EV changes.
-                recordingLockExposureNs = liveExpNs.takeIf { it > 0L } ?: (1_000_000_000L / 30L)
+                // Use the last completed AE result as the lock baseline. High-speed constrained
+                // sessions are deliberately excluded because many HALs reject manual sensor requests.
+                recordingLockExposureNs = liveExpNs.takeIf { it > 0L } ?: (1_000_000_000L / cfg.fps.coerceAtLeast(1))
                 recordingLockIso = liveIso.takeIf { it > 0 } ?: isoRange.lower.coerceAtLeast(100)
                 recordingLockStartEv = cfg.ev
                 recordingAeRelockPending = false
-                recordingExposureLockActive = true
-                if (!manualSensor && !aeLockAvail) {
-                    ui.onMessage("This camera does not support exposure lock; auto exposure may change while recording")
-                    recordingExposureLockActive = false
+                recordingExposureLockActive = !highSpeed && (manualSensor || aeLockAvail)
+                if (highSpeed) {
+                    ui.onMessage("Exposure lock isn't supported reliably in high-speed recording; auto exposure remains active")
+                } else if (!recordingExposureLockActive) {
+                    ui.onMessage("This camera doesn't support exposure lock; auto exposure may change while recording")
                 } else {
                     updateRepeating()
-                }
-                if (highSpeed && manualSensor) {
-                    // Constrained high-speed sessions may reject manual sensor requests.
-                    // Preserve recording compatibility and explicitly report the limitation.
-                    recordingExposureLockActive = false
-                    ui.onMessage("Exposure lock isn't supported reliably in high-speed recording")
                 }
             }
             activeRecorder.start()
