@@ -5,7 +5,7 @@ on:
   push:
     branches: [main, master, 'feature/**', 'ui-layout-wireless-guide', 'workflow-378-camera-fixes', 'workflow-497-camera-features', 'workflow-498-video-exposure-lock-release']
   pull_request:
-    branches: [main, master]
+    branches: [main, master, 'workflow-497-camera-features', 'workflow-498-video-exposure-lock-release', 'workflow-499-exposure-release-fixes']
 
 jobs:
   build:
