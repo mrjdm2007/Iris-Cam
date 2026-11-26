@@ -1163,9 +1163,9 @@ class CameraController(
                 // then re-lock from the first result produced by that updated request.
                 b.set(CaptureRequest.CONTROL_AE_LOCK, !(recordingExposureLockActive && recordingAeRelockPending))
             }
-            if (pendingRecordingStart != null) b.setTag(recordingStartLockTag)
-            else if (recordingExposureLockActive && recordingAeRelockPending) b.setTag(recordingEvUpdateTag)
         }
+        if (pendingRecordingStart != null) b.setTag(recordingStartLockTag)
+        else if (recordingExposureLockActive && recordingAeRelockPending) b.setTag(recordingEvUpdateTag)
         if (awbLock && awbLockAvail) b.set(CaptureRequest.CONTROL_AWB_LOCK, true)
         if (torch && flashAvail) b.set(CaptureRequest.FLASH_MODE, CameraMetadata.FLASH_MODE_TORCH)
         pick(
