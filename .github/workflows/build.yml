@@ -45,5 +45,5 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: IrisCam-v1.1.0-release-apk
+          name: IrisCam-v1.1.0-${{ secrets.IRIS_RELEASE_KEYSTORE_BASE64 != '' && 'signed' || 'internal-debug-signed' }}-apk
           path: app/build/outputs/apk/release/app-release.apk
