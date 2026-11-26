@@ -231,6 +231,8 @@ class CameraController(
     private var recordingLockStartEv = 0
     @Volatile private var recordingAeRelockPending = false
     private val recordingEvUpdateTag = Any()
+    private val recordingStartLockTag = Any()
+    @Volatile private var pendingRecordingStart: MediaRecorder? = null
 
     var manualFocus = false
         private set
@@ -1161,7 +1163,8 @@ class CameraController(
                 // then re-lock from the first result produced by that updated request.
                 b.set(CaptureRequest.CONTROL_AE_LOCK, !(recordingExposureLockActive && recordingAeRelockPending))
             }
-            if (recordingExposureLockActive && recordingAeRelockPending) b.setTag(recordingEvUpdateTag)
+            if (pendingRecordingStart != null) b.setTag(recordingStartLockTag)
+            else if (recordingExposureLockActive && recordingAeRelockPending) b.setTag(recordingEvUpdateTag)
         }
         if (awbLock && awbLockAvail) b.set(CaptureRequest.CONTROL_AWB_LOCK, true)
         if (torch && flashAvail) b.set(CaptureRequest.FLASH_MODE, CameraMetadata.FLASH_MODE_TORCH)
@@ -1232,6 +1235,13 @@ class CameraController(
             res: TotalCaptureResult
         ) {
             liveIso = res.get(CaptureResult.SENSOR_SENSITIVITY) ?: liveIso
+            if (r.tag === recordingStartLockTag) {
+                val pending = pendingRecordingStart
+                if (pending != null) {
+                    pendingRecordingStart = null
+                    handler.post { completeRecordingStart(pending) }
+                }
+            }
             if (recordingAeRelockPending && r.tag === recordingEvUpdateTag) {
                 recordingAeRelockPending = false
                 handler.post {
@@ -2509,7 +2519,7 @@ class CameraController(
     // ---------- recording ----------
 
     fun startRecording() {
-        if (recording) return
+        if (recording || pendingRecordingStart != null) return
         if (session == null) {
             ui.onMessage("Camera is still preparing the video session. Try again in a moment.")
             return
@@ -2520,23 +2530,30 @@ class CameraController(
             configureAndStart()
             return
         }
-        try {
-            if (!cfg.manualExposure) {
-                // Use the last completed AE result as the lock baseline. High-speed constrained
-                // sessions are deliberately excluded because many HALs reject manual sensor requests.
-                recordingLockExposureNs = liveExpNs.takeIf { it > 0L } ?: (1_000_000_000L / cfg.fps.coerceAtLeast(1))
-                recordingLockIso = liveIso.takeIf { it > 0 } ?: isoRange.lower.coerceAtLeast(100)
-                recordingLockStartEv = cfg.ev
-                recordingAeRelockPending = false
-                recordingExposureLockActive = !highSpeed && (manualSensor || aeLockAvail)
-                if (highSpeed) {
-                    ui.onMessage("Exposure lock isn't supported reliably in high-speed recording; auto exposure remains active")
-                } else if (!recordingExposureLockActive) {
-                    ui.onMessage("This camera doesn't support exposure lock; auto exposure may change while recording")
-                } else {
-                    updateRepeating()
-                }
+        if (!cfg.manualExposure) {
+            // Snapshot AE's latest completed result, submit a tagged lock request, and only
+            // start the encoder after Camera2 confirms that request has reached the sensor.
+            recordingLockExposureNs = liveExpNs.takeIf { it > 0L } ?: (1_000_000_000L / cfg.fps.coerceAtLeast(1))
+            recordingLockIso = liveIso.takeIf { it > 0 } ?: isoRange.lower.coerceAtLeast(100)
+            recordingLockStartEv = cfg.ev
+            recordingAeRelockPending = false
+            recordingExposureLockActive = !highSpeed && (manualSensor || aeLockAvail)
+            if (highSpeed) {
+                ui.onMessage("Exposure lock isn't supported reliably in high-speed recording; auto exposure remains active")
+            } else if (!recordingExposureLockActive) {
+                ui.onMessage("This camera doesn't support exposure lock; auto exposure may change while recording")
+            } else {
+                pendingRecordingStart = activeRecorder
+                updateRepeating()
+                return
             }
+        }
+        completeRecordingStart(activeRecorder)
+    }
+
+    private fun completeRecordingStart(activeRecorder: MediaRecorder) {
+        if (released || recording) return
+        try {
             activeRecorder.start()
             crop?.active = true
             recording = true
