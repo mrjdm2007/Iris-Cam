@@ -22,10 +22,15 @@ jobs:
         with:
           gradle-version: 8.7
 
-      - name: Build debug APK
-        run: gradle assembleDebug --no-daemon
+      - name: Build debug and release APKs
+        run: gradle assembleDebug assembleRelease --no-daemon
 
       - uses: actions/upload-artifact@v4
         with:
           name: IrisCam-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: IrisCam-v1.1.0-release-apk
+          path: app/build/outputs/apk/release/app-release.apk
