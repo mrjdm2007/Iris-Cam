@@ -37,7 +37,12 @@ android {
             // Configure the four IRIS_RELEASE_* environment variables in CI to sign distributable builds.
             // Without them, use the debug key for internal testing only.
             signingConfig = signingConfigs.getByName(if (hasReleaseSigning) "irisRelease" else "debug")
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
         }
     }
     compileOptions {
