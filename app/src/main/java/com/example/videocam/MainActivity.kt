@@ -1317,6 +1317,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
                     }
                 }
             } else {
+                if (!idle()) return@readout
                 cfg.manualExposure = !cfg.manualExposure
                 cam.clearAeLock()
                 applyLive()
@@ -1325,7 +1326,10 @@ class MainActivity : Activity(), CameraController.Callbacks {
         rIso = readout("ISO") { if (manualExposureActive()) pickIso() else toast("Switch to MANUAL to edit ISO") }
         rShutter = readout("SHUTTER") { if (manualExposureActive()) pickShutter() else toast("Switch to MANUAL to edit shutter speed") }
         rEv = readout("EV") { pickEv() }
-        rAe = readout("AE LOCK") { cam.toggleAeLock() }
+        rAe = readout("AE LOCK") {
+            if (cam.recording) toast("Use the exposure slider while recording")
+            else cam.toggleAeLock()
+        }
         rWb = readout("WB") { cam.toggleAwbLock() }
         exposureControlsChip = chip("•••") { toggleExposureControls() }
         val readRow = LinearLayout(this).apply {
@@ -2922,6 +2926,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
     }
 
     private fun pickEv() {
+        if (!idle()) return
         if (manualExposureActive()) {
             toast("EV is unavailable in Manual exposure")
             return
@@ -2934,6 +2939,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
     }
 
     private fun pickShutter() {
+        if (!idle()) return
         if (!manualExposureActive()) {
             toast("Switch EXPOSURE to Manual to set the shutter")
             return
@@ -2947,6 +2953,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
     }
 
     private fun pickIso() {
+        if (!idle()) return
         if (!manualExposureActive()) {
             toast("Switch EXPOSURE to Manual to set ISO")
             return
@@ -3076,7 +3083,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
             cfg.ev = ne
         }
         cfgDirty = true
-        cam.updateRepeating()
+        cam.updateExposureValue()
         refreshReadouts()
     }
 
@@ -3086,6 +3093,7 @@ class MainActivity : Activity(), CameraController.Callbacks {
     }
 
     private fun doExpPull() {
+        if (!idle()) return
         val a = expSlider.markA
         val b = expSlider.markB
         if (a == null || b == null) {
@@ -3907,16 +3915,17 @@ class MainActivity : Activity(), CameraController.Callbacks {
             "expTime" -> arg.toIntOrNull()?.let { expSeconds = it.coerceIn(1, 12) }
             "zoom" -> arg.toFloatOrNull()?.let { cam.setZoom(it) }
             "manual" -> {
+                if (cam.recording) { toast("Stop recording before changing exposure mode"); return }
                 cfg.manualExposure = !cfg.manualExposure
                 cam.clearAeLock()
                 applyLive()
             }
-            "iso" -> if (cfg.manualExposure) arg.toIntOrNull()?.let {
+            "iso" -> if (!cam.recording && cfg.manualExposure) arg.toIntOrNull()?.let {
                 cfg.iso = it.coerceIn(cam.isoRange.lower, cam.isoRange.upper)
                 cfgDirty = true
                 cam.updateRepeating()
             }
-            "shutter" -> if (cfg.manualExposure) arg.toIntOrNull()?.let {
+            "shutter" -> if (!cam.recording && cfg.manualExposure) arg.toIntOrNull()?.let {
                 if (it > 0) {
                     cfg.shutterDenom = it
                     cfgDirty = true
