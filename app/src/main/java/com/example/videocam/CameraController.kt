@@ -230,7 +230,7 @@ class CameraController(
     private var recordingLockIso = 0
     private var recordingLockStartEv = 0
     @Volatile private var recordingAeRelockPending = false
-    private val recordingEvUpdateTag = Any()
+    @Volatile private var recordingEvUpdateTag = Any()
     private val recordingStartLockTag = Any()
     @Volatile private var pendingRecordingStart: MediaRecorder? = null
 
@@ -1310,6 +1310,7 @@ class CameraController(
     /** Apply a user EV-slider change without leaving AE unlocked on cameras lacking manual sensor control. */
     fun updateExposureValue() {
         if (recording && recordingExposureLockActive && !manualSensor && aeLockAvail) {
+            recordingEvUpdateTag = Any()
             recordingAeRelockPending = true
         }
         updateRepeating()
